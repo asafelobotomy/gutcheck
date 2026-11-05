@@ -1,10 +1,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { run, git } = require('./exec');
+const { HEAVY_DIRS } = require('./util');
 const { evaluate } = require('./checks');
 const gh = require('./github');
 
-const SKIP = new Set(['node_modules', 'target', 'dist', 'build', 'vendor', '.cache', '.local', '.npm']);
+const SKIP = new Set([...HEAVY_DIRS, '.cache', '.local', '.npm']);
 
 // Find git repos under root (root itself, or children up to maxDepth levels deep).
 function discover(root, maxDepth = 2) {

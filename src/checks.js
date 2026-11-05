@@ -2,8 +2,7 @@
 // Finding: { id, category, severity: 'error'|'warn'|'info', title, detail, fix? }
 // `fix` is an optional action descriptor the UI can offer as a button.
 
-const DAY = 86400000;
-const daysAgo = (iso) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / DAY) : null);
+const { daysAgo } = require('./util');
 
 function checkCI(s) {
   const out = [];

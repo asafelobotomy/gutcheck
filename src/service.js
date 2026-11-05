@@ -1,0 +1,109 @@
+// Application logic behind the IPC handlers, with every Electron/disk dependency injected so it can
+// be tested without Electron. main.js only does the wiring (trusted-sender check, dialogs, window).
+
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const actions = require('./actions');
+const github = require('./github');
+const { scanRepo } = require('./scanner');
+const { scanClutter, workspaceAdvice } = require('./clutter');
+const { buildReport } = require('./report');
+
+const PLAN_TTL = 5 * 60 * 1000;
+
+const publicPlan = (token, p) => ({ ok: true, token, type: p.type, repoPath: p.repoPath, repoName: p.repoName, title: p.title, risk: p.risk, display: p.display, warnings: p.warnings, undo: p.undo, body: p.body, note: p.note, confirmName: p.confirmName });
+
+// deps: { known: Map(path -> scan result), settings: () => obj, audit: (entry) => void,
+//         trash: (path) => Promise, clipboard: { writeText }, rescan?: (dir) => Promise<result> }
+function createService({ known, settings, audit, trash, clipboard, rescan = (d) => scanRepo(d, { deep: false }) }) {
+  const plans = new Map(); // token -> { plan, expires } (only these stored plans can ever run)
+  const busy = new Set(); // repo paths with an action in flight
+  let clutterScanning = false;
+
+  async function planActions(items) {
+    if (!Array.isArray(items) || items.length === 0 || items.length > 200) return [{ ok: false, error: 'Bad request' }];
+    const readOnly = !!settings().readOnly;
+    const out = [];
+    for (const it of items) {
+      const repo = it && known.get(it.dir);
+      const p = await actions.plan(repo, it && it.action, { readOnly });
+      if (!p.ok) { out.push({ ...p, repoName: repo && repo.name }); continue; }
+      const token = crypto.randomBytes(16).toString('hex');
+      plans.set(token, { plan: p, expires: Date.now() + PLAN_TTL });
+      out.push(publicPlan(token, p));
+    }
+    for (const [t, v] of plans) if (v.expires < Date.now()) plans.delete(t);
+    return out;
+  }
+
+  async function applyActions(tokens) {
+    if (!Array.isArray(tokens)) return [];
+    const out = [];
+    for (const token of tokens) {
+      const entry = plans.get(token);
+      plans.delete(token); // single use
+      if (!entry || entry.expires < Date.now()) { out.push({ ok: false, error: 'Plan expired. Please review it again.' }); continue; }
+      const p = entry.plan;
+      if (settings().readOnly) { out.push({ ok: false, repoName: p.repoName, error: 'Read-only mode is on.' }); continue; }
+      if (busy.has(p.repoPath)) { out.push({ ok: false, repoName: p.repoName, error: 'Another action is running on this repo.' }); continue; }
+      busy.add(p.repoPath);
+      try {
+        const r = await actions.apply(p, { trash });
+        audit({ repo: p.repoName, path: p.repoPath, action: p.type, risk: p.risk, title: p.title, ok: r.ok, steps: r.results.map((x) => ({ cmd: x.text, ok: x.ok })) });
+        let res = null;
+        try { res = await rescan(p.repoPath); known.set(p.repoPath, res); } catch {}
+        out.push({ ok: r.ok, repoName: p.repoName, title: p.title, results: r.results, res, rate: github.getRate() });
+      } finally {
+        busy.delete(p.repoPath);
+      }
+    }
+    return out;
+  }
+
+  const wsRepos = () => [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name, originUrl: r.originUrl }));
+  const wsAdvice = async (root) => {
+    if (!root || !fs.existsSync(root)) return null;
+    try { return await workspaceAdvice(root, wsRepos()); } catch { return null; }
+  };
+
+  // Read-only. `dirs` (optional) limits the scan to those repos, otherwise every known repo.
+  async function clutterScan(dirs) {
+    if (clutterScanning) return { ok: false, error: 'A clutter scan is already running' };
+    const targets = (Array.isArray(dirs) && dirs.length ? dirs : [...known.keys()]).filter((d) => known.has(d) && !known.get(d).error);
+    if (!targets.length) return { ok: false, error: 'Scan a workspace first.' };
+    clutterScanning = true;
+    try {
+      const repos = [];
+      for (const d of targets) {
+        try {
+          repos.push({ path: d, name: path.basename(d), ...(await scanClutter(d)) });
+        } catch (e) {
+          repos.push({ path: d, name: path.basename(d), items: [], advice: [], count: 0, totalSize: 0, error: String(e.message || e) });
+        }
+      }
+      return { ok: true, repos, workspace: Array.isArray(dirs) && dirs.length ? null : await wsAdvice(settings().root) };
+    } finally {
+      clutterScanning = false;
+    }
+  }
+
+  // Build the "Copy for LLM" report from the last scan and put it on the clipboard.
+  async function copyReport(dir) {
+    const repos = dir ? [known.get(dir)].filter(Boolean) : [...known.values()];
+    if (!repos.length) return { ok: false, error: dir ? 'Unknown repo' : 'Scan a workspace first.' };
+    const clutter = new Map();
+    for (const r of repos) {
+      if (r.error) continue;
+      try { clutter.set(r.path, await scanClutter(r.path)); } catch {}
+    }
+    const root = settings().root;
+    const text = buildReport({ repos, clutter, workspace: dir ? [] : (await wsAdvice(root)) || [], root: dir ? null : root });
+    clipboard.writeText(text);
+    return { ok: true, chars: text.length, repos: repos.length };
+  }
+
+  return { planActions, applyActions, clutterScan, copyReport, _plans: plans };
+}
+
+module.exports = { createService };

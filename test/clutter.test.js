@@ -212,3 +212,15 @@ test('apply refuses items changed or committed after the preview, and ambiguous 
     assert.ok(!trashed.includes('b.bak'));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('a ._ file is only high confidence when the real file sits beside it', async () => {
+  const dir = repo();
+  try {
+    put(dir, '._lonely.txt');
+    put(dir, 'real.txt');
+    put(dir, '._real.txt');
+    const m = byPath(await scanClutter(dir));
+    assert.equal(m['._lonely.txt'].confidence, 'medium');
+    assert.equal(m['._real.txt'].confidence, 'high');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

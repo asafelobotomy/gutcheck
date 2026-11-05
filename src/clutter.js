@@ -13,13 +13,13 @@ const fsp = fs.promises;
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { git } = require('./exec');
+const { DAY, plural, list, HEAVY_DIRS } = require('./util');
 
-const DAY = 86400000;
 const MAX_FILES = 40000;
 const MAX_DEPTH = 6;
 const MAX_HASH_BYTES = 5 * 1024 * 1024;
 // Never descend into these: huge, owned by a tool, or not part of the source tree.
-const NO_DESCEND = new Set(['.git', 'node_modules', '.venv', 'venv', 'vendor', 'target', 'dist', 'build', '.next', '.nuxt', '.svelte-kit', '.cxx', '.gradle']);
+const NO_DESCEND = new Set([...HEAVY_DIRS, '.git', '.venv', 'venv', '.next', '.nuxt', '.svelte-kit', '.cxx', '.gradle']);
 
 // Regenerable folders. `sure`: the name alone is unambiguous, so high confidence even when not ignored.
 const CACHE_DIRS = {
@@ -43,7 +43,7 @@ const FILE_RULES = [
   { re: /^\.DS_Store$/, category: 'junk', reason: 'macOS folder metadata', confidence: 'high', ignoreAs: '.DS_Store' },
   { re: /^Thumbs\.db$/i, category: 'junk', reason: 'Windows thumbnail cache', confidence: 'high', ignoreAs: 'Thumbs.db' },
   { re: /^desktop\.ini$/i, category: 'junk', reason: 'Windows folder metadata', confidence: 'high', ignoreAs: 'desktop.ini' },
-  { re: /^\._./, category: 'junk', reason: 'macOS resource-fork file', confidence: 'high', ignoreAs: '._*' },
+  { re: /^\._./, category: 'junk', reason: 'macOS resource-fork file', confidence: 'medium', ignoreAs: '._*', base: (n) => n.slice(2), highWithBase: true },
   { re: /\.sw[a-p]$/, category: 'junk', reason: 'Editor swap file (may hold unsaved edits)', confidence: 'medium', ignoreAs: '*.swp' },
   { re: /~$/, category: 'backup', reason: 'Editor backup file', confidence: 'medium', ignoreAs: '*~', base: (n) => n.slice(0, -1) },
   { re: /^\.#./, category: 'junk', reason: 'Emacs lock file', confidence: 'medium', ignoreAs: '.#*' },
@@ -241,7 +241,7 @@ async function scanClutter(dir) {
       }
       const base = { path: r, name: e.name, kind: 'file', size: st.size, mtime: st.mtimeMs };
       if (rule) {
-        await addItem({ ...base, category: rule.category, reason: identical ? `Identical to ${orig}` : rule.reason, confidence: identical ? 'high' : rule.confidence, regenerable: !!rule.regenerable, keep: orig ? (rel ? rel + '/' : '') + orig : null, ignoreAs: rule.ignoreAs });
+        await addItem({ ...base, category: rule.category, reason: identical ? `Identical to ${orig}` : rule.reason, confidence: identical || (rule.highWithBase && orig) ? 'high' : rule.confidence, regenerable: !!rule.regenerable, keep: orig ? (rel ? rel + '/' : '') + orig : null, ignoreAs: rule.ignoreAs });
       } else if (orig) {
         await addItem({ ...base, category: 'duplicate', reason: identical ? `Identical copy of ${orig}` : `Copy of ${orig} that has since diverged: review`, confidence: identical ? 'high' : 'low', keep: (rel ? rel + '/' : '') + orig });
       }
@@ -267,8 +267,6 @@ async function scanClutter(dir) {
   return { items, advice, count: items.length, totalSize: items.reduce((n, i) => n + i.size, 0), truncated };
 }
 
-const plural = (n, w, pl = w + 's') => `${n} ${n === 1 ? w : pl}`;
-const list = (a, max = 6) => a.slice(0, max).join(', ') + (a.length > max ? `, +${a.length - max} more` : '');
 
 function buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, root }) {
   const out = [];

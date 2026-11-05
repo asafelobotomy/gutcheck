@@ -9,6 +9,7 @@ const path = require('node:path');
 const { run } = require('./exec');
 const { TEMPLATES } = require('./templates');
 const { scanClutter, IGNORE_OK } = require('./clutter');
+const { PROTECTION } = require('./protection');
 
 class PlanError extends Error {}
 const fail = (msg) => { throw new PlanError(msg); };
@@ -36,17 +37,6 @@ function needRemote(repo) {
 }
 const localBranch = (repo, b) => (repo.git.branches || []).find((x) => x.name === b) || fail(`No local branch "${b}" in the last scan.`);
 const defaultBranch = (repo) => (repo.remote && repo.remote.defaultBranch) || null;
-
-const PROTECTION = {
-  basic: {
-    label: 'Basic: require a pull request, block force-pushes and deletion (no approvals needed)',
-    body: { required_status_checks: null, enforce_admins: false, required_pull_request_reviews: { required_approving_review_count: 0 }, restrictions: null, allow_force_pushes: false, allow_deletions: false },
-  },
-  strict: {
-    label: 'Strict: 1 approval, dismiss stale reviews, resolve conversations, admins included, block force-pushes and deletion',
-    body: { required_status_checks: null, enforce_admins: true, required_pull_request_reviews: { required_approving_review_count: 1, dismiss_stale_reviews: true }, restrictions: null, allow_force_pushes: false, allow_deletions: false, required_conversation_resolution: true },
-  },
-};
 
 // Each action: plan(repo, params, ctx) -> { risk, title, steps, undo?, warnings? }
 const ACTIONS = {
@@ -317,7 +307,6 @@ const ACTIONS = {
   },
 };
 
-// Names the UI may request, in addition to the type -> plan mapping.
 const defaultCtx = (over = {}) => {
   const ctx = { run, fs, readOnly: false, clutter: scanClutter, ...over };
   // Recoverable removal. The app passes Electron's shell.trashItem; this fallback uses gio.

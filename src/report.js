@@ -5,13 +5,10 @@
 // is untrusted, so it is flattened to one line, length-capped, and the report tells the assistant
 // to treat it as data. Env file contents never reach this module.
 
-const { PROTECTION } = require('./actions');
+const { PROTECTION } = require('./protection');
+const { daysAgo, sq, plural } = require('./util');
 
-const DAY = 86400000;
-const daysAgo = (iso) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / DAY) : null);
 const t = (s, n = 120) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
-const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`; // POSIX single-quote
-const plural = (n, w, pl = w + 's') => `${n} ${n === 1 ? w : pl}`;
 const SEV = { error: 0, warn: 1, info: 2 };
 const MAX_CLUTTER_LINES = 40;
 
