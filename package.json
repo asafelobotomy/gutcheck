@@ -1,7 +1,7 @@
 {
   "name": "gutcheck",
   "productName": "GutCheck",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "Workspace-wide GitHub health dashboard built on the gh CLI",
   "main": "src/main.js",
   "author": "solon",
@@ -28,6 +28,7 @@
         "AppImage"
       ],
       "category": "Development",
+      "icon": "src/assets/icon.png",
       "artifactName": "GutCheck-${version}-${arch}.AppImage"
     },
     "directories": {

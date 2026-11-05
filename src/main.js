@@ -43,7 +43,7 @@ function createWindow() {
   const startHidden = process.argv.includes(HIDDEN_FLAG) && trayCtl.hasTray();
   win = new BrowserWindow({
     width: 1280, height: 820, minWidth: 900, minHeight: 600, show: false,
-    backgroundColor: '#0f1115', title: 'GutCheck',
+    backgroundColor: '#0f1115', title: 'GutCheck', icon: path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   win.removeMenu();

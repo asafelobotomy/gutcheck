@@ -1,5 +1,7 @@
 # GutCheck
 
+<p align="center"><img src="src/assets/logo.svg" width="128" alt="GutCheck logo: a check mark made of intestine"></p>
+
 A desktop dashboard that gives you a health check across every GitHub project in a folder. It is built on the [`gh` CLI](https://cli.github.com) and `git`, so it uses your existing GitHub login and never handles tokens itself.
 
 ## What it checks

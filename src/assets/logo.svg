@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="GutCheck: a check mark made of intestine">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b2030"/>
+      <stop offset="1" stop-color="#0f1115"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <!-- the check mark, drawn as a wobbly bowel -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path id="gut" d="M92 276 C128 250 156 292 186 332 C206 360 214 388 228 408 C262 330 286 270 338 200 C362 168 380 140 424 98" stroke="#7a2a3c" stroke-width="124"/>
+        <g fill="#7a2a3c" stroke="none"><circle cx="118" cy="258" r="70"/><circle cx="160" cy="306" r="80"/><circle cx="194" cy="372" r="86"/><circle cx="252" cy="386" r="80"/><circle cx="268" cy="318" r="84"/><circle cx="312" cy="246" r="72"/><circle cx="352" cy="200" r="88"/><circle cx="392" cy="138" r="74"/><circle cx="414" cy="100" r="68"/></g>
+    <path d="M92 276 C128 250 156 292 186 332 C206 360 214 388 228 408 C262 330 286 270 338 200 C362 168 380 140 424 98" stroke="#e8808f" stroke-width="104"/>
+        <g fill="#e8808f" stroke="none"><circle cx="118" cy="258" r="60"/><circle cx="160" cy="306" r="70"/><circle cx="194" cy="372" r="76"/><circle cx="252" cy="386" r="70"/><circle cx="268" cy="318" r="74"/><circle cx="312" cy="246" r="62"/><circle cx="352" cy="200" r="78"/><circle cx="392" cy="138" r="64"/><circle cx="414" cy="100" r="58"/></g>
+    <g>
+      <!-- the folds across the tube -->
+      <path d="M92 276 C128 250 156 292 186 332 C206 360 214 388 228 408 C262 330 286 270 338 200 C362 168 380 140 424 98" stroke="#c4556b" stroke-width="104" stroke-linecap="butt" stroke-dasharray="9 27"/>
+      <!-- wet shine -->
+      <path d="M86 258 C122 232 150 274 180 314 C200 342 208 368 224 388 C256 312 282 252 332 184 C356 152 376 126 418 82" stroke="#ffd0d6" stroke-width="12" opacity=".6" transform="translate(-6 -2)"/>
+    </g>
+  </g>
+</svg>

@@ -119,3 +119,12 @@ test('autostart uses the AppImage path, quotes awkward paths, and uses login ite
   assert.deepEqual(calls[0], { openAtLogin: true, args: ['--hidden'] });
   assert.equal(isAutostart(app, { platform: 'darwin' }), true);
 });
+
+test('the logo, window icon and tray icon are all bundled and valid PNG/SVG files', () => {
+  const dir = path.join(__dirname, '..', 'src', 'assets');
+  const png = (f) => fs.readFileSync(path.join(dir, f)).subarray(0, 4).toString('hex');
+  assert.equal(png('icon.png'), '89504e47');
+  assert.equal(png('tray.png'), '89504e47');
+  assert.match(fs.readFileSync(path.join(dir, 'logo.svg'), 'utf8'), /^<svg /);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).build.linux.icon, 'src/assets/icon.png');
+});
