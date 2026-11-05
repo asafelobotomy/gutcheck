@@ -1,0 +1,36 @@
+{
+  "name": "gutcheck",
+  "productName": "GutCheck",
+  "version": "0.2.0",
+  "description": "Workspace-wide GitHub health dashboard built on the gh CLI",
+  "main": "src/main.js",
+  "author": "solon",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron . --no-sandbox",
+    "test": "node --test test/",
+    "dist": "electron-builder --linux AppImage"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "dev.solon.gutcheck",
+    "productName": "GutCheck",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development",
+      "artifactName": "GutCheck-${version}-${arch}.AppImage"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  }
+}
