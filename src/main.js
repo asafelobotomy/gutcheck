@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, session, clipboard, Tray, Menu, nativeImage } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const { fileURLToPath } = require('node:url');
 const { discover, scanRepo, scanAll } = require('./scanner');
 const github = require('./github');
 const { createService } = require('./service');
@@ -8,15 +9,15 @@ const { appendAudit, readAudit } = require('./audit');
 const { run } = require('./exec');
 const { createTrayController } = require('./tray');
 const { setAutostart, isAutostart, HIDDEN_FLAG } = require('./autostart');
+const { createSettingsStore } = require('./settings');
 
 let win;
 let scanning = false;
 const RENDERER_FILE = path.join(__dirname, 'renderer', 'index.html');
-// Only our own bundled page may call privileged IPC.
+// Only our own bundled page may call privileged IPC. fileURLToPath also handles Windows drive letters.
 const trusted = (e) => {
   try {
-    const u = new URL(e.senderFrame.url);
-    return u.protocol === 'file:' && path.normalize(decodeURIComponent(u.pathname)) === RENDERER_FILE;
+    return fileURLToPath(e.senderFrame.url) === RENDERER_FILE;
   } catch {
     return false;
   }
@@ -28,11 +29,9 @@ function handle(channel, fn) {
   });
 }
 const known = new Map(); // path -> latest scan result (only these paths may be acted on)
-const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
-const loadSettings = () => {
-  try { return JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); } catch { return {}; }
-};
-const saveSettings = (s) => fs.writeFileSync(settingsFile(), JSON.stringify(s, null, 2));
+const store = () => createSettingsStore(path.join(app.getPath('userData'), 'settings.json'));
+const loadSettings = () => store().load();
+const updateSettings = (patch) => store().update(patch); // every settings write goes through here
 
 const trayCtl = createTrayController({ app, Tray, Menu, nativeImage, getWindow: () => win, getSettings: () => loadSettings() });
 const autostartDir = () => path.join(app.getPath('appData'), 'autostart');
@@ -49,7 +48,7 @@ function createWindow() {
   win.removeMenu();
   trayCtl.attach(win);
   win.once('ready-to-show', () => { if (!startHidden) win.show(); });
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  win.loadFile(RENDERER_FILE);
   win.webContents.setWindowOpenHandler(({ url }) => { openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e) => e.preventDefault());
 }
@@ -72,14 +71,17 @@ handle('dir:pick', async () => {
   return r.canceled ? null : r.filePaths[0];
 });
 
-handle('scan:start', async (_e, { root, deep }) => {
-  if (typeof root !== 'string' || !fs.existsSync(root)) return { ok: false, error: 'Folder does not exist' };
+const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
+
+handle('scan:start', async (_e, { root, deep } = {}) => {
+  if (typeof root !== 'string' || !isDir(root)) return { ok: false, error: 'Folder does not exist' };
   if (scanning) return { ok: false, error: 'A scan is already running' };
   scanning = true;
   try {
-    saveSettings({ ...loadSettings(), root, deep: !!deep });
+    updateSettings({ root, deep: !!deep });
     const dirs = discover(root);
     known.clear();
+    service.forgetPlans(); // plans reviewed for the previous workspace can no longer run
     win.webContents.send('scan:begin', { total: dirs.length });
     const results = await scanAll(dirs, { deep: !!deep }, (res, done, total) => {
       known.set(res.path, res);
@@ -92,9 +94,10 @@ handle('scan:start', async (_e, { root, deep }) => {
   }
 });
 
-handle('scan:one', async (_e, { dir, deep }) => {
+handle('scan:one', async (_e, { dir, deep } = {}) => {
   if (!known.has(dir)) return { ok: false, error: 'Unknown repo' };
   const res = await scanRepo(dir, { deep: !!deep });
+  if (!known.has(dir)) return { ok: false, error: 'The workspace was rescanned meanwhile' };
   known.set(dir, res);
   return { ok: true, res, rate: github.getRate() };
 });
@@ -107,55 +110,48 @@ const trendStore = {
   read: () => JSON.parse(fs.readFileSync(trendFile(), 'utf8')),
   write: (a) => { const f = trendFile(); fs.writeFileSync(f + '.tmp', JSON.stringify(a)); fs.renameSync(f + '.tmp', f); },
 };
-const updateSettings = (patch) => { const s = { ...loadSettings(), ...patch }; saveSettings(s); return s; };
-const service = createService({ known, settings: loadSettings, audit, trash: (f) => shell.trashItem(f), clipboard, trendStore, updateSettings });
+const rescan = (dir) => scanRepo(dir, { deep: !!loadSettings().deep }); // keep deep findings after an action
+const service = createService({ known, settings: loadSettings, audit, trash: (f) => shell.trashItem(f), clipboard, rescan, trendStore, updateSettings });
 
-handle('action:plan', (_e, { items }) => service.planActions(items));
-handle('action:apply', (_e, { tokens }) => service.applyActions(tokens));
+handle('action:plan', (_e, { items } = {}) => service.planActions(items));
+handle('action:apply', (_e, { tokens } = {}) => service.applyActions(tokens));
 handle('clutter:scan', (_e, { dirs } = {}) => service.clutterScan(dirs));
 handle('trend:get', () => service.trend());
 handle('quality:scan', (_e, { dirs } = {}) => service.qualityScan(dirs));
-handle('quality:settings', () => service.qualitySettings());
 handle('quality:set', (_e, patch) => service.setQualitySettings(patch));
 handle('report:copy', (_e, { dir } = {}) => service.copyReport(dir));
 
 handle('audit:list', () => readAudit(auditFile()));
 
-handle('settings:set', (_e, patch) => {
-  const s = loadSettings();
-  if (patch && typeof patch.readOnly === 'boolean') s.readOnly = patch.readOnly;
-  saveSettings(s);
-  return s;
-});
+handle('settings:set', (_e, patch) => updateSettings(patch && typeof patch.readOnly === 'boolean' ? { readOnly: patch.readOnly } : {}));
 
 // Startup and tray options. Only booleans are accepted; launch-on-start-up is stored by the OS/desktop.
-handle('background:get', () => {
-  const s = loadSettings();
-  return { launchOnStartup: isAutostart(app, { dir: autostartDir() }), minimizeToTray: !!s.minimizeToTray, closeToTray: !!s.closeToTray, trayAvailable: trayCtl.hasTray() };
-});
+const background = (s = loadSettings()) => ({ launchOnStartup: isAutostart(app, { dir: autostartDir() }), minimizeToTray: !!s.minimizeToTray, closeToTray: !!s.closeToTray, trayAvailable: trayCtl.hasTray() });
+handle('background:get', () => background());
 handle('background:set', (_e, patch) => {
   const p = patch && typeof patch === 'object' ? patch : {};
-  const s = loadSettings();
-  for (const k of BACKGROUND_KEYS) if (typeof p[k] === 'boolean') s[k] = p[k];
-  saveSettings(s);
+  const s = updateSettings(Object.fromEntries(BACKGROUND_KEYS.filter((k) => typeof p[k] === 'boolean').map((k) => [k, p[k]])));
   if (typeof p.launchOnStartup === 'boolean') setAutostart(app, p.launchOnStartup, { dir: autostartDir() });
-  return { launchOnStartup: isAutostart(app, { dir: autostartDir() }), minimizeToTray: !!s.minimizeToTray, closeToTray: !!s.closeToTray, trayAvailable: trayCtl.hasTray() };
+  return background(s);
 });
 
 handle('open:url', (_e, url) => openExternal(url));
 handle('open:folder', (_e, dir) => { if (known.has(dir)) shell.openPath(dir); });
 
-// Defence in depth: the app loads only its own bundled page, so deny every permission request,
-// all webviews and all new windows.
-app.on('web-contents-created', (_e, contents) => {
-  contents.on('will-attach-webview', (ev) => ev.preventDefault());
-});
-
-app.whenReady().then(() => {
-  session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
-  session.defaultSession.setPermissionCheckHandler(() => false);
-  trayCtl.create();
-  createWindow();
-});
-if (!trayCtl.singleInstance()) process.exitCode = 0;
-app.on('window-all-closed', () => app.quit());
+// One running copy: a second launch only wakes the first one (singleInstance quits this process).
+if (trayCtl.singleInstance()) {
+  // Defence in depth: the app loads only its own bundled page, so deny every permission request,
+  // all webviews and all new windows.
+  app.on('web-contents-created', (_e, contents) => {
+    contents.on('will-attach-webview', (ev) => ev.preventDefault());
+  });
+  app.whenReady().then(() => {
+    session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+    session.defaultSession.setPermissionCheckHandler(() => false);
+    // A moved or updated AppImage: point the login entry at the copy that is running now.
+    if (app.isPackaged && isAutostart(app, { dir: autostartDir() })) setAutostart(app, true, { dir: autostartDir() });
+    trayCtl.create();
+    createWindow();
+  });
+  app.on('window-all-closed', () => app.quit());
+}

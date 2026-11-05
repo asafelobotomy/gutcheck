@@ -3,14 +3,27 @@
 
 /* ---------------------------------------------------------------- modals */
 
+// Escape cancels; Tab stays inside the dialog; focus goes back to whatever opened it.
 function modal(build) {
   return new Promise((resolve) => {
-    const close = (v) => { overlay.remove(); resolve(v); };
-    const box = h('div', { class: 'modal' });
+    const opener = document.activeElement;
+    const close = (v) => { overlay.remove(); if (opener && opener.focus) opener.focus(); resolve(v); };
+    const box = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true' });
     const overlay = h('div', { class: 'overlay' }, box);
     build(box, close);
+    const title = box.querySelector('.mh');
+    if (title) { title.id = 'modal-title'; box.setAttribute('aria-labelledby', 'modal-title'); }
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); close(null); return; }
+      if (e.key !== 'Tab') return;
+      const f = [...box.querySelectorAll('button,input,select,summary,[tabindex]')].filter((el) => !el.disabled);
+      if (!f.length) return;
+      const [first, last] = [f[0], f[f.length - 1]];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
     document.body.append(overlay);
-    const first = box.querySelector('input,select,button.primary');
+    const first = box.querySelector('input,select,button.primary') || box.querySelector('button');
     if (first) first.focus();
   });
 }

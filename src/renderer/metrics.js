@@ -3,6 +3,7 @@
 (function (root) {
   const DAY = 86400000;
   const DAYS_PER_YEAR = 365;
+  const STALE_BRANCH_DAYS = 60; // also used by checks.js, so the dashboard and findings agree
   const ageDays = (iso, now) => (iso ? Math.floor((now - new Date(iso).getTime()) / DAY) : null);
   const bucket = (value, edges, labels) => {
     for (let i = 0; i < edges.length; i++) if (value <= edges[i]) return labels[i];
@@ -54,7 +55,7 @@
       t.ahead += g.ahead || 0;
       t.behind += g.behind || 0;
       t.mergedBranches += (g.mergedBranches || []).length;
-      t.staleBranches += (g.branches || []).filter((b) => !b.current && ageDays(b.date, now) >= 60 && !(g.mergedBranches || []).includes(b.name)).length;
+      t.staleBranches += (g.branches || []).filter((b) => !b.current && ageDays(b.date, now) >= STALE_BRANCH_DAYS && !(g.mergedBranches || []).includes(b.name)).length;
       t.alertsTotal += (r.alerts || []).length;
       t.alertsHigh += (r.alerts || []).filter((a) => a.severity === 'high' || a.severity === 'critical').length;
       if (!r.remote) t.localOnly++;
@@ -162,7 +163,8 @@
   }
 
   // Roll code-quality scan results (one per repo) up to workspace level.
-  function qualityTotals(repos) {
+  // `maxLines` is the configured limit, shown even when every repo failed to scan.
+  function qualityTotals(repos, maxLines = null) {
     const ok = repos.filter((r) => !r.error);
     const langs = new Map();
     const largest = [];
@@ -174,14 +176,14 @@
     return {
       repos: ok.length, files: sum((r) => r.files), lines: sum((r) => r.lines), over: sum((r) => r.loc.overCount), magic: sum((r) => r.magic.total),
       secrets: sum((r) => r.secretCount), todos: sum((r) => r.markers.total), debug: sum((r) => r.debugCount),
-      max: ok.length ? ok[0].loc.max : null,
+      max: ok.length ? ok[0].loc.max : maxLines,
       languages: [...langs.values()].sort((a, b) => b.lines - a.lines),
       largest: largest.sort((a, b) => b.measured - a.measured).slice(0, 10),
       magicByRepo: ok.map((r) => ({ name: r.name, path: r.path, count: r.magic.total })).filter((x) => x.count).sort((a, b) => b.count - a.count),
     };
   }
 
-  const api = { compute, groupFindings, heatmap, snapshot, movers, delta, qualityTotals, ACTIVITY, PR_AGE };
+  const api = { compute, groupFindings, heatmap, snapshot, movers, delta, qualityTotals, ACTIVITY, PR_AGE, STALE_BRANCH_DAYS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Metrics = api;
 })(typeof window !== 'undefined' ? window : globalThis);

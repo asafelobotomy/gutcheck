@@ -154,14 +154,42 @@ test('branch protection sends a JSON body on stdin and needs admin', async () =>
 
 test('apply stops at the first failing step and uses the injected runner', async () => {
   const calls = [];
-  const runner = async (cmd, args, o) => { calls.push([cmd, args, o.input]); return { ok: calls.length < 2, stdout: '', stderr: calls.length < 2 ? '' : 'boom' }; };
+  const runner = async (cmd, args, o) => { calls.push([cmd, args, o.input]); return { ok: calls.length < 3, stdout: calls.length === 1 ? ' M a\n' : '', stderr: calls.length < 3 ? '' : 'boom' }; };
   const p = await plan(ghRepo({ git: { ...ghRepo().git, dirty: 1 } }), { type: 'commit-all', message: 'x' }, { run: async () => ({ ok: true, stdout: ' M a', stderr: '' }) });
   const r = await apply(p, { run: runner });
   assert.equal(r.ok, false);
-  assert.equal(calls.length, 2); // add -A succeeded, commit failed; nothing after
+  assert.equal(calls.length, 3); // status check matched, add -A succeeded, commit failed; nothing after
+  // A file that appeared after the preview (here a new .env) stops the commit before anything is staged.
+  const drift = [];
+  const changed = await apply(p, { run: async (cmd, args) => { drift.push(args); return { ok: true, stdout: ' M a\n?? .env\n', stderr: '' }; } });
+  assert.equal(changed.ok, false);
+  assert.equal(drift.length, 1);
+  assert.match(changed.results[0].out, /changed since the preview/);
   const prot = await plan(ghRepo(), { type: 'protect-branch', preset: 'basic' });
   await apply(prot, { run: runner });
   assert.ok(calls.at(-1)[2].includes('required_pull_request_reviews'));
+});
+
+test('append and write refuse to follow a symlink out of the repo', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'gutcheck-link-'));
+  try {
+    const repo = path.join(base, 'repo');
+    const outside = path.join(base, 'outside.txt');
+    fs.mkdirSync(repo);
+    fs.writeFileSync(outside, 'keep\n');
+    fs.symlinkSync(outside, path.join(repo, '.gitignore'));
+    fs.symlinkSync(base, path.join(repo, '.github'));
+    const append = await apply({ steps: [{ kind: 'append', root: repo, path: path.join(repo, '.gitignore'), content: '.env\n', display: 'append' }] });
+    assert.equal(append.ok, false);
+    assert.match(append.results[0].out, /symbolic link/);
+    const write = await apply({ steps: [{ kind: 'write', root: repo, path: path.join(repo, '.github', 'x.yml'), content: 'x', display: 'write' }] });
+    assert.equal(write.ok, false);
+    assert.match(write.results[0].out, /outside the repository/);
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'keep\n');
+    assert.equal(fs.existsSync(path.join(base, 'x.yml')), false);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test('read-only mode and unknown actions are refused at plan time', async () => {

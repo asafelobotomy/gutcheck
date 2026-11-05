@@ -30,16 +30,15 @@ function load() {
 
 test('every IPC channel is registered', () => {
   const { handlers } = load();
-  for (const c of ['settings:get', 'settings:set', 'auth:status', 'rate:get', 'dir:pick', 'scan:start', 'scan:one', 'action:plan', 'action:apply', 'clutter:scan', 'report:copy', 'trend:get', 'quality:scan', 'quality:settings', 'quality:set', 'audit:list', 'background:get', 'background:set', 'open:url', 'open:folder']) assert.ok(handlers.has(c), c);
+  for (const c of ['settings:get', 'settings:set', 'auth:status', 'rate:get', 'dir:pick', 'scan:start', 'scan:one', 'action:plan', 'action:apply', 'clutter:scan', 'report:copy', 'trend:get', 'quality:scan', 'quality:set', 'audit:list', 'background:get', 'background:set', 'open:url', 'open:folder']) assert.ok(handlers.has(c), c);
 });
 
 test('quality settings round-trip through IPC with validation', async () => {
   const { call } = load();
-  assert.deepEqual(await call('quality:settings'), { maxLines: 400, locMode: 'total', ignore: [] });
   assert.equal((await call('quality:set', { maxLines: 650, locMode: 'code', ignore: ['legacy/'] })).maxLines, 650);
-  assert.deepEqual(await call('quality:settings'), { maxLines: 650, locMode: 'code', ignore: ['legacy/'] });
-  assert.equal((await call('quality:set', { maxLines: -4 })).maxLines, 400);
-  assert.equal((await call('quality:set', 'junk')).maxLines, 400);
+  assert.deepEqual((await call('settings:get')).quality, { maxLines: 650, locMode: 'code', ignore: ['legacy/'] });
+  assert.equal((await call('quality:set', { maxLines: -4 })).maxLines, 650, 'an invalid value keeps the current one');
+  assert.equal((await call('quality:set', 'junk')).maxLines, 650);
   assert.equal((await call('quality:scan', {})).ok, false); // nothing scanned yet
 });
 
@@ -76,6 +75,26 @@ test('startup and tray options accept only booleans and write the autostart entr
   assert.equal(off.launchOnStartup, false);
   assert.equal(off.closeToTray, true, 'untouched options are kept');
   assert.equal((await call('background:set', 'junk')).closeToTray, true);
+});
+
+test('settings survive damage: bad JSON is kept aside, non-objects read as empty, writes are atomic', async () => {
+  const { call, userData } = load();
+  const file = path.join(userData, 'settings.json');
+  fs.writeFileSync(file, '{"readOnly": tr');
+  assert.deepEqual(await call('settings:get'), {});
+  assert.equal(fs.readFileSync(file + '.bad', 'utf8'), '{"readOnly": tr', 'the damaged file is kept for recovery');
+  fs.writeFileSync(file, 'null');
+  assert.deepEqual(await call('settings:get'), {});
+  await call('settings:set', { readOnly: true });
+  await call('background:set', { closeToTray: true });
+  assert.deepEqual(await call('settings:get'), { readOnly: true, closeToTray: true }, 'separate handlers never clobber each other');
+  assert.equal(fs.existsSync(file + '.tmp'), false);
+});
+
+test('a missing request argument fails safely instead of throwing', async () => {
+  const { handlers, call } = load();
+  for (const ch of ['scan:start', 'scan:one', 'action:plan', 'action:apply']) await handlers.get(ch)({ senderFrame: { url: pathToFileURL(path.join(__dirname, '..', 'src', 'renderer', 'index.html')).href } });
+  assert.equal((await call('scan:start', { root: __filename })).ok, false, 'a file is not a workspace folder');
 });
 
 test('open:url allows only github.com https links; open:folder only scanned repos', async () => {

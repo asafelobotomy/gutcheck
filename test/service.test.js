@@ -59,6 +59,20 @@ test('bad input, unknown repos and read-only mode are refused', async () => {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('a new workspace scan voids old plans, and a repo dropped from the workspace cannot be acted on', async () => {
+  const { dir, svc, known, trashed } = await setup();
+  try {
+    const plan1 = (await svc.planActions([{ dir, action: { type: 'clean-clutter', paths: ['.env.bak'] } }]))[0];
+    svc.forgetPlans();
+    assert.match((await svc.applyActions([plan1.token]))[0].error, /expired/);
+    const plan2 = (await svc.planActions([{ dir, action: { type: 'clean-clutter', paths: ['.env.bak'] } }]))[0];
+    known.delete(dir);
+    assert.match((await svc.applyActions([plan2.token]))[0].error, /no longer in the scanned workspace/);
+    assert.deepEqual(trashed, []);
+    assert.equal(known.has(dir), false, 'nothing puts the old repo back');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('an unknown token cannot run anything', async () => {
   const { dir, svc } = await setup();
   try {

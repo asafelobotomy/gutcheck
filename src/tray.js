@@ -59,4 +59,4 @@ function createTrayController({ app, Tray, Menu, nativeImage, getWindow, getSett
   return { create, attach, show, hide, toggle, quit, singleInstance, hasTray: () => !!tray };
 }
 
-module.exports = { createTrayController, ICON };
+module.exports = { createTrayController };

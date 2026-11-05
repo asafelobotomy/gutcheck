@@ -13,7 +13,6 @@ contextBridge.exposeInMainWorld('api', {
   copyReport: (dir) => ipcRenderer.invoke('report:copy', { dir }),
   trend: () => ipcRenderer.invoke('trend:get'),
   qualityScan: (dirs) => ipcRenderer.invoke('quality:scan', { dirs }),
-  qualitySettings: () => ipcRenderer.invoke('quality:settings'),
   setQualitySettings: (patch) => ipcRenderer.invoke('quality:set', patch),
   audit: () => ipcRenderer.invoke('audit:list'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),

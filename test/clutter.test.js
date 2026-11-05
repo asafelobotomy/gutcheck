@@ -224,3 +224,14 @@ test('a ._ file is only high confidence when the real file sits beside it', asyn
     assert.equal(m['._real.txt'].confidence, 'high');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('adding the suggested ignore rules clears the "not in .gitignore" advice', async () => {
+  const dir = repo();
+  try {
+    for (const f of ['.a.swo', 'x.temp', 'y.tmp', 'yarn-error.log', 'z.bak', 'pnpm-debug.log']) put(dir, f);
+    const adv = (await scanClutter(dir)).advice.find((a) => a.id === 'clutter-not-ignored');
+    assert.ok(adv, 'advice is given first');
+    fs.writeFileSync(path.join(dir, '.gitignore'), adv.fix.entries.join('\n') + '\n');
+    assert.equal((await scanClutter(dir)).advice.find((a) => a.id === 'clutter-not-ignored'), undefined);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

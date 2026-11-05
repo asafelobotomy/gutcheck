@@ -53,7 +53,6 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
     clutterScan: async (d) => { calls.push(['clutterScan', d]); return clutter; },
     trend: async () => trend,
     qualityScan: async (d) => { calls.push(['qualityScan', d]); return quality; },
-    qualitySettings: async () => quality.settings,
     setQualitySettings: async (p) => { calls.push(['qualitySet', p]); return { ...quality.settings, ...p }; },
     background: async () => ({ launchOnStartup: false, minimizeToTray: true, closeToTray: false, trayAvailable: true }),
     setBackground: async (p) => { calls.push(['background', p]); return { launchOnStartup: !!p.launchOnStartup, minimizeToTray: true, closeToTray: false, trayAvailable: true }; },

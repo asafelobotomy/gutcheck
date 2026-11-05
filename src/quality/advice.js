@@ -4,7 +4,8 @@ const { plural, list } = require('../util');
 
 const fmtSize = (n) => (n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
-function buildAdvice(q) {
+// `lim` carries scan.js thresholds so the text always matches what was measured.
+function buildAdvice(q, lim) {
   const out = [];
   const add = (id, severity, title, detail) => out.push({ id, category: 'Code quality', severity, title, detail });
   const at = (x) => `${x.path}:${x.line}`;
@@ -24,21 +25,20 @@ function buildAdvice(q) {
   if (M.repeated.length)
     add('q-constants-candidates', 'info', `${plural(M.repeated.length, 'number')} repeated without a name`, `${list(M.repeated.map((r) => `${r.value} x${r.count} in ${plural(r.files, 'file')}`), 6)}. Give each a named constant.`);
   if (M.denseFiles)
-    add('q-magic-dense', 'info', `${plural(M.denseFiles, 'file')} with many magic numbers`, list(M.files.filter((f) => f.count >= 15).map((f) => `${f.path} (${f.count})`), 5));
+    add('q-magic-dense', 'info', `${plural(M.denseFiles, 'file')} with many magic numbers`, list(M.files.filter((f) => f.count >= lim.denseFile).map((f) => `${f.path} (${f.count})`), 5));
   if (M.total >= 20 && !M.constants.files.length && M.constants.definitions < 3)
     add('q-no-constants', 'info', 'No constants module', `${M.total} bare numbers and no constants file or named constants. Create a constants module (for example constants.js) and import from it.`);
 
-  const warnDebug = q.debug.filter((d) => d.severity === 'warn');
-  if (warnDebug.length) add('q-debug', 'warn', `${plural(warnDebug.length, 'debugger/breakpoint statement')}`, `${list(warnDebug.map(at), 6)}. Remove before shipping.`);
-  const logs = q.debugCount - warnDebug.length;
+  if (q.breakpointCount) add('q-debug', 'warn', `${plural(q.breakpointCount, 'debugger/breakpoint statement')}`, `${list(q.debug.filter((d) => d.severity === 'warn').map(at), 6)}. Remove before shipping.`);
+  const logs = q.debugCount - q.breakpointCount;
   if (logs >= 10) add('q-console', 'info', `${logs} console.log calls in source`, 'Use a real logger or remove the leftovers.');
 
   if (q.markers.total)
     add('q-markers', q.markers.FIXME + q.markers.HACK ? 'warn' : 'info', `${plural(q.markers.total, 'TODO/FIXME marker')}`, `TODO ${q.markers.TODO}, FIXME ${q.markers.FIXME}, HACK ${q.markers.HACK}, XXX ${q.markers.XXX}. ${list(q.markers.items.map((m) => `${at(m)}`), 4)}.`);
   if (q.largeFiles.length)
-    add('q-large-files', 'warn', `${plural(q.largeFiles.length, 'file')} over 5 MB`, `${list(q.largeFiles.map((f) => `${f.path} (${fmtSize(f.size)})`), 5)}. Large binaries bloat clones: use Git LFS or keep them out of the repo.`);
+    add('q-large-files', 'warn', `${plural(q.largeFiles.length, 'file')} over ${fmtSize(lim.bigFile)}`, `${list(q.largeFiles.map((f) => `${f.path} (${fmtSize(f.size)})`), 5)}. Large binaries bloat clones: use Git LFS or keep them out of the repo.`);
   if (q.sourceFiles >= 5 && !q.testFiles) add('q-no-tests', 'info', 'No test files found', `${q.sourceFiles} source files and no tests. Add some so changes can be checked.`);
-  if (q.truncated) add('q-truncated', 'info', 'Very large repo: scan was capped', 'Only the first 6000 files were analysed.');
+  if (q.truncated) add('q-truncated', 'info', 'Very large repo: scan was capped', `Only the first ${lim.maxFiles} files were analysed.`);
   return out;
 }
 

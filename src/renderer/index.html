@@ -9,7 +9,7 @@
 <body>
   <header>
     <h1>GutCheck</h1>
-    <input id="root" type="text" placeholder="Workspace folder, e.g. ~/Projects" spellcheck="false" />
+    <input id="root" type="text" placeholder="Workspace folder, e.g. ~/Projects" aria-label="Workspace folder" spellcheck="false" />
     <button id="browse">Browse…</button>
     <label class="deep" title="Also runs npm outdated per repo (slower)"><input id="deep" type="checkbox" /> Deep scan</label>
     <button id="scan" class="primary">Scan</button>
@@ -24,8 +24,8 @@
   <main>
     <aside>
       <div class="filters">
-        <input id="q" type="search" placeholder="Filter repos…" />
-        <select id="sort">
+        <input id="q" type="search" placeholder="Filter repos…" aria-label="Filter repositories" />
+        <select id="sort" aria-label="Sort repositories">
           <option value="score">Worst health first</option>
           <option value="name">Name</option>
           <option value="prs">Most open PRs</option>
@@ -39,7 +39,7 @@
     </aside>
     <section id="detail"><p class="empty">Choose a workspace folder and press Scan.</p></section>
   </main>
-  <div id="toast" hidden></div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
   <script src="metrics.js"></script>
   <script src="app.js"></script>
   <script src="modals.js"></script>

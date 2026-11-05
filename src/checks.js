@@ -4,6 +4,12 @@
 
 const { daysAgo, DAYS_PER_YEAR } = require('./util');
 
+const { STALE_BRANCH_DAYS } = require('./renderer/metrics'); // one value for findings and the dashboard
+
+const STALE_PR_DAYS = 30;
+// Local branches that are not current, not merged and untouched for STALE_BRANCH_DAYS (shared with report.js).
+const staleBranches = (g) => (g.branches || []).filter((b) => !b.current && daysAgo(b.date) >= STALE_BRANCH_DAYS && !(g.mergedBranches || []).includes(b.name));
+
 function checkCI(s) {
   const out = [];
   if (!s.remote) return out;
@@ -34,7 +40,7 @@ function checkPRs(s) {
       out.push({ id: 'pr-conflict-' + pr.number, category: 'PRs', severity: 'error', title: `PR #${pr.number} has merge conflicts`, detail: pr.title, url: pr.url });
     if (pr.statusCheckRollup === 'FAILURE')
       out.push({ id: 'pr-ci-' + pr.number, category: 'PRs', severity: 'error', title: `PR #${pr.number} has failing checks`, detail: pr.title, url: pr.url });
-    if (age >= 30 && !pr.isDraft)
+    if (age >= STALE_PR_DAYS && !pr.isDraft)
       out.push({ id: 'pr-stale-' + pr.number, category: 'PRs', severity: 'warn', title: `PR #${pr.number} stale for ${age} days`, detail: pr.title, url: pr.url });
     if (pr.reviewDecision === 'APPROVED' && pr.mergeable === 'MERGEABLE' && pr.statusCheckRollup !== 'FAILURE')
       out.push({ id: 'pr-ready-' + pr.number, category: 'PRs', severity: 'info', title: `PR #${pr.number} approved and mergeable`, detail: pr.title, url: pr.url, fix: { type: 'pr-merge', label: 'Merge…', number: pr.number, method: 'squash', deleteBranch: true } });
@@ -55,9 +61,9 @@ function checkBranches(s) {
     out.push({ id: 'git-no-upstream', category: 'Branches', severity: 'info', title: `Branch ${g.branch} has no upstream`, detail: 'Not tracking a remote branch.', fix: { type: 'push', label: 'Push & set upstream' } });
   if (g.mergedBranches.length)
     out.push({ id: 'git-merged', category: 'Branches', severity: 'info', title: `${g.mergedBranches.length} local branch${g.mergedBranches.length > 1 ? 'es' : ''} already merged`, detail: g.mergedBranches.join(', '), fix: { type: 'delete-merged', label: 'Delete merged', branches: g.mergedBranches } });
-  const stale = g.branches.filter((b) => !b.current && daysAgo(b.date) >= 60 && !g.mergedBranches.includes(b.name));
+  const stale = staleBranches(g);
   if (stale.length)
-    out.push({ id: 'git-stale', category: 'Branches', severity: 'info', title: `${stale.length} stale branch${stale.length > 1 ? 'es' : ''} (60+ days)`, detail: stale.map((b) => b.name).join(', ') });
+    out.push({ id: 'git-stale', category: 'Branches', severity: 'info', title: `${stale.length} stale branch${stale.length > 1 ? 'es' : ''} (${STALE_BRANCH_DAYS}+ days)`, detail: stale.map((b) => b.name).join(', ') });
   if (g.detached) out.push({ id: 'git-detached', category: 'Branches', severity: 'warn', title: 'Detached HEAD', detail: 'Commits here may be lost.' });
   return out;
 }
@@ -85,7 +91,7 @@ function checkDeps(s) {
   for (const m of d.manifestsWithoutLock)
     out.push({ id: 'no-lock-' + m, category: 'Dependencies', severity: 'warn', title: `${m}: no lockfile`, detail: 'Builds are not reproducible without a lockfile.' });
   if (d.needsInstall)
-    out.push({ id: 'deps-not-installed', category: 'Dependencies', severity: 'warn', title: 'Dependencies not installed', detail: 'node_modules is missing.', fix: { type: 'npm-install', label: 'npm install' } });
+    out.push({ id: 'deps-not-installed', category: 'Dependencies', severity: 'warn', title: 'Dependencies not installed', detail: 'node_modules is missing.', fix: { type: 'npm-install', label: (d.installer || ['npm', 'install']).join(' ') } });
   if (d.outdated != null && d.outdated > 0)
     out.push({ id: 'deps-outdated', category: 'Dependencies', severity: 'warn', title: `${d.outdated} outdated npm package${d.outdated > 1 ? 's' : ''}`, detail: d.outdatedNames.slice(0, 8).join(', ') });
   if (s.remote && s.remote.alertsEnabled === false)
@@ -125,4 +131,4 @@ function evaluate(snapshot) {
   return { findings, score, grade: score >= 90 ? 'A' : score >= 75 ? 'B' : score >= 55 ? 'C' : 'D' };
 }
 
-module.exports = { evaluate, checkCI, checkPRs, checkBranches, checkFiles, checkDeps, checkRepoSettings };
+module.exports = { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches, evaluate, checkPRs, checkFiles, checkDeps, checkRepoSettings };

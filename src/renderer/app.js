@@ -1,5 +1,6 @@
 const $ = (id) => document.getElementById(id);
-const state = { repos: new Map(), selected: null, view: 'dashboard', scanning: false, readOnly: false, clutter: null, quality: null, picked: new Set(), trend: [] };
+// gen counts workspace scans: an on-demand result from an older workspace is dropped. scanError: last failure per on-demand scan.
+const state = { repos: new Map(), selected: null, view: 'dashboard', scanning: false, readOnly: false, clutter: null, quality: null, picked: new Set(), trend: [], gen: 0, scanError: {} };
 
 // DOM helper: all text goes through textContent, so repo/PR titles from GitHub can never inject markup.
 function h(tag, attrs = {}, ...kids) {
@@ -26,6 +27,50 @@ function toast(msg, kind = '') {
   toastTimer = setTimeout(() => (t.hidden = true), 7000);
 }
 
+// Shared view helpers (the other renderer scripts use these too).
+const plural = (n, w, pl = w + 's') => `${n.toLocaleString()} ${n === 1 ? w : pl}`;
+const stat = (label, val, cls = '') => h('div', { class: 'stat ' + cls }, h('b', {}, val), h('span', {}, label));
+const sevClass = (sev) => (sev === 'error' ? 'b-err' : sev === 'warn' ? 'b-warn' : '');
+const healthClass = (avg) => (avg == null ? '' : avg >= 75 ? 'ok' : avg >= 55 ? 'warn' : 'err');
+
+// Make any element keyboard-operable like a button (Tab to focus, Enter or Space to activate).
+function activate(el, fn) {
+  el.tabIndex = 0;
+  el.setAttribute('role', 'button');
+  el.addEventListener('click', fn);
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); } });
+  return el;
+}
+
+function copyButton(dir, label) {
+  const b = h('button', { title: 'Copy a full report with an ordered fix plan, to paste into any LLM' }, 'Copy for LLM');
+  b.addEventListener('click', () => copyForLlm(b, dir, label));
+  return b;
+}
+
+// Clutter and code-quality scans run on demand. One request per kind at a time (every caller shares
+// it); a result that lands after a new workspace scan started is dropped; afterwards the current view
+// is redrawn, so no view is left saying "Scanning…".
+const inflight = {};
+function onDemand(kind, call, accept) {
+  if (state.scanning) { toast('Wait for the workspace scan to finish.'); return Promise.resolve(); }
+  if (inflight[kind]) return inflight[kind];
+  const gen = state.gen;
+  inflight[kind] = (async () => {
+    try {
+      const out = await call();
+      if (gen !== state.gen) return;
+      if (!out.ok) { state.scanError[kind] = out.error; toast(out.error, 'bad'); return; }
+      delete state.scanError[kind];
+      accept(out);
+    } finally {
+      inflight[kind] = null;
+      if (gen === state.gen && state.view !== 'history') renderMain();
+    }
+  })();
+  return inflight[kind];
+}
+
 const counts = (r) => ({
   err: r.findings.filter((f) => f.severity === 'error').length,
   warn: r.findings.filter((f) => f.severity === 'warn').length,
@@ -33,22 +78,17 @@ const counts = (r) => ({
 
 /* ---------------------------------------------------------------- stats + list */
 
+// Same numbers as the dashboard: repos that failed to scan are not averaged in.
 function renderStats() {
-  const rs = [...state.repos.values()];
-  const tot = rs.reduce((a, r) => {
-    const c = counts(r);
-    a.err += c.err; a.warn += c.warn; a.prs += (r.prs || []).length; a.ci += (r.ci?.failed || []).length;
-    return a;
-  }, { err: 0, warn: 0, prs: 0, ci: 0 });
-  const avg = rs.length ? Math.round(rs.reduce((n, r) => n + (r.score || 0), 0) / rs.length) : 0;
-  const stat = (label, val, cls = '') => h('div', { class: 'stat ' + cls }, h('b', {}, val), h('span', {}, label));
+  const m = Metrics.compute([...state.repos.values()]);
+  const t = m.totals;
   $('stats').replaceChildren(
-    stat('Repositories', rs.length),
-    stat('Avg health', rs.length ? avg : '–', avg >= 75 ? 'ok' : 'warn'),
-    stat('Errors', tot.err, tot.err ? 'err' : 'ok'),
-    stat('Warnings', tot.warn, tot.warn ? 'warn' : 'ok'),
-    stat('Open PRs', tot.prs),
-    stat('Failing CI', tot.ci, tot.ci ? 'err' : 'ok')
+    stat('Repositories', t.repos),
+    stat('Avg health', m.avg == null ? '–' : m.avg, healthClass(m.avg)),
+    stat('Errors', t.errors, t.errors ? 'err' : 'ok'),
+    stat('Warnings', t.warns, t.warns ? 'warn' : 'ok'),
+    stat('Open PRs', t.prs),
+    stat('Failing CI', t.failingCI, t.failingCI ? 'err' : 'ok')
   );
 }
 
@@ -60,15 +100,15 @@ function renderList() {
   rs.sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : sort === 'prs' ? (b.prs?.length || 0) - (a.prs?.length || 0) : (a.score ?? 0) - (b.score ?? 0));
   $('repos').replaceChildren(...rs.map((r) => {
     const c = counts(r);
-    return h('li', { class: state.view === 'repo' && r.path === state.selected ? 'sel' : '', onclick: () => select(r.path) },
+    return activate(h('li', { class: state.view === 'repo' && r.path === state.selected ? 'sel' : '' },
       h('div', { class: 'grade g' + r.grade }, r.grade),
       h('div', { class: 'rinfo' },
         h('div', { class: 'rname' }, r.name),
         h('div', { class: 'rmeta' },
           c.err ? h('span', { class: 'b-err' }, `${c.err} err`) : null,
           c.warn ? h('span', { class: 'b-warn' }, `${c.warn} warn`) : null,
-          r.prs?.length ? h('span', {}, `${r.prs.length} PR`) : null,
-          !r.remote && !r.error ? h('span', {}, 'local only') : null)));
+          r.prs?.length ? h('span', {}, plural(r.prs.length, 'PR')) : null,
+          !r.remote && !r.error ? h('span', {}, 'local only') : null))), () => select(r.path));
   }));
 }
 
@@ -111,6 +151,7 @@ async function runActions(items, { ask = true } = {}) {
 }
 
 const stripUi = (a) => { const { label, ...rest } = a; return rest; };
+const actOn = (r, type, extra = {}) => () => runActions([{ repo: r, action: { type, ...extra } }]); // a button handler
 
 /* ---------------------------------------------------------------- detail view */
 
@@ -125,7 +166,7 @@ function btn(label, onclick, cls = '') {
 function findingEl(r, f) {
   return h('div', { class: 'finding ' + f.severity },
     h('div', { class: 't' }, h('b', {}, f.title), h('span', {}, f.detail || '')),
-    f.url ? h('a', { onclick: () => window.api.openUrl(f.url) }, 'Open ↗') : null,
+    f.url ? btn('Open ↗', () => window.api.openUrl(f.url)) : null,
     f.fix ? btn(f.fix.label, () => runActions([{ repo: r, action: f.fix }])) : null);
 }
 
@@ -134,7 +175,7 @@ function branchesPanel(r) {
   const def = r.remote?.defaultBranch;
   const remoteSet = new Set((g.remoteBranches || []).map((b) => b.name));
   const prByBranch = new Map((r.prs || []).map((p) => [p.headRefName, p]));
-  const act = (type, extra) => () => runActions([{ repo: r, action: { type, ...extra } }]);
+  const act = (type, extra) => actOn(r, type, extra);
   const rows = (g.branches || []).map((b) => {
     const merged = (g.mergedBranches || []).includes(b.name);
     return h('div', { class: 'row' },
@@ -161,7 +202,7 @@ function branchesPanel(r) {
 
 function prsPanel(r) {
   if (!r.prs?.length) return [];
-  const act = (type, p, extra) => () => runActions([{ repo: r, action: { type, number: p.number, ...extra } }]);
+  const act = (type, p, extra) => actOn(r, type, { number: p.number, ...extra });
   return [h('h3', {}, `Open pull requests (${r.prs.length})`), ...r.prs.map((p) => h('div', { class: 'row' },
     h('div', { class: 'grow' }, h('b', {}, `#${p.number} ${p.title}`), h('div', { class: 'muted' }, `${p.headRefName}${p.isDraft ? ' · draft' : ''} · checks: ${p.statusCheckRollup} · review: ${p.reviewDecision || 'none'}${p.mergeable === 'CONFLICTING' ? ' · conflicts' : ''}`)),
     p.isDraft ? btn('Ready for review', act('pr-ready', p)) : btn('Merge…', act('pr-merge', p, { method: 'squash', deleteBranch: true })),
@@ -171,7 +212,7 @@ function prsPanel(r) {
 
 function settingsPanel(r) {
   if (!r.remote || r.remote.unreachable) return [];
-  const act = (type, extra) => () => runActions([{ repo: r, action: { type, ...extra } }]);
+  const act = (type, extra) => actOn(r, type, extra);
   const prot = r.protection === true ? 'on' : r.protection === false ? 'off' : 'unknown';
   return [h('h3', {}, 'Repository settings'),
     h('div', { class: 'muted' }, `Default branch protection: ${prot} · Dependabot alerts: ${r.remote.alertsEnabled === false ? 'off' : r.remote.alertsEnabled ? 'on' : 'unknown'} · Your permission: ${r.remote.viewerPermission || 'unknown'}`),
@@ -194,7 +235,7 @@ const FILE_TEMPLATES = [
 function filesPanel(r) {
   const missing = FILE_TEMPLATES.filter(([, , has]) => !has(r));
   if (!missing.length) return [];
-  return [h('h3', {}, 'Add missing files'), h('div', { class: 'toolbar' }, missing.map(([id, label]) => btn('+ ' + label, () => runActions([{ repo: r, action: { type: 'add-file', template: id } }]))))];
+  return [h('h3', {}, 'Add missing files'), h('div', { class: 'toolbar' }, missing.map(([id, label]) => btn('+ ' + label, actOn(r, 'add-file', { template: id }))))];
 }
 
 function renderRepo() {
@@ -205,10 +246,10 @@ function renderRepo() {
   const toolbar = h('div', { class: 'toolbar' });
   const mk = (label, fn) => { const b = h('button', {}, label); b.addEventListener('click', () => fn(b)); toolbar.append(b); };
   mk('Rescan', async (b) => { b.disabled = true; await refreshOne(r.path); });
-  mk('Fetch & prune', () => runActions([{ repo: r, action: { type: 'fetch' } }]));
-  mk('Copy for LLM', (b) => copyForLlm(b, r.path, r.name));
+  mk('Fetch & prune', actOn(r, 'fetch'));
   mk('Open folder', () => window.api.openFolder(r.path));
   if (r.remote) mk('Open on GitHub ↗', () => window.api.openUrl(r.remote.url));
+  toolbar.append(copyButton(r.path, r.name));
   const cats = [...new Set(r.findings.map((f) => f.category))];
   put(d, 
     h('div', { class: 'dhead' }, h('div', { class: 'grade g' + r.grade }, r.grade), h('h2', {}, r.name), h('span', { class: 'pill' }, `${r.score}/100`)),
@@ -224,13 +265,16 @@ async function copyForLlm(b, dir, label) {
   try {
     const out = await window.api.copyReport(dir);
     if (!out.ok) return toast(out.error, 'bad');
-    toast(`Copied a ${Math.round(out.chars / 1000)}k-character report for ${label} to the clipboard. Paste it into your LLM. It includes repo paths, PR and branch titles and clutter file names, but no file contents.`);
+    const size = out.chars < 1000 ? `${out.chars}-character` : `${Math.round(out.chars / 1000)}k-character`;
+    toast(`Copied a ${size} report for ${label} to the clipboard. Paste it into your LLM. It includes repo paths, PR and branch titles and clutter file names, but no file contents.`);
   } finally { b.disabled = false; }
 }
 
 async function refreshOne(dir) {
+  const gen = state.gen;
   const out = await window.api.rescan(dir, $('deep').checked);
-  if (out.ok) { state.repos.set(dir, out.res); showRate(out.rate); }
+  if (gen !== state.gen) return; // a workspace scan started meanwhile
+  if (out.ok) { state.repos.set(dir, out.res); showRate(out.rate); } else toast(out.error || 'Rescan failed.', 'bad');
   renderStats(); renderList(); renderMain();
 }
 
@@ -244,11 +288,11 @@ function renderOverview() {
   const list = Metrics.groupFindings([...state.repos.values()].filter((r) => !r.error));
   put($('detail'), 
     h('h2', {}, 'Workspace overview'),
-    state.repos.size ? (() => { const b = h('button', {}, 'Copy for LLM'); b.title = 'Copy a full report with an ordered fix plan, to paste into any LLM'; b.addEventListener('click', () => copyForLlm(b, null, 'the whole workspace')); return h('div', { class: 'toolbar' }, b); })() : null,
+    state.repos.size ? h('div', { class: 'toolbar' }, copyButton(null, 'the whole workspace')) : null,
     list.length ? h('p', { class: 'sub' }, 'Recommendations grouped across all repositories, most severe first. "Fix all" previews every command before anything runs.') : h('p', { class: 'empty' }, state.repos.size ? 'Nothing to recommend.' : 'Choose a workspace folder and press Scan.'),
     ...list.map((g) => {
       const bulk = g.fixes.every((f) => f && BULKABLE.has(f.action.type)) && g.fixes.length > 1;
-      return h('div', { class: 'rec' }, h('span', { class: 'n b-' + (g.sev === 'error' ? 'err' : g.sev === 'warn' ? 'warn' : '') }, g.repos.length),
+      return h('div', { class: 'rec' }, h('span', { class: 'n ' + sevClass(g.sev) }, g.repos.length),
         h('div', { class: 'grow' }, h('div', {}, `${g.title}  `, h('span', { class: 'pill' }, g.cat)), h('div', { class: 'repos' }, g.repos.join(', '))),
         bulk ? btn(`Fix all ${g.fixes.length}…`, () => runActions(g.fixes, { ask: false })) : null);
     }));
@@ -256,7 +300,9 @@ function renderOverview() {
 
 async function renderHistory() {
   state.view = 'history'; state.selected = null;
+  renderList();
   const entries = await window.api.audit();
+  if (state.view !== 'history') return; // the user moved on while it loaded
   put($('detail'), 
     h('h2', {}, 'Action history'),
     h('p', { class: 'sub' }, 'Everything GutCheck has changed on this machine (newest first). Stored locally in the app data folder.'),
@@ -264,7 +310,6 @@ async function renderHistory() {
     ...entries.map((e) => h('div', { class: 'finding ' + (e.ok ? '' : 'error') },
       h('div', { class: 't' }, h('b', {}, `${e.ok ? '✓' : '✗'} ${e.repo}: ${e.title}`),
         h('span', {}, new Date(e.ts).toLocaleString() + ' · ' + (e.steps || []).map((s) => s.cmd).join('  ;  '))))));
-  renderList();
 }
 
 function renderMain() {
@@ -283,6 +328,7 @@ function select(dir) { state.selected = dir; state.view = 'repo'; renderList(); 
 async function startScan() {
   const root = $('root').value.trim();
   if (!root || state.scanning) return;
+  state.gen++; state.scanError = {};
   state.scanning = true; state.clutter = null; state.quality = null; state.picked.clear(); state.repos.clear(); state.selected = null; state.view = 'dashboard';
   $('ptext').textContent = 'Scanning…'; $('progress').hidden = false;
   $('scan').disabled = true; renderStats(); renderList(); renderMain();

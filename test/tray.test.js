@@ -111,6 +111,7 @@ test('autostart uses the AppImage path, quotes awkward paths, and uses login ite
   assert.deepEqual(launchCommand({ isPackaged: true }, { APPIMAGE: '/home/me/My Apps/GutCheck.AppImage' }, '/tmp/.mount/x'), { exec: '/home/me/My Apps/GutCheck.AppImage', args: ['--hidden'] });
   assert.deepEqual(launchCommand({ isPackaged: false, getAppPath: () => '/src/gc' }, {}, '/usr/bin/electron'), { exec: '/usr/bin/electron', args: ['/src/gc', '--no-sandbox', '--hidden'] });
   assert.equal(quoteArg('/plain/path-1.0'), '/plain/path-1.0');
+  assert.equal(quoteArg('/opt/100%/g'), '"/opt/100%%/g"');
   assert.equal(quoteArg('/a b/$x"y'), '"/a b/\\$x\\"y"');
   assert.match(desktopEntry('/My Apps/g', ['--hidden']), /Exec="\/My Apps\/g" --hidden/);
   const calls = [];

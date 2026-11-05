@@ -10,10 +10,11 @@ const { scanRepo } = require('./scanner');
 const { scanClutter, workspaceAdvice } = require('./clutter');
 const { buildReport } = require('./report');
 const Metrics = require('./renderer/metrics');
-const { scanQuality, normalizeSettings } = require('./quality');
+const { scanQuality, normalizeSettings, LINE_LIMITS } = require('./quality');
+
+const { DAYS_PER_YEAR } = require('./util');
 
 const PLAN_TTL = 5 * 60 * 1000;
-const { DAYS_PER_YEAR } = require('./util');
 const TREND_MAX = DAYS_PER_YEAR; // about a year of daily snapshots kept on disk
 const TREND_MERGE_MS = 10 * 60 * 1000; // scans closer together than this replace each other
 
@@ -80,6 +81,7 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
       plans.delete(token); // single use
       if (!entry || entry.expires < Date.now()) { out.push({ ok: false, error: 'Plan expired. Please review it again.' }); continue; }
       const p = entry.plan;
+      if (!known.has(p.repoPath)) { out.push({ ok: false, repoName: p.repoName, error: 'This repo is no longer in the scanned workspace.' }); continue; }
       if (settings().readOnly) { out.push({ ok: false, repoName: p.repoName, error: 'Read-only mode is on.' }); continue; }
       if (busy.has(p.repoPath)) { out.push({ ok: false, repoName: p.repoName, error: 'Another action is running on this repo.' }); continue; }
       busy.add(p.repoPath);
@@ -87,7 +89,7 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
         const r = await actions.apply(p, { trash });
         audit({ repo: p.repoName, path: p.repoPath, action: p.type, risk: p.risk, title: p.title, ok: r.ok, steps: r.results.map((x) => ({ cmd: x.text, ok: x.ok })) });
         let res = null;
-        try { res = await rescan(p.repoPath); known.set(p.repoPath, res); } catch {}
+        try { res = await rescan(p.repoPath); if (known.has(p.repoPath)) known.set(p.repoPath, res); } catch {}
         out.push({ ok: r.ok, repoName: p.repoName, title: p.title, results: r.results, res, rate: github.getRate() });
       } finally {
         busy.delete(p.repoPath);
@@ -127,7 +129,8 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
 
   const qualitySettings = () => normalizeSettings(settings().quality);
   function setQualitySettings(patch) {
-    const next = normalizeSettings({ ...qualitySettings(), ...(patch && typeof patch === 'object' ? patch : {}) });
+    const cur = qualitySettings();
+    const next = normalizeSettings({ ...cur, ...(patch && typeof patch === 'object' ? patch : {}) }, cur); // a bad field keeps its current value
     updateSettings({ quality: next });
     return next;
   }
@@ -148,7 +151,7 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
         const sum = (f) => repos.reduce((n, r) => n + f(r), 0);
         stampTrend(settings().root, 'quality', { over: sum((r) => r.loc.overCount), magic: sum((r) => r.magic.total), secrets: sum((r) => r.secretCount), todos: sum((r) => r.markers.total) });
       }
-      return { ok: true, repos, settings: cfg };
+      return { ok: true, repos, settings: cfg, limits: LINE_LIMITS };
     } finally {
       qualityScanning = false;
     }
@@ -175,7 +178,9 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
     return { ok: true, chars: text.length, repos: repos.length };
   }
 
-  return { planActions, applyActions, clutterScan, qualityScan, qualitySettings, setQualitySettings, copyReport, recordScan, trend };
+  const forgetPlans = () => plans.clear();
+
+  return { planActions, applyActions, forgetPlans, clutterScan, qualityScan, qualitySettings, setQualitySettings, copyReport, recordScan, trend };
 }
 
 module.exports = { createService };

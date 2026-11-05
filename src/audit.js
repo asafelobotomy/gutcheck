@@ -18,7 +18,9 @@ function appendAudit(file, entry, io = fs) {
 
 function readAudit(file, limit = 200, io = fs) {
   try {
-    return io.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).slice(-limit).reverse().map((l) => JSON.parse(l));
+    // Parse line by line: one damaged line (a crash mid-append) must not hide the whole history.
+    const parse = (l) => { try { return JSON.parse(l); } catch { return null; } };
+    return io.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).slice(-limit).reverse().map(parse).filter(Boolean);
   } catch {
     return [];
   }

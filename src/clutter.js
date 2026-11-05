@@ -13,7 +13,7 @@ const fsp = fs.promises;
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { git } = require('./exec');
-const { DAY, COMMAND_TIMEOUT_MS, plural, list, HEAVY_DIRS } = require('./util');
+const { DAY, COMMAND_TIMEOUT_MS, NODE_LOCKFILES, plural, list, HEAVY_DIRS } = require('./util');
 
 const MAX_FILES = 40000;
 const MAX_DEPTH = 6;
@@ -39,22 +39,25 @@ const CACHE_DIRS = {
 };
 
 // First match wins. `base` derives the name of the file this one is a leftover copy of.
+// `ignoreAs` must match every name `re` matches (gitignore is case-sensitive), otherwise adding the
+// suggested rule would never clear the "not in .gitignore" advice.
 const FILE_RULES = [
   { re: /^\.DS_Store$/, category: 'junk', reason: 'macOS folder metadata', confidence: 'high', ignoreAs: '.DS_Store' },
-  { re: /^Thumbs\.db$/i, category: 'junk', reason: 'Windows thumbnail cache', confidence: 'high', ignoreAs: 'Thumbs.db' },
-  { re: /^desktop\.ini$/i, category: 'junk', reason: 'Windows folder metadata', confidence: 'high', ignoreAs: 'desktop.ini' },
+  { re: /^Thumbs\.db$/, category: 'junk', reason: 'Windows thumbnail cache', confidence: 'high', ignoreAs: 'Thumbs.db' },
+  { re: /^desktop\.ini$/, category: 'junk', reason: 'Windows folder metadata', confidence: 'high', ignoreAs: 'desktop.ini' },
   { re: /^\._./, category: 'junk', reason: 'macOS resource-fork file', confidence: 'medium', ignoreAs: '._*', base: (n) => n.slice(2), highWithBase: true },
-  { re: /\.sw[a-p]$/, category: 'junk', reason: 'Editor swap file (may hold unsaved edits)', confidence: 'medium', ignoreAs: '*.swp' },
+  { re: /\.sw[a-p]$/, category: 'junk', reason: 'Editor swap file (may hold unsaved edits)', confidence: 'medium', ignoreAs: '*.sw[a-p]' },
   { re: /~$/, category: 'backup', reason: 'Editor backup file', confidence: 'medium', ignoreAs: '*~', base: (n) => n.slice(0, -1) },
   { re: /^\.#./, category: 'junk', reason: 'Emacs lock file', confidence: 'medium', ignoreAs: '.#*' },
   { re: /^#.+#$/, category: 'junk', reason: 'Emacs autosave file', confidence: 'medium', ignoreAs: '#*#' },
   { re: /^~\$./, category: 'junk', reason: 'Office lock file', confidence: 'medium', ignoreAs: null },
-  { re: /\.(tmp|temp)$/i, category: 'temp', reason: 'Temporary file', confidence: 'medium', ignoreAs: '*.tmp' },
+  { re: /\.tmp$/, category: 'temp', reason: 'Temporary file', confidence: 'medium', ignoreAs: '*.tmp' },
+  { re: /\.temp$/, category: 'temp', reason: 'Temporary file', confidence: 'medium', ignoreAs: '*.temp' },
   { re: /\.orig$/, category: 'backup', reason: 'Leftover from a merge or patch', confidence: 'medium', ignoreAs: '*.orig', base: (n) => n.replace(/\.orig$/, '') },
   { re: /\.rej$/, category: 'backup', reason: 'Rejected patch hunk', confidence: 'medium', ignoreAs: '*.rej', base: (n) => n.replace(/\.rej$/, '') },
-  { re: /\.bak$/i, category: 'backup', reason: 'Backup copy', confidence: 'medium', ignoreAs: '*.bak', base: (n) => n.replace(/\.bak$/i, '') },
+  { re: /\.bak$/, category: 'backup', reason: 'Backup copy', confidence: 'medium', ignoreAs: '*.bak', base: (n) => n.replace(/\.bak$/, '') },
   { re: /\.(old|backup)$/i, category: 'backup', reason: 'Backup copy', confidence: 'medium', ignoreAs: null, base: (n) => n.replace(/\.(old|backup)$/i, '') },
-  { re: /^(npm-debug|yarn-debug|yarn-error|pnpm-debug|lerna-debug)\.log/, category: 'log', reason: 'Package manager crash log', confidence: 'high', ignoreAs: 'npm-debug.log*' },
+  ...['npm-debug', 'yarn-debug', 'yarn-error', 'pnpm-debug', 'lerna-debug'].map((n) => ({ re: new RegExp(`^${n}\\.log`), category: 'log', reason: 'Package manager crash log', confidence: 'high', ignoreAs: `${n}.log*` })),
   { re: /\.log$/i, category: 'log', reason: 'Log file', confidence: 'low', ignoreAs: '*.log' },
   { re: /^\.(eslint|stylelint)cache$/, category: 'cache', reason: 'Linter cache', confidence: 'high', regenerable: true, ignoreAs: null },
   { re: /^\.coverage$/, category: 'test-artifact', reason: 'Python coverage data', confidence: 'high', regenerable: true, ignoreAs: '.coverage' },
@@ -75,7 +78,7 @@ const IGNORE_OK = new Set([
   ...FILE_RULES.map((r) => r.ignoreAs).filter(Boolean),
 ]);
 
-const LOCKFILES = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock', 'bun.lockb', 'npm-shrinkwrap.json'];
+const LOCKFILES = NODE_LOCKFILES;
 const SPLIT_DIRS = [['test', 'tests', '__tests__', 'spec'], ['doc', 'docs'], ['script', 'scripts'], ['example', 'examples'], ['asset', 'assets'], ['util', 'utils'], ['lib', 'libs']];
 const MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|mp4|mov|webm|pdf)$/i;
 const ARCHIVE_RE = /\.(zip|tar|tgz|tar\.gz|7z|rar)$/i;

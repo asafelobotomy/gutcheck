@@ -1,11 +1,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { run, git } = require('./exec');
-const { HEAVY_DIRS, cmpVersion } = require('./util');
+const { HEAVY_DIRS, NODE_LOCKFILES, installCommand, cmpVersion } = require('./util');
 const { evaluate } = require('./checks');
 const gh = require('./github');
 
-const SKIP = new Set([...HEAVY_DIRS, '.cache', '.local', '.npm']);
+const SKIP = new Set(HEAVY_DIRS); // dot-folders are skipped separately
 
 // Find git repos under root (root itself, or children up to maxDepth levels deep).
 function discover(root, maxDepth = 2) {
@@ -41,8 +41,9 @@ async function collectGit(dir) {
   const g = { branch: null, detached: false, upstream: null, ahead: 0, behind: 0, dirty: 0, branches: [], remoteBranches: [], mergedBranches: [] };
   for (const line of st.stdout.split('\n')) {
     if (line.startsWith('# branch.head ')) {
-      g.branch = line.slice(14);
-      if (g.branch === '(detached)') g.detached = true;
+      const head = line.slice(14);
+      if (head === '(detached)') g.detached = true; // no branch name: nothing to push, track or report
+      else g.branch = head;
     } else if (line.startsWith('# branch.upstream ')) g.upstream = line.slice(18);
     else if (line.startsWith('# branch.ab ')) {
       const m = /\+(\d+) -(\d+)/.exec(line);
@@ -107,9 +108,9 @@ function collectFiles(dir) {
 }
 
 async function collectDeps(dir, names, deep) {
-  const d = { manifests: [], manifestsWithoutLock: [], needsInstall: false, outdated: null, outdatedNames: [] };
+  const d = { manifests: [], manifestsWithoutLock: [], needsInstall: false, installer: installCommand(names), outdated: null, outdatedNames: [] };
   const lockFor = {
-    'package.json': ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock', 'bun.lockb', 'npm-shrinkwrap.json'],
+    'package.json': NODE_LOCKFILES,
     'Cargo.toml': ['Cargo.lock'],
     'go.mod': ['go.sum'],
   };
@@ -164,7 +165,8 @@ async function collectLocal(dir, opts) {
   const ref = parseGithubRemote(originUrl);
   const files = collectFiles(dir);
   const wfDir = path.join(dir, '.github', 'workflows');
-  const hasWorkflows = fs.existsSync(wfDir) && fs.readdirSync(wfDir).length > 0;
+  let hasWorkflows = false;
+  try { hasWorkflows = fs.readdirSync(wfDir).length > 0; } catch {} // missing, or not a folder
   const [g, deps] = await Promise.all([collectGit(dir), collectDeps(dir, files.names, opts.deep)]);
   delete files.names;
   return { dir, ref, originUrl, files, hasWorkflows, git: g, deps };

@@ -16,6 +16,29 @@ test('package.json and package-lock.json agree on the version (a bump must touch
   assert.equal(lock.packages[''].version, pkg.version);
 });
 
+test('dependency overrides never force a package onto a major version it does not accept', () => {
+  // A too-broad override once put minimatch 11 under glob@7 (which needs 3.x) and broke glob.sync.
+  const { packages } = JSON.parse(read('package-lock.json'));
+  // Deliberate: every minimatch 9.x and 10.x is in the advisory range (see package.json overrides).
+  // 9/10 -> 11 keeps the same named exports, and the CI AppImage build proves app-builder-lib works.
+  const ALLOWED = new Set(['node_modules/@electron/universal>minimatch', 'node_modules/app-builder-lib>minimatch']);
+  const resolve = (from, name) => {
+    for (let dir = from; ; dir = dir.slice(0, dir.lastIndexOf('/node_modules/')) || '') {
+      const hit = packages[(dir ? dir + '/' : '') + 'node_modules/' + name];
+      if (hit) return hit;
+      if (!dir) return null;
+    }
+  };
+  for (const [where, pkg] of Object.entries(packages)) {
+    for (const [name, spec] of Object.entries({ ...pkg.dependencies, ...pkg.optionalDependencies })) {
+      const m = /^\^(\d+)\./.exec(spec);
+      const got = resolve(where, name);
+      if (!m || !got || !got.version || m[1] === '0' || ALLOWED.has(where + '>' + name)) continue;
+      assert.equal(got.version.split('.')[0], m[1], `${where || 'root'} wants ${name}@${spec} but gets ${got.version}`);
+    }
+  }
+});
+
 test('CI releases on a version bump to main and on v* tags, only after tests and the build pass', () => {
   assert.match(wf, /branches: \[main\]/);
   assert.match(wf, /tags: \['v\*'\]/);

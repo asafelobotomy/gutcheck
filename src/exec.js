@@ -33,4 +33,4 @@ async function json(cmd, args, opts) {
 const READONLY_GIT = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
 const git = (args, opts) => run('git', [...READONLY_GIT, ...args], opts);
 
-module.exports = { run, json, git };
+module.exports = { run, json, git, READONLY_GIT };

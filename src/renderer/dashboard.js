@@ -19,15 +19,6 @@ function dlt(now, then, better = 'down') {
   return { text: `${d.dir > 0 ? '▲' : '▼'} ${Math.abs(d.d)} since last scan`, cls: d.good ? 'good' : 'bad' };
 }
 
-// Make any element keyboard-operable like a button (Tab to focus, Enter or Space to activate).
-function activate(el, fn) {
-  el.tabIndex = 0;
-  el.setAttribute('role', 'button');
-  el.addEventListener('click', fn);
-  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); } });
-  return el;
-}
-
 function card(label, value, { cls = '', sub = '', go = null, delta = null } = {}) {
   const el = h('div', { class: 'kpi ' + cls + (go ? ' link' : '') }, h('b', {}, value), h('span', {}, label), sub ? h('i', {}, sub) : null, delta ? h('i', { class: 'd ' + delta.cls }, delta.text) : null);
   if (go) activate(el, go);
@@ -69,6 +60,9 @@ function hbars(rows, { max = Math.max(1, ...rows.map((r) => r.value)), fmt = Str
   }));
 }
 
+// Lines of code per language (dashboard and code-quality view).
+const langBars = (languages) => hbars(languages.slice(0, 8).map((l) => ({ label: l.lang, value: l.lines, cls: 'c-info', title: plural(l.files, 'file') })), { fmt: (n) => n.toLocaleString() });
+
 function columns(rows, cls = 'info') {
   const max = Math.max(1, ...rows.map((r) => r.count));
   return h('div', { class: 'cols' }, rows.map((r) => {
@@ -97,6 +91,7 @@ function lineChart(entries, series, { fmt = String, get = (e, k) => e[k] } = {})
   const W = 300, H = 110, PX = 8, PT = 8, PB = 8;
   const pts = entries.slice(-30);
   const vals = pts.flatMap((e) => series.map((s) => get(e, s.key))).filter((v) => v != null);
+  if (!vals.length) return h('p', { class: 'muted' }, 'No data yet.');
   const lo = Math.min(...vals), hi = Math.max(...vals);
   const span = hi - lo || 1;
   const x = (i) => PX + (pts.length === 1 ? (W - 2 * PX) / 2 : (i / (pts.length - 1)) * (W - 2 * PX));
@@ -126,7 +121,7 @@ function heatmapEl(hm, open) {
     grid.append(name, ...r.cells.map((c, i) => {
       const n = c.error + c.warn + c.info;
       const cell = h('div', { class: 'hm' + (c.worst ? ` hm-${c.worst}-${c.level}` : ''), title: `${r.name} / ${hm.cols[i]}: ` + (n ? [c.error && `${c.error} error`, c.warn && `${c.warn} warning`, c.info && `${c.info} note`].filter(Boolean).join(', ') : 'clean') }, n || '');
-      activate(cell, open(r.path));
+      cell.addEventListener('click', open(r.path)); // keyboard users open the repo from its row name
       return cell;
     }));
   }
@@ -166,27 +161,24 @@ function renderDashboard() {
   const open = (dir) => () => { if (dir) select(dir); };
   const toOverview = () => { renderOverview(); renderList(); };
 
-  const copy = h('button', {}, 'Copy for LLM');
-  copy.title = 'Copy a full report with an ordered fix plan, to paste into any LLM';
-  copy.addEventListener('click', () => copyForLlm(copy, null, 'the whole workspace'));
 
   const cl = m.clutter;
   const clutterCard = cl
     ? card('Clutter found', fmtSize(cl.totalSize), { cls: kind(cl.items), sub: `${cl.items} items, ${fmtSize(cl.safeSize)} safe to remove`, go: () => openClutter() })
-    : card('Clutter', 'Scan', { cls: '', sub: 'find stale env files, caches, copies', go: async () => { await scanClutterNow(); await loadTrend(); } });
+    : card('Clutter', 'Scan', { cls: '', sub: state.scanError.clutter || 'find stale env files, caches, copies', go: async () => { await scanClutterNow(); await loadTrend(); } });
 
   const rescanQuality = async () => { await scanQualityNow(); await loadTrend(); };
-  const qt = state.quality ? Metrics.qualityTotals([...state.quality.repos.values()]) : null;
+  const qt = state.quality ? Metrics.qualityTotals([...state.quality.repos.values()], state.quality.settings.maxLines) : null;
   const qualityCards = qt
-    ? [card(`Files over ${qt.max} lines`, qt.over, { cls: kind(qt.over), sub: `${qt.files.toLocaleString()} files, ${qt.lines.toLocaleString()} lines`, go: () => openQuality() }),
+    ? [card(`Files over ${qt.max} lines`, qt.over.toLocaleString(), { cls: kind(qt.over), sub: `${plural(qt.files, 'file')}, ${plural(qt.lines, 'line')}`, go: () => openQuality() }),
       card('Magic numbers', qt.magic.toLocaleString(), { cls: kind(qt.magic, 'info'), sub: 'bare numbers in source', go: () => openQuality() }),
-      card('Possible secrets', qt.secrets, { cls: kind(qt.secrets, 'err'), sub: 'hardcoded credentials', go: () => openQuality() }),
-      card('TODO markers', qt.todos, { sub: qt.debug ? `${qt.debug} debug leftovers` : '', go: () => openQuality() })]
-    : [card('Code quality', 'Scan', { sub: 'file length, magic numbers, secrets', go: rescanQuality })];
+      card('Possible secrets', qt.secrets.toLocaleString(), { cls: kind(qt.secrets, 'err'), sub: 'hardcoded credentials', go: () => openQuality() }),
+      card('TODO markers', qt.todos.toLocaleString(), { sub: qt.debug ? `${qt.debug} debug leftovers` : '', go: () => openQuality() })]
+    : [card('Code quality', 'Scan', { sub: state.scanError.quality || 'file length, magic numbers, secrets', go: rescanQuality })];
 
   const cards = [
     card('Repositories', t.repos, { sub: t.failedScans ? `${t.failedScans} failed to scan` : '', cls: t.failedScans ? 'warn' : '' }),
-    card('Average health', m.avg == null ? '–' : m.avg, { cls: m.avg >= 75 ? 'ok' : m.avg >= 55 ? 'warn' : 'err', delta: prev && dlt(m.avg, prev.avg, 'up') }),
+    card('Average health', m.avg == null ? '–' : m.avg, { cls: healthClass(m.avg), delta: prev && dlt(m.avg, prev.avg, 'up') }),
     card('Errors', t.errors, { cls: kind(t.errors, 'err'), go: toOverview, delta: prev && dlt(t.errors, prev.errors) }),
     card('Warnings', t.warns, { cls: kind(t.warns), go: toOverview, delta: prev && dlt(t.warns, prev.warns) }),
     card('Open PRs', t.prs, { sub: [t.readyPRs && `${t.readyPRs} ready`, t.conflictPRs && `${t.conflictPRs} conflicts`].filter(Boolean).join(' · ') }),
@@ -195,7 +187,7 @@ function renderDashboard() {
     card('Unpushed commits', t.ahead, { sub: t.behind ? `${t.behind} behind upstream` : '', cls: kind(t.ahead), delta: prev && dlt(t.ahead, prev.ahead) }),
     card('High/critical alerts', t.alertsHigh, { sub: `${t.alertsTotal} open in total`, cls: kind(t.alertsHigh, 'err') }),
     card('Merged branches', t.mergedBranches, { sub: 'safe to delete', cls: kind(t.mergedBranches, 'info') }),
-    card('Stale branches', t.staleBranches, { sub: '60+ days, unmerged' }),
+    card('Stale branches', t.staleBranches, { sub: `${Metrics.STALE_BRANCH_DAYS}+ days, unmerged` }),
     card('Local-only repos', t.localOnly, { sub: 'no GitHub backup', cls: kind(t.localOnly) }),
     card('No LICENSE', t.noLicense, { sub: t.noReadme ? `${t.noReadme} also lack a README` : '', cls: kind(t.noLicense, 'err') }),
     clutterCard,
@@ -230,8 +222,8 @@ function renderDashboard() {
     : [panel('Trends', 'Not enough history yet', h('p', { class: 'muted' }, 'Health, error and clutter trends appear after your second scan. GutCheck keeps a small local history (scores and totals only, no paths) in its app data folder.'))];
 
   put(d,
-    h('div', { class: 'dhead' }, h('h2', {}, 'Dashboard'), h('span', { class: 'pill' }, `${t.repos} repos`)),
-    h('div', { class: 'toolbar' }, copy, btn('Workspace overview', toOverview)),
+    h('div', { class: 'dhead' }, h('h2', {}, 'Dashboard'), h('span', { class: 'pill' }, plural(t.repos, 'repo'))),
+    h('div', { class: 'toolbar' }, copyButton(null, 'the whole workspace'), btn('Workspace overview', toOverview)),
     h('div', { class: 'kpis' }, cards),
     h('div', { class: 'panels' },
       panel('Health grades', 'Repositories by grade', donut(m.grades, m.avg)),
@@ -239,7 +231,7 @@ function renderDashboard() {
       panel('Issues by category', 'Errors, warnings and notes', m.categories.length ? stacked(m.categories) : h('p', { class: 'ok-msg' }, 'No issues.')),
       panel('Top recommendations', 'Same problem across the most repos (click for fixes)', m.recommendations.length
         ? h('div', { class: 'attn' }, m.recommendations.map((g) => activate(h('div', { class: 'row link' },
-          h('span', { class: 'n b-' + (g.sev === 'error' ? 'err' : g.sev === 'warn' ? 'warn' : '') }, g.repos.length),
+          h('span', { class: 'n ' + sevClass(g.sev) }, g.repos.length),
           h('div', { class: 'grow' }, g.title, h('span', { class: 'pill' }, g.cat)), ), toOverview)))
         : h('p', { class: 'ok-msg' }, 'Nothing to recommend.')),
       panel('Repo activity', 'Time since the last push', columns(m.activity, 'info')),
@@ -249,9 +241,9 @@ function renderDashboard() {
       wide(panel('Issue heatmap', 'Where the problems are: repos down, categories across. Click a row to open it.', hm.cols.length ? heatmapEl(hm, open) : h('p', { class: 'ok-msg' }, 'No issues anywhere.'))),
       panel('Health by repo', 'Click a bar to open the repo', hbars(m.perRepo.map((p) => ({ label: p.name, value: p.score, cls: 'c-' + GRADE_COLOR[p.grade], title: `${p.name}: ${p.score}/100`, go: open(p.path) })), { max: 100 })),
       ...(qt ? [panel('Largest files', `Lines per file; limit is ${qt.max}`, hbars(qt.largest.map((f) => ({ label: `${f.repo}/${f.path}`, value: f.measured, cls: f.measured > qt.max ? 'c-warn' : 'c-info', go: () => openQuality() })), { max: Math.max(1, qt.largest[0] ? qt.largest[0].measured : 1) })),
-        panel('Lines by language', `${qt.lines.toLocaleString()} lines in ${qt.files.toLocaleString()} files`, hbars(qt.languages.slice(0, 8).map((l) => ({ label: l.lang, value: l.lines, cls: 'c-info', title: `${l.files} files` })), { fmt: (n) => n.toLocaleString() })),
+        panel('Lines by language', `${qt.lines.toLocaleString()} lines in ${qt.files.toLocaleString()} files`, langBars(qt.languages)),
         panel('Magic numbers by repo', 'Bare numbers in non-test source', qt.magicByRepo.length ? hbars(qt.magicByRepo.slice(0, 10).map((r) => ({ label: r.name, value: r.count, cls: 'c-info', go: () => openQuality() })), { fmt: (n) => n.toLocaleString() }) : h('p', { class: 'ok-msg' }, 'None found.'))] : []),
-      panel('Clutter by repo', cl ? `${fmtSize(cl.totalSize)} across ${cl.items} items` : 'Not scanned yet',
+      panel('Clutter by repo', cl ? `${fmtSize(cl.totalSize)} across ${plural(cl.items, 'item')}` : 'Not scanned yet',
         cl ? (cl.byRepo.length ? hbars(cl.byRepo.slice(0, 10).map((r) => ({ label: r.name, value: r.size, cls: 'c-warn', title: `${r.count} items`, go: () => openClutter() })), { fmt: fmtSize }) : h('p', { class: 'ok-msg' }, 'No clutter. Tidy.'))
           : btn('Scan for clutter', async () => { await scanClutterNow(); await loadTrend(); }))));
   d.scrollTop = top;

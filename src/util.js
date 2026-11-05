@@ -12,6 +12,15 @@ const list = (a, max = 6) => a.slice(0, max).join(', ') + (a.length > max ? `, +
 // Folders no scan should descend into: huge build/dependency output owned by a tool.
 const HEAVY_DIRS = ['node_modules', 'target', 'dist', 'build', 'vendor'];
 
+// Node lockfiles, and the install command that matches the one a project uses.
+const NODE_LOCKFILES = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock', 'bun.lockb', 'npm-shrinkwrap.json'];
+function installCommand(names) {
+  if (names.includes('pnpm-lock.yaml')) return ['pnpm', 'install'];
+  if (names.includes('yarn.lock')) return ['yarn', 'install'];
+  if (names.includes('bun.lock') || names.includes('bun.lockb')) return ['bun', 'install'];
+  return ['npm', 'install'];
+}
+
 // Dotted numeric version compare (-1, 0, 1); prerelease tags are ignored. Good enough to tell
 // "behind" from "ahead", which `npm outdated` reports alike (e.g. a retracted latest release).
 function cmpVersion(a, b) {
@@ -24,4 +33,4 @@ function cmpVersion(a, b) {
   return 0;
 }
 
-module.exports = { DAYS_PER_YEAR, MAX_PLAN_ITEMS, COMMAND_TIMEOUT_MS, cmpVersion, DAY, daysAgo, sq, plural, list, HEAVY_DIRS };
+module.exports = { NODE_LOCKFILES, installCommand, DAYS_PER_YEAR, MAX_PLAN_ITEMS, COMMAND_TIMEOUT_MS, cmpVersion, DAY, daysAgo, sq, plural, list, HEAVY_DIRS };

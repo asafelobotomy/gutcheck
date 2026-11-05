@@ -89,3 +89,11 @@ test('cmpVersion tells behind from ahead (npm lists a package ahead of a retract
   assert.equal(cmpVersion('v2.0.0-beta.1', '2.0.0'), 0);
   assert.equal(cmpVersion('1.0', '1.0.0'), 0);
 });
+
+test('a detached HEAD has no branch name, so no "no upstream" finding or push command', () => {
+  const { evaluate } = require('../src/checks');
+  const s = { git: { branch: null, detached: true, upstream: null, ahead: 0, behind: 0, dirty: 0, branches: [], remoteBranches: [], mergedBranches: [] }, remote: { owner: 'o', name: 'n' }, files: {}, deps: { manifestsWithoutLock: [] }, prs: [], ci: { failed: [] }, alerts: [] };
+  const ids = evaluate(s).findings.map((f) => f.id);
+  assert.ok(ids.includes('git-detached'));
+  assert.ok(!ids.includes('git-no-upstream'));
+});

@@ -12,19 +12,23 @@ const R = require('./rules');
 const { buildAdvice } = require('./advice');
 
 const DEFAULTS = { maxLines: 400, locMode: 'total', ignore: [] };
+const LINE_LIMITS = { min: 20, max: 20000 }; // allowed range for the user's file-length limit
 const MAX_FILES = 6000;
 const MAX_READ = 1024 * 1024;
 const BIG_FILE = 5 * 1024 * 1024;
 const DENSE_FILE = 15; // magic numbers in one file before it is called out
-const CANDIDATE_MIN = 3;
-const CANDIDATE_MIN_VALUE = 10; // single digits are indices and counts, not worth a name // a literal repeated this often deserves a name
+const MAX_KEPT = 200; // findings of one kind kept per repo (counts stay exact)
+const CANDIDATE_MIN = 3; // a literal repeated this often deserves a name
+const CANDIDATE_MIN_VALUE = 10; // single digits are indices and counts, not worth a name
 const REUSE_MIN = 100; // smaller values (3, 5, 30...) collide by accident, so only larger ones count as "the same constant"
 
-// Validate user settings (they come from disk and from the UI): anything odd falls back to defaults.
-function normalizeSettings(q = {}) {
-  const maxLines = Number.isInteger(q.maxLines) && q.maxLines >= 20 && q.maxLines <= 20000 ? q.maxLines : DEFAULTS.maxLines;
-  const locMode = q.locMode === 'code' ? 'code' : 'total';
-  const ignore = (Array.isArray(q.ignore) ? q.ignore : []).filter((s) => typeof s === 'string').map((s) => s.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 100)).filter(Boolean).slice(0, 50);
+// Validate user settings (they come from disk and from the UI): an invalid field falls back to
+// `base` (the current settings when updating, else the defaults).
+function normalizeSettings(q = {}, base = DEFAULTS) {
+  q = q && typeof q === 'object' ? q : {};
+  const maxLines = Number.isInteger(q.maxLines) && q.maxLines >= LINE_LIMITS.min && q.maxLines <= LINE_LIMITS.max ? q.maxLines : base.maxLines;
+  const locMode = q.locMode === 'code' || q.locMode === 'total' ? q.locMode : base.locMode;
+  const ignore = (Array.isArray(q.ignore) ? q.ignore : base.ignore).filter((s) => typeof s === 'string').map((s) => s.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 100)).filter(Boolean).slice(0, 50);
   return { maxLines, locMode, ignore };
 }
 
@@ -51,6 +55,8 @@ async function scanQuality(dir, rawSettings) {
   const markers = { TODO: 0, FIXME: 0, HACK: 0, XXX: 0, items: [] };
   const debug = [];
   const secrets = [];
+  let secretCount = 0;
+  const debugBy = { warn: 0, info: 0 };
   const largeFiles = [];
   let magicTotal = 0;
   let sourceFiles = 0;
@@ -83,7 +89,7 @@ async function scanQuality(dir, rawSettings) {
     // Secrets: raw text, source and config files only.
     rawLines.forEach((l, i) => {
       if (l.length > 2000) return;
-      for (const kind of R.secretKinds(l, isTest)) if (secrets.length < 200) secrets.push({ path: rel, line: i + 1, kind });
+      for (const kind of R.secretKinds(l, isTest)) { secretCount++; if (secrets.length < MAX_KEPT) secrets.push({ path: rel, line: i + 1, kind }); }
     });
     if (!spec) continue;
 
@@ -115,7 +121,7 @@ async function scanQuality(dir, rawSettings) {
       if (def) defs.push({ ...def, path: rel, line: i + 1, fam: spec.fam });
       if (isTest) return;
       const dbg = R.debugKind(line, ext);
-      if (dbg && debug.length < 200) debug.push({ path: rel, line: i + 1, kind: dbg[0], severity: dbg[1] });
+      if (dbg) { debugBy[dbg[1]]++; if (debug.length < MAX_KEPT) debug.push({ path: rel, line: i + 1, kind: dbg[0], severity: dbg[1] }); }
       for (const m of R.magicNumbers(line)) {
         fileMagic++;
         const key = String(m.value);
@@ -159,15 +165,16 @@ async function scanQuality(dir, rawSettings) {
     settings: cfg, files: res.files, lines: res.lines, sourceFiles, testFiles: res.tests,
     languages: [...res.languages.values()].sort((a, b) => b.lines - a.lines),
     loc: { max: cfg.maxLines, mode: cfg.locMode, overCount: res.over.length, over: res.over.slice(0, 100), largest: res.largest.slice(0, 10) },
-    magic: { total: magicTotal, files: magicFiles.slice(0, 20), denseFiles: magicFiles.filter((f) => f.count >= DENSE_FILE).length, repeated: candidatesOut.slice(0, 15), reuse: reuse.slice(0, 15), constants: { files: constantsFiles.slice(0, 10), definitions: defs.length } },
+    magic: { total: magicTotal, fileCount: magicFiles.length, files: magicFiles.slice(0, 20), denseFiles: magicFiles.filter((f) => f.count >= DENSE_FILE).length, repeated: candidatesOut.slice(0, 15), reuse: reuse.slice(0, 15), constants: { files: constantsFiles.slice(0, 10), definitions: defs.length } },
     markers: { TODO: markers.TODO, FIXME: markers.FIXME, HACK: markers.HACK, XXX: markers.XXX, total: markers.TODO + markers.FIXME + markers.HACK + markers.XXX, items: markers.items },
-    debug: debug.slice(0, 40), debugCount: debug.length,
-    secrets: secrets.slice(0, 40), secretCount: secrets.length,
+    // Lists are capped; the counts are exact. Breakpoints are kept ahead of console.log in the list.
+    debug: [...debug.filter((d) => d.severity === 'warn'), ...debug.filter((d) => d.severity !== 'warn')].slice(0, 40), debugCount: debugBy.warn + debugBy.info, breakpointCount: debugBy.warn,
+    secrets: secrets.slice(0, 40), secretCount,
     largeFiles: largeFiles.slice(0, 10),
     skipped: res.skipped, truncated: res.truncated,
   };
-  out.advice = buildAdvice(out);
+  out.advice = buildAdvice(out, { denseFile: DENSE_FILE, bigFile: BIG_FILE, maxFiles: MAX_FILES });
   return out;
 }
 
-module.exports = { scanQuality, normalizeSettings, DEFAULTS };
+module.exports = { scanQuality, normalizeSettings, LINE_LIMITS };

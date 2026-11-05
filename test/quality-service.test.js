@@ -34,7 +34,7 @@ test('quality settings are validated, stored through updateSettings, and used by
     assert.deepEqual(svc.qualitySettings(), normalizeSettings());
     assert.equal((await svc.qualityScan()).repos[0].loc.overCount, 0);
     assert.deepEqual(svc.setQualitySettings({ maxLines: 50, ignore: ['x/'], evil: 1 }), { maxLines: 50, locMode: 'total', ignore: ['x/'] });
-    assert.equal(svc.setQualitySettings({ maxLines: 3 }).maxLines, 400); // invalid values fall back
+    assert.equal(svc.setQualitySettings({ maxLines: 3 }).maxLines, 50); // an invalid value keeps the current one
     svc.setQualitySettings({ maxLines: 50 });
     const out = await svc.qualityScan();
     assert.ok(out.ok);

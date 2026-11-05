@@ -26,7 +26,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
-      - run: npm audit --omit=dev
+      # Electron itself ships inside the app, so dev dependencies are audited too.
+      - run: npm audit
 
   appimage:
     needs: test

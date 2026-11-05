@@ -7,7 +7,8 @@ const ENTRY = 'gutcheck.desktop';
 const HIDDEN_FLAG = '--hidden'; // start straight into the tray
 
 // Desktop Entry spec: an argument with spaces or special characters is double-quoted.
-const quoteArg = (a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : '"' + a.replace(/(["`$\\])/g, '\\$1').replace(/%/g, '%%') + '"');
+// `%` is a field code there, so any argument containing one is quoted and escaped.
+const quoteArg = (a) => (/^[\w@+=:,./-]+$/.test(a) ? a : '"' + a.replace(/(["`$\\])/g, '\\$1').replace(/%/g, '%%') + '"');
 
 function desktopEntry(exec, args = []) {
   const line = [exec, ...args].map(quoteArg).join(' ');

@@ -124,3 +124,67 @@ test('page text goes through textContent: hostile repo data cannot inject markup
   assert.equal(t.$$('img, script').length, 0);
   assert.ok(t.$('#repos').textContent.includes('<img src=x onerror=alert(1)>'), 'shown as text, not parsed as markup');
 });
+
+test('a failed clutter scan shows the error and a retry, not an endless "Scanning…"', async () => {
+  const t = await boot({ clutter: { ok: false, error: 'disk on fire' } });
+  await scan(t);
+  click(t.$('#clutter'));
+  await tick(80);
+  assert.match(t.$('#detail').textContent, /Clutter scan failed: disk on fire/);
+  assert.ok(t.$$('#detail button').some((b) => b.textContent === 'Try again'));
+});
+
+test('a clutter result from before a new workspace scan is dropped', async () => {
+  const t = await boot();
+  await scan(t);
+  let release;
+  t.w.api.clutterScan = () => new Promise((r) => { release = () => r({ ok: true, repos: [], workspace: [] }); });
+  click(t.$('#clutter'));
+  await tick();
+  click(t.$('#scan'));
+  release();
+  await tick(80);
+  assert.equal(t.run('state.clutter'), null);
+});
+
+test('History loaded late does not draw over the view the user switched to', async () => {
+  const t = await boot();
+  await scan(t);
+  let release;
+  t.w.api.audit = () => new Promise((r) => { release = () => r([{ ts: Date.now(), ok: true, repo: 'x', title: 'late', steps: [] }]); });
+  click(t.$('#history'));
+  click(t.$('#dashboard'));
+  release();
+  await tick();
+  assert.ok(!t.$('#detail').textContent.includes('Action history'));
+  assert.match(t.$('#detail h2').textContent, /Dashboard/);
+});
+
+test('the stats bar agrees with the dashboard: repos that failed to scan are not averaged in', async () => {
+  const { REPOS } = require('./helpers/dom');
+  const t = await boot({ repos: [...REPOS, { path: '/w/broken', name: 'broken', error: 'scan failed', score: 0, grade: 'D', findings: [] }] });
+  await scan(t);
+  const stats = Object.fromEntries(t.$$('#stats .stat').map((s) => [s.querySelector('span').textContent, s.querySelector('b').textContent]));
+  assert.equal(stats.Repositories, '3');
+  assert.equal(stats['Avg health'], String(Math.round((100 + 82 + 52) / 3)));
+});
+
+test('dialogs close on Escape and give focus back; repo rows work from the keyboard', async () => {
+  const t = await boot();
+  await scan(t);
+  const opener = t.$('#background');
+  opener.focus();
+  click(opener);
+  await tick();
+  const dlg = t.$('.modal');
+  assert.equal(dlg.getAttribute('role'), 'dialog');
+  press(t.w, dlg, 'Escape');
+  await tick();
+  assert.equal(t.$('.modal'), null);
+  assert.equal(t.doc.activeElement, opener);
+  assert.equal(t.calls.filter((c) => c[0] === 'background').length, 0, 'Escape saves nothing');
+  const row = t.$('#repos li');
+  assert.equal(row.tabIndex, 0);
+  press(t.w, row, 'Enter');
+  assert.ok(t.$('#detail .dhead'), 'Enter opens the repo');
+});

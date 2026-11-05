@@ -2,12 +2,13 @@
 // effects); apply() runs a plan. The UI shows the plan, the user confirms, and main applies the
 // stored plan, so what is previewed is exactly what runs. Deliberately NOT offered: deleting repos, changing visibility, force-push, history rewriting.
 
-const fs = require('node:fs');
 const path = require('node:path');
-const { run } = require('./exec');
-const { COMMAND_TIMEOUT_MS, MAX_PLAN_ITEMS } = require('./util');
+const { READONLY_GIT } = require('./exec');
+const { apply, defaultCtx } = require('./apply');
+const { MAX_PLAN_ITEMS } = require('./util');
+const INSTALLERS = ['npm install', 'yarn install', 'pnpm install', 'bun install'];
 const { TEMPLATES } = require('./templates');
-const { scanClutter, IGNORE_OK } = require('./clutter');
+const { IGNORE_OK } = require('./clutter');
 const { PROTECTION } = require('./protection');
 
 class PlanError extends Error {}
@@ -18,8 +19,7 @@ const validBranch = (b) => typeof b === 'string' && BRANCH_RE.test(b) && !b.incl
 const cleanText = (s, max) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) : '');
 
 // Read-only git for planning: same hardening as scans (no hooks, no fsmonitor, no index lock).
-const RO = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
-const readGit = (ctx, args, cwd) => ctx.run('git', [...RO, ...args], { cwd });
+const readGit = (ctx, args, cwd) => ctx.run('git', [...READONLY_GIT, ...args], { cwd });
 
 const quote = (a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : JSON.stringify(a));
 const show = (cmd, args) => `${cmd} ${args.filter((a, i, all) => !(a === '-c' || all[i - 1] === '-c')).map(quote).join(' ')}`;
@@ -127,7 +127,9 @@ const ACTIONS = {
       if (r.git.dirty === 0) fail('Nothing to commit.');
       if (r.git.detached) fail('Detached HEAD.');
       const st = (await readGit(ctx, ['status', '--short'], r.path)).stdout.trim();
-      return { risk: 'caution', title: `Commit all changes on ${r.git.branch}`, steps: [git(['add', '-A'], r.path), git(['commit', '-m', msg], r.path)], warnings: ['Files to be committed:\n' + st.split('\n').slice(0, 40).join('\n')], undo: 'git reset --soft HEAD~1' };
+      // `git add -A` must stage exactly what was previewed: the check step refuses if anything changed since.
+      const check = { kind: 'check', cmd: 'git', args: [...READONLY_GIT, 'status', '--short'], cwd: r.path, expect: st, display: 'check the changed files are still the ones listed below' };
+      return { risk: 'caution', title: `Commit all changes on ${r.git.branch}`, steps: [check, git(['add', '-A'], r.path), git(['commit', '-m', msg], r.path)], warnings: ['Files to be committed:\n' + st.split('\n').slice(0, 40).join('\n')], undo: 'git reset --soft HEAD~1' };
     },
   },
 
@@ -252,14 +254,19 @@ const ACTIONS = {
       const author = (await readGit(ctx, ['config', 'user.name'], r.path)).stdout.trim() || 'Author';
       const manifests = (r.deps && r.deps.manifests) || [];
       const content = t.build({ author, name: path.basename(r.path), manifests });
-      const steps = [{ kind: 'write', path: target, content, display: `write ${t.file} (${content.length} bytes)`, preview: content.split('\n').slice(0, 14).join('\n') }];
+      const steps = [{ kind: 'write', root: r.path, path: target, content, display: `write ${t.file} (${content.length} bytes)`, preview: content.split('\n').slice(0, 14).join('\n') }];
       if (p.commit) steps.push(git(['add', '--', t.file], r.path), git(['commit', '-m', `Add ${t.label}`, '--', t.file], r.path));
       return { risk: p.commit ? 'caution' : 'safe', title: `Add ${t.file}${p.commit ? ' and commit it' : ''}`, steps, undo: p.commit ? 'git reset --soft HEAD~1 && git rm --cached ' + t.file : `rm ${t.file}` };
     },
   },
 
+  // Uses the package manager the lockfile belongs to (npm on a yarn repo would add a second lockfile).
   'npm-install': {
-    plan: (r) => ({ risk: 'caution', title: 'Run npm install', steps: [{ kind: 'cmd', cmd: 'npm', args: ['install'], cwd: r.path, display: 'npm install', timeout: 300000 }], warnings: ["This executes the project's package install scripts."] }),
+    plan(r) {
+      const want = ((r.deps && r.deps.installer) || []).join(' ');
+      const [cmd, ...args] = (INSTALLERS.includes(want) ? want : 'npm install').split(' ');
+      return { risk: 'caution', title: `Run ${cmd} install`, steps: [{ kind: 'cmd', cmd, args, cwd: r.path, display: `${cmd} ${args.join(' ')}`, timeout: 300000 }], warnings: ["This executes the project's package install scripts."] };
+    },
   },
   // Remove detected clutter. Paths from the UI are only looked up in a FRESH scan, so anything
   // tracked by git, not detected as clutter, or outside the repo is refused.
@@ -301,20 +308,11 @@ const ACTIONS = {
       const add = entries.filter((e) => !have.has(e));
       if (!add.length) fail('.gitignore already has those rules.');
       const content = add.join('\n') + '\n';
-      return { risk: 'safe', title: `Add ${add.length} rule${add.length > 1 ? 's' : ''} to .gitignore`, steps: [{ kind: 'append', path: target, content, display: `append to .gitignore: ${add.join('  ')}`, preview: content }], undo: 'Delete the added lines from .gitignore.' };
+      return { risk: 'safe', title: `Add ${add.length} rule${add.length > 1 ? 's' : ''} to .gitignore`, steps: [{ kind: 'append', root: r.path, path: target, content, display: `append to .gitignore: ${add.join('  ')}`, preview: content }], undo: 'Delete the added lines from .gitignore.' };
     },
   },
 };
 
-const defaultCtx = (over = {}) => {
-  const ctx = { run, fs, readOnly: false, clutter: scanClutter, ...over };
-  // Recoverable removal. The app passes Electron's shell.trashItem; this fallback uses gio.
-  ctx.trash = ctx.trash || (async (p) => {
-    const t = await ctx.run('gio', ['trash', '--', p]);
-    if (!t.ok) throw new Error('Could not move to trash (is gio installed?): ' + t.stderr.trim());
-  });
-  return ctx;
-};
 
 async function plan(repo, action, ctx = {}) {
   ctx = defaultCtx(ctx);
@@ -346,54 +344,4 @@ async function plan(repo, action, ctx = {}) {
 }
 
 // Execute a plan produced by plan(). Stops at the first failing step.
-async function apply(p, ctx = {}) {
-  ctx = defaultCtx(ctx);
-  const results = [];
-  for (const s of p.steps) {
-    if (s.kind === 'write') {
-      try {
-        fs.mkdirSync(path.dirname(s.path), { recursive: true });
-        fs.writeFileSync(s.path, s.content, { flag: 'wx' });
-        results.push({ text: s.display, ok: true, out: '' });
-      } catch (e) {
-        results.push({ text: s.display, ok: false, out: String(e.message) });
-        return { ok: false, results };
-      }
-    } else if (s.kind === 'append') {
-      try {
-        const cur = fs.existsSync(s.path) ? fs.readFileSync(s.path, 'utf8') : '';
-        fs.appendFileSync(s.path, (cur && !cur.endsWith('\n') ? '\n' : '') + s.content);
-        results.push({ text: s.display, ok: true, out: '' });
-      } catch (e) {
-        results.push({ text: s.display, ok: false, out: String(e.message) });
-        return { ok: false, results };
-      }
-    } else if (s.kind === 'remove') {
-      try {
-        // Re-check at the last moment: the item must still sit directly inside the repo tree.
-        const rootReal = fs.realpathSync(s.root);
-        const parentReal = fs.realpathSync(path.dirname(s.path));
-        if (parentReal !== rootReal && !parentReal.startsWith(rootReal + path.sep)) throw new Error('Path is outside the repository.');
-        const st = fs.lstatSync(s.path); // throws ENOENT when it is already gone
-        if (s.fileStat && (st.size !== s.fileStat.size || st.mtimeMs !== s.fileStat.mtime)) throw new Error('Changed since the preview. Rescan and review it again.');
-        // Might have been committed since the preview: never remove anything git tracks.
-        const tr = await ctx.run('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', s.rel], { cwd: s.root });
-        if (!tr.ok || tr.stdout) throw new Error('Tracked by git (or could not be checked): not removed.');
-        if (s.mode === 'trash') await ctx.trash(s.path);
-        else fs.rmSync(s.path, { recursive: true, force: true });
-        results.push({ text: s.display, ok: true, out: '' });
-      } catch (e) {
-        if (e && e.code === 'ENOENT') { results.push({ text: s.display, ok: true, out: 'already gone' }); continue; }
-        results.push({ text: s.display, ok: false, out: String(e.message) });
-        return { ok: false, results };
-      }
-    } else {
-      const r = await ctx.run(s.cmd, s.args, { cwd: s.cwd, input: s.input, timeout: s.timeout || COMMAND_TIMEOUT_MS });
-      results.push({ text: s.display, ok: r.ok, out: (r.stdout + r.stderr).trim().slice(0, 2000) });
-      if (!r.ok) return { ok: false, results };
-    }
-  }
-  return { ok: true, results };
-}
-
-module.exports = { plan, apply, ACTIONS, PROTECTION, validBranch };
+module.exports = { plan, apply };

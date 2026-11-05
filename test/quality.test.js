@@ -172,3 +172,40 @@ test('single-digit numbers are never reported as unnamed repeated constants', as
     assert.deepEqual(q.magic.repeated.map((r) => r.value), [4242]);
   } finally { cleanup(dir); }
 });
+
+test('a debugger after many console.log calls is still reported, and counts are exact past the list cap', async () => {
+  const dir = repo();
+  try {
+    put(dir, 'src/a.js', lines(45, 'console.log("x");') + 'debugger;\n');
+    sh(dir, 'add', '-A');
+    const q = await scanQuality(dir, {});
+    assert.equal(q.breakpointCount, 1);
+    assert.equal(q.debugCount, 46);
+    assert.ok(q.advice.find((a) => a.id === 'q-debug'));
+    assert.match(q.advice.find((a) => a.id === 'q-console').title, /^45 /);
+  } finally { cleanup(dir); }
+});
+
+test('secrets: a { or $ elsewhere on the line no longer hides a hardcoded credential', () => {
+  const v = 'aB3dE5fG7hJ9kL1mN2';
+  assert.deepEqual(R.secretKinds(`cfg = { password: "${v}" }`), ['Hardcoded credential']);
+  assert.deepEqual(R.secretKinds(`$password = "${v}";`), ['Hardcoded credential']);
+  assert.deepEqual(R.secretKinds(`password = process.env.PW || "${v}"`), [], 'an env lookup is a default, not a secret');
+  assert.deepEqual(R.secretKinds('password = "${PASSWORD_FROM_ENV_X}"'), []);
+});
+
+test('lexer: code inside template ${...} is scanned; shell $#, PHP # comments and Rust raw strings are handled', () => {
+  const js = lex('const s = `${a ? `q` : 4242} ${"`"} t`; f(9999);', LANGS.js).code[0];
+  assert.match(js, /4242/);
+  assert.match(js, /9999/);
+  assert.ok(!js.includes('t`'), 'template text stays blanked');
+  assert.deepEqual(lex('n=${#arr[@]} # hi\n', LANGS.sh).comments, [' hi', '']);
+  assert.deepEqual(lex('$x = 5; # TODO 9\n', LANGS.php).comments[0], ' TODO 9');
+  assert.equal(lex('let s = r#"a"b"#; f(42);', LANGS.rs).code[0], 'let s = ""; f(42);');
+});
+
+test('two-letter constants such as KB count as named constants', () => {
+  assert.deepEqual(R.constantDef('const KB = 1024;'), { name: 'KB', value: 1024 });
+  assert.deepEqual(R.constantDef('const MASK = 0xff;'), { name: 'MASK', value: 255 });
+  assert.deepEqual(R.magicNumbers('const KB = 1024;'), []);
+});

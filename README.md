@@ -93,7 +93,7 @@ Requires `gh` and `git` on your `PATH`, and `gh auth login` completed.
 - The only network access is through your own `gh` CLI. There is no telemetry, no updater and no other server. The UI is sandboxed with a strict Content Security Policy.
 - Scans run read-only `git` commands with hooks and `core.fsmonitor` disabled, so opening an untrusted repo does not run its code.
 - Actions are planned by the app, previewed, and then run exactly as previewed. They only target branches, PRs and runs found in the last scan, or (for clutter) items found by a fresh scan at plan time. Right before removing anything GutCheck checks it is still unchanged and not tracked by git.
-- Files GutCheck keeps on your machine, in its app data folder: `settings.json` (workspace folder, read-only switch, tray options), `audit.log` (every change it made; trimmed to the latest 500 entries once it passes 1 MB) and `trend.json` (scores and totals per scan). Nothing is uploaded.
+- Files GutCheck keeps on your machine, in its app data folder: `settings.json` (workspace folder, read-only switch, tray options; written atomically, and a damaged copy is kept as `settings.json.bad`), `audit.log` (every change it made; trimmed to the latest 500 entries once it passes 1 MB) and `trend.json` (scores and totals per scan). Nothing is uploaded.
 
 ## Develop
 
@@ -104,7 +104,7 @@ npm test       # unit tests
 npm run dist   # build the AppImage into dist/
 ```
 
-`package.json` has an `overrides` entry that pins a patched `minimatch` inside `electron-builder`'s dependencies (the advisory is for glob-pattern DoS in build tooling; upstream still ships the vulnerable range). Remove it once `electron-builder` updates; `npm audit` should stay at 0.
+`package.json` has an `overrides` entry that lifts only the vulnerable `minimatch` versions (7.0.0 to 11.0.3, a glob-pattern DoS in build tooling) to a patched 11.x. Older majors that `glob` and `asar` need are left alone, because they are not affected and 11.x is not API-compatible with them. Remove it once `electron-builder` updates; `npm audit` should stay at 0 and `npm ls minimatch` should show nothing invalid.
 
 ### Releasing
 
