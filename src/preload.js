@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('api', {
   applyActions: (tokens) => ipcRenderer.invoke('action:apply', { tokens }),
   clutterScan: (dirs) => ipcRenderer.invoke('clutter:scan', { dirs }),
   copyReport: (dir) => ipcRenderer.invoke('report:copy', { dir }),
+  trend: () => ipcRenderer.invoke('trend:get'),
   audit: () => ipcRenderer.invoke('audit:list'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   openUrl: (u) => ipcRenderer.invoke('open:url', u),

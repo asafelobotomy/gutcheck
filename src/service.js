@@ -9,17 +9,47 @@ const github = require('./github');
 const { scanRepo } = require('./scanner');
 const { scanClutter, workspaceAdvice } = require('./clutter');
 const { buildReport } = require('./report');
+const Metrics = require('./renderer/metrics');
 
 const PLAN_TTL = 5 * 60 * 1000;
+const TREND_MAX = 365; // snapshots kept on disk
+const TREND_MERGE_MS = 10 * 60 * 1000; // scans closer together than this replace each other
 
 const publicPlan = (token, p) => ({ ok: true, token, type: p.type, repoPath: p.repoPath, repoName: p.repoName, title: p.title, risk: p.risk, display: p.display, warnings: p.warnings, undo: p.undo, body: p.body, note: p.note, confirmName: p.confirmName });
 
 // deps: { known: Map(path -> scan result), settings: () => obj, audit: (entry) => void,
-//         trash: (path) => Promise, clipboard: { writeText }, rescan?: (dir) => Promise<result> }
-function createService({ known, settings, audit, trash, clipboard, rescan = (d) => scanRepo(d, { deep: false }) }) {
+//         trash: (path) => Promise, clipboard: { writeText }, rescan?: (dir) => Promise<result>,
+//         trendStore?: { read(): array, write(array) } }
+function createService({ known, settings, audit, trash, clipboard, rescan = (d) => scanRepo(d, { deep: false }), trendStore = null }) {
   const plans = new Map(); // token -> { plan, expires } (only these stored plans can ever run)
   const busy = new Set(); // repo paths with an action in flight
   let clutterScanning = false;
+
+  // ---- Trend history: a small snapshot per scan (scores and totals only), local to this machine ----
+  const loadTrend = () => {
+    try { const a = trendStore && trendStore.read(); return Array.isArray(a) ? a.filter((e) => e && typeof e.ts === 'number') : []; } catch { return []; }
+  };
+  const saveTrend = (a) => { try { if (trendStore) trendStore.write(a.slice(-TREND_MAX)); } catch {} };
+
+  function recordScan(root, results) {
+    if (!trendStore || !results || !results.length) return;
+    const snap = Metrics.snapshot(results, root);
+    const all = loadTrend();
+    const last = all[all.length - 1];
+    if (last && last.root === snap.root && snap.ts - last.ts < TREND_MERGE_MS) {
+      snap.clutter = last.clutter ?? null; // keep a clutter size measured for the scan being replaced
+      all.pop();
+    }
+    all.push(snap);
+    saveTrend(all);
+  }
+
+  function recordClutter(root, bytes) {
+    const all = loadTrend();
+    for (let i = all.length - 1; i >= 0; i--) if (all[i].root === (root || '')) { all[i].clutter = bytes; saveTrend(all); return; }
+  }
+
+  const trend = () => loadTrend().filter((e) => e.root === (settings().root || '')).slice(-90);
 
   async function planActions(items) {
     if (!Array.isArray(items) || items.length === 0 || items.length > 200) return [{ ok: false, error: 'Bad request' }];
@@ -82,7 +112,9 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
           repos.push({ path: d, name: path.basename(d), items: [], advice: [], count: 0, totalSize: 0, error: String(e.message || e) });
         }
       }
-      return { ok: true, repos, workspace: Array.isArray(dirs) && dirs.length ? null : await wsAdvice(settings().root) };
+      const full = !(Array.isArray(dirs) && dirs.length);
+      if (full) recordClutter(settings().root, repos.reduce((n, r) => n + (r.totalSize || 0), 0));
+      return { ok: true, repos, workspace: full ? await wsAdvice(settings().root) : null };
     } finally {
       clutterScanning = false;
     }
@@ -103,7 +135,7 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
     return { ok: true, chars: text.length, repos: repos.length };
   }
 
-  return { planActions, applyActions, clutterScan, copyReport, _plans: plans };
+  return { planActions, applyActions, clutterScan, copyReport, recordScan, trend, _plans: plans };
 }
 
 module.exports = { createService };

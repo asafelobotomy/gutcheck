@@ -74,6 +74,7 @@ handle('scan:start', async (_e, { root, deep }) => {
       known.set(res.path, res);
       win.webContents.send('scan:repo', { res, done, total });
     });
+    service.recordScan(root, results);
     return { ok: true, count: results.length, rate: github.getRate() };
   } finally {
     scanning = false;
@@ -92,11 +93,17 @@ const auditFile = () => path.join(app.getPath('userData'), 'audit.log');
 function audit(entry) {
   try { fs.appendFileSync(auditFile(), JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n'); } catch {}
 }
-const service = createService({ known, settings: loadSettings, audit, trash: (f) => shell.trashItem(f), clipboard });
+const trendFile = () => path.join(app.getPath('userData'), 'trend.json');
+const trendStore = {
+  read: () => JSON.parse(fs.readFileSync(trendFile(), 'utf8')),
+  write: (a) => { const f = trendFile(); fs.writeFileSync(f + '.tmp', JSON.stringify(a)); fs.renameSync(f + '.tmp', f); },
+};
+const service = createService({ known, settings: loadSettings, audit, trash: (f) => shell.trashItem(f), clipboard, trendStore });
 
 handle('action:plan', (_e, { items }) => service.planActions(items));
 handle('action:apply', (_e, { tokens }) => service.applyActions(tokens));
 handle('clutter:scan', (_e, { dirs } = {}) => service.clutterScan(dirs));
+handle('trend:get', () => service.trend());
 handle('report:copy', (_e, { dir } = {}) => service.copyReport(dir));
 
 handle('audit:list', () => {

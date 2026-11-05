@@ -86,3 +86,41 @@ test('clutterScan covers known repos only and copyReport writes the clipboard wi
     assert.equal(clip.length, 1);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('trend history: one snapshot per scan, rapid rescans merge, scoped to the workspace, capped', async () => {
+  const { dir, known, s } = await setup();
+  try {
+    let disk = [];
+    const svc = createService({ known, settings: () => s, audit() {}, trash: async () => {}, clipboard: { writeText() {} }, trendStore: { read: () => disk, write: (a) => { disk = JSON.parse(JSON.stringify(a)); } } });
+    const results = [...known.values()];
+    svc.recordScan(s.root, results);
+    svc.recordScan(s.root, results); // within 10 minutes: replaces
+    assert.equal(disk.length, 1);
+    assert.deepEqual(Object.keys(disk[0].scores), [path.basename(dir)]);
+    assert.ok(!JSON.stringify(disk).includes(dir), 'no absolute paths on disk, only names and scores');
+
+    disk[0].ts -= 3600e3; // pretend the first scan was an hour ago
+    svc.recordScan(s.root, results);
+    assert.equal(disk.length, 2);
+    await svc.clutterScan(); // a full clutter scan stamps the latest snapshot
+    assert.equal(typeof disk[1].clutter, 'number');
+    assert.equal(svc.trend().length, 2);
+    s.root = '/some/other/root';
+    assert.equal(svc.trend().length, 0);
+
+    s.root = path.dirname(dir);
+    disk = Array.from({ length: 400 }, (_, i) => ({ ts: i, root: s.root, scores: {} }));
+    svc.recordScan(s.root, results);
+    assert.ok(disk.length <= 365);
+    assert.ok(svc.trend().length <= 90);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a corrupt or missing trend file is treated as empty', async () => {
+  const { dir, known, s } = await setup();
+  try {
+    const svc = createService({ known, settings: () => s, audit() {}, trash: async () => {}, clipboard: { writeText() {} }, trendStore: { read: () => { throw new Error('ENOENT'); }, write() {} } });
+    assert.deepEqual(svc.trend(), []);
+    svc.recordScan(s.root, [...known.values()]); // must not throw
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

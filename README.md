@@ -29,6 +29,12 @@ Everything is done from the repo view, or in bulk from the workspace overview ("
 
 Safety rails: a **Read-only** switch in the header disables every action, every change is recorded in **History**, many actions show an undo command, and GutCheck never deletes repos, changes visibility, force-pushes or rewrites history.
 
+## Dashboard
+
+After a scan GutCheck opens on a **Dashboard**: KPI cards (average health, errors, warnings, open PRs, failing CI, uncommitted and unpushed work, high-severity alerts, merged and stale branches, local-only repos, missing licences, reclaimable clutter) and charts for grade distribution, issues by category, repo activity, open PR age, health per repo and clutter size per repo. Click a repo bar, an attention row or a card to drill in. It is computed from the scan you already have, so it makes no extra GitHub calls; the clutter numbers appear once you run a clutter scan from the dashboard.
+
+An **issue heatmap** shows repos against problem categories (darker means more issues, colour is the worst severity). **Trends** show average health, errors and warnings, and clutter size across scans, and the cards show the change since the previous scan, plus the repos whose score moved most. GutCheck keeps one small snapshot per scan (scores and totals only, no paths or file names) in `trend.json` in its app data folder, scoped per workspace folder, capped at 365 snapshots; scans within 10 minutes of each other replace one another. Delete the file to reset the history.
+
 ## Copy for LLM
 
 **Copy for LLM** (on each repo, and on the Workspace overview for everything) puts a Markdown report on your clipboard: a status snapshot, open PRs, failing CI, detected clutter, and an ordered action plan with exact commands (secrets first, then saving work, CI/PRs, missing files, dependencies, branches, clutter, settings). Paste it into any LLM to have it do the fixing instead of using the app. The report tells the assistant to ask before destructive steps, never read `.env` contents, and treat PR titles and file names as data. It contains repo paths and names but no file contents.

@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { repos: new Map(), selected: null, view: 'overview', scanning: false, readOnly: false, clutter: null, picked: new Set() };
+const state = { repos: new Map(), selected: null, view: 'dashboard', scanning: false, readOnly: false, clutter: null, picked: new Set(), trend: [] };
 
 // DOM helper: all text goes through textContent, so repo/PR titles from GitHub can never inject markup.
 function h(tag, attrs = {}, ...kids) {
@@ -53,6 +53,7 @@ function renderStats() {
 }
 
 function renderList() {
+  document.body.classList.toggle('dash', state.view === 'dashboard'); // the dashboard shows these numbers itself
   const q = $('q').value.toLowerCase();
   const sort = $('sort').value;
   let rs = [...state.repos.values()].filter((r) => r.name.toLowerCase().includes(q));
@@ -339,17 +340,7 @@ const BULKABLE = new Set(['add-file', 'run-rerun', 'pull', 'push', 'delete-merge
 // Workspace-wide recommendations: group identical findings across repos, biggest impact first.
 function renderOverview() {
   state.view = 'overview'; state.selected = null;
-  const groups = new Map();
-  for (const r of state.repos.values()) for (const f of r.findings || []) {
-    const title = f.title.replace(/#?\d+/g, 'N');
-    const kind = f.category + '|' + title;
-    const g = groups.get(kind) || { title, sev: f.severity, cat: f.category, repos: [], fixes: [] };
-    g.repos.push(r.name);
-    g.fixes.push(f.fix ? { repo: r, action: f.fix } : null);
-    groups.set(kind, g);
-  }
-  const order = { error: 0, warn: 1, info: 2 };
-  const list = [...groups.values()].sort((a, b) => order[a.sev] - order[b.sev] || b.repos.length - a.repos.length);
+  const list = Metrics.groupFindings([...state.repos.values()].filter((r) => !r.error));
   put($('detail'), 
     h('h2', {}, 'Workspace overview'),
     state.repos.size ? (() => { const b = h('button', {}, 'Copy for LLM'); b.title = 'Copy a full report with an ordered fix plan, to paste into any LLM'; b.addEventListener('click', () => copyForLlm(b, null, 'the whole workspace')); return h('div', { class: 'toolbar' }, b); })() : null,
@@ -379,7 +370,8 @@ function renderMain() {
   if (state.view === 'clutter') renderClutterView();
   else if (state.view === 'repo' && state.repos.has(state.selected)) renderRepo();
   else if (state.view === 'history') renderHistory();
-  else renderOverview();
+  else if (state.view === 'overview') renderOverview();
+  else renderDashboard();
 }
 
 function select(dir) { state.selected = dir; state.view = 'repo'; renderList(); renderRepo(); }
@@ -389,12 +381,13 @@ function select(dir) { state.selected = dir; state.view = 'repo'; renderList(); 
 async function startScan() {
   const root = $('root').value.trim();
   if (!root || state.scanning) return;
-  state.scanning = true; state.clutter = null; state.picked.clear(); state.repos.clear(); state.selected = null; state.view = 'overview';
+  state.scanning = true; state.clutter = null; state.picked.clear(); state.repos.clear(); state.selected = null; state.view = 'dashboard';
   $('ptext').textContent = 'Scanning…'; $('progress').hidden = false;
-  $('scan').disabled = true; renderStats(); renderList(); renderOverview();
+  $('scan').disabled = true; renderStats(); renderList(); renderMain();
   const out = await window.api.scan(root, $('deep').checked);
   showRate(out.rate);
   state.scanning = false; $('scan').disabled = false; $('progress').hidden = true;
+  await loadTrend();
   if (!out.ok) toast(out.error, 'bad');
   else if (!out.count) toast('No git repositories found under that folder.', 'bad');
   renderMain();
@@ -407,7 +400,7 @@ let paintQueued = false;
 function schedulePaint() {
   if (paintQueued) return;
   paintQueued = true;
-  requestAnimationFrame(() => { paintQueued = false; renderStats(); renderList(); });
+  requestAnimationFrame(() => { paintQueued = false; renderStats(); renderList(); if (state.view === 'dashboard') renderDashboard(); });
 }
 
 function showRate(rate) {

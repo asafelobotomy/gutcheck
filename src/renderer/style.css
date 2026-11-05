@@ -75,3 +75,57 @@ pre.warnbox { border-left: 3px solid var(--warn); color: var(--warn); }
 .crow:hover { background: var(--panel); } .crow input { margin-top: 3px; }
 .cblock { margin-bottom: 22px; } .cblock h3 { display: flex; gap: 10px; align-items: center; }
 .badge.conf-high { color: var(--ok); } .badge.conf-medium { color: var(--warn); } .badge.conf-low { color: var(--muted); }
+
+/* dashboard */
+.kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 1px; border-top: 3px solid var(--line); }
+.kpi b { font-size: 24px; line-height: 1.1; } .kpi span { color: var(--muted); font-size: 12px; } .kpi i { color: var(--muted); font-size: 11px; font-style: normal; }
+.kpi.ok { border-top-color: var(--ok); } .kpi.warn { border-top-color: var(--warn); } .kpi.err { border-top-color: var(--err); } .kpi.info { border-top-color: var(--info); }
+.kpi.ok b { color: var(--ok); } .kpi.warn b { color: var(--warn); } .kpi.err b { color: var(--err); }
+.link { cursor: pointer; } .kpi.link:hover, .kpi.link:focus-visible { border-color: var(--accent); outline: none; }
+.panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+.panel h3 { margin: 0 0 2px; font-size: 14px; } .panel > .muted { margin: 0 0 10px; }
+.donut { display: flex; align-items: center; gap: 22px; }
+.donut .track { fill: none; stroke: var(--panel2); stroke-width: 16; } .donut .arc { fill: none; stroke-width: 16; }
+.donut .big { fill: var(--text); font-size: 26px; font-weight: 700; } .donut .small { fill: var(--muted); font-size: 10px; }
+.arc.c-ok { stroke: var(--ok); } .arc.c-info { stroke: var(--info); } .arc.c-warn { stroke: var(--warn); } .arc.c-err { stroke: var(--err); }
+.legend > div { margin: 4px 0; } .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
+.d-ok { background: var(--ok); } .d-info { background: var(--info); } .d-warn { background: var(--warn); } .d-err { background: var(--err); }
+.hbars { display: flex; flex-direction: column; gap: 5px; max-height: 340px; overflow: auto; }
+.hb { display: grid; grid-template-columns: 120px 1fr 56px; gap: 8px; align-items: center; font-size: 12px; border-radius: 4px; }
+.hb.link:hover { background: var(--panel2); }
+.hb .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .hb .val { text-align: right; color: var(--muted); }
+.hb .track { height: 10px; background: var(--panel2); border-radius: 5px; overflow: hidden; display: flex; }
+.hb .fill { height: 100%; border-radius: 5px; background: var(--info); }
+.fill.c-ok { background: var(--ok); } .fill.c-info { background: var(--info); } .fill.c-warn { background: var(--warn); } .fill.c-err { background: var(--err); }
+.track.stack .fill { border-radius: 0; } .fill.s-error { background: var(--err); } .fill.s-warn { background: var(--warn); } .fill.s-info { background: var(--info); }
+.cols { display: flex; gap: 10px; align-items: flex-end; height: 170px; }
+.col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; min-width: 0; }
+.col .barwrap { flex: 1; width: 100%; display: flex; align-items: flex-end; } .col .bar { width: 100%; border-radius: 4px 4px 0 0; background: var(--info); }
+.bar.warn { background: var(--warn); } .bar.info { background: var(--info); }
+.col .val { font-size: 12px; color: var(--muted); } .col .lbl { font-size: 10px; color: var(--muted); text-align: center; margin-top: 4px; }
+.attn .row { display: flex; gap: 10px; align-items: center; padding: 6px 4px; border-bottom: 1px solid var(--line); border-radius: 4px; }
+.attn .row:hover { background: var(--panel2); } .attn .n { min-width: 28px; text-align: right; font-weight: 700; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; } .chip { font-size: 11px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.chip.err { color: var(--err); border-color: var(--err); } .chip.ok { color: var(--ok); border-color: var(--ok); }
+body.dash #stats { display: none; }
+
+/* dashboard: trends + heatmap */
+.panel.wide { grid-column: 1 / -1; }
+.kpi i.d { font-weight: 600; } .kpi i.d.good { color: var(--ok); } .kpi i.d.bad { color: var(--err); } .b-ok { color: var(--ok); }
+.tchart .trend { width: 100%; height: auto; display: block; }
+.trend .grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; }
+.trend .ln { fill: none; stroke-width: 2; stroke-linejoin: round; } .trend .pt { stroke: var(--panel); stroke-width: 1.5; }
+.ln.ok { stroke: var(--ok); } .ln.err { stroke: var(--err); } .ln.warn { stroke: var(--warn); } .ln.info { stroke: var(--info); }
+.pt.ok { fill: var(--ok); } .pt.err { fill: var(--err); } .pt.warn { fill: var(--warn); } .pt.info { fill: var(--info); }
+.taxis { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-top: 2px; }
+.legend.row2 { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--muted); } .legend.row2 > span { display: inline-flex; align-items: center; }
+.heatwrap { max-height: 420px; overflow: auto; }
+.heat { display: grid; gap: 3px; align-items: stretch; }
+.heat .hh { font-size: 11px; color: var(--muted); text-align: center; padding: 2px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.heat .hn { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; align-self: center; } .heat .hn:hover { color: var(--accent); }
+.hm { min-height: 24px; border-radius: 4px; background: var(--panel2); display: grid; place-items: center; font-size: 11px; font-weight: 700; cursor: pointer; color: #0b0d12; }
+.hm-error-1 { background: color-mix(in srgb, var(--err) 35%, var(--panel2)); } .hm-error-2 { background: color-mix(in srgb, var(--err) 65%, var(--panel2)); } .hm-error-3 { background: var(--err); }
+.hm-warn-1 { background: color-mix(in srgb, var(--warn) 35%, var(--panel2)); } .hm-warn-2 { background: color-mix(in srgb, var(--warn) 65%, var(--panel2)); } .hm-warn-3 { background: var(--warn); }
+.hm-info-1 { background: color-mix(in srgb, var(--info) 35%, var(--panel2)); } .hm-info-2 { background: color-mix(in srgb, var(--info) 65%, var(--panel2)); } .hm-info-3 { background: var(--info); }
