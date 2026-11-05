@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { run } = require('./exec');
 const { TEMPLATES } = require('./templates');
+const { scanClutter, IGNORE_OK } = require('./clutter');
 
 class PlanError extends Error {}
 const fail = (msg) => { throw new PlanError(msg); };
@@ -271,10 +272,61 @@ const ACTIONS = {
   'npm-install': {
     plan: (r) => ({ risk: 'caution', title: 'Run npm install', steps: [{ kind: 'cmd', cmd: 'npm', args: ['install'], cwd: r.path, display: 'npm install', timeout: 300000 }], warnings: ["This executes the project's package install scripts."] }),
   },
+  // Remove detected clutter. Paths from the UI are only looked up in a FRESH scan, so anything
+  // tracked by git, not detected as clutter, or outside the repo is refused.
+  'clean-clutter': {
+    async plan(r, p, ctx) {
+      const want = [...new Set(Array.isArray(p.paths) ? p.paths : [])];
+      if (!want.length || want.length > 500 || want.some((x) => typeof x !== 'string')) fail('Choose at least one item.');
+      const found = new Map((await ctx.clutter(r.path)).items.map((i) => [i.path, i]));
+      const picked = want.map((x) => found.get(x) || fail(`"${x}" is no longer detected as clutter. Rescan and try again.`));
+      const chosen = new Set(want);
+      for (const it of picked) if (it.keep && chosen.has(it.keep)) fail(`"${it.path}" and the file it duplicates, "${it.keep}", are both selected. Keep one.`);
+      const steps = picked.map((it) => ({
+        kind: 'remove', root: r.path, path: path.join(r.path, ...it.path.split('/')), mode: it.mode,
+        display: it.mode === 'trash' ? `move to trash: ${it.path}${it.kind === 'dir' ? '/' : ''}` : `delete (regenerable): ${it.path}${it.kind === 'dir' ? '/' : ''}`,
+        note: it.reason,
+      }));
+      const env = picked.filter((it) => it.category === 'env');
+      const trashed = picked.filter((it) => it.mode === 'trash').length;
+      const warnings = [];
+      if (env.length) warnings.push(`Env files can hold secrets that exist nowhere else:\n${env.map((e) => e.path).join('\n')}\nThey go to your trash, so you can restore them.`);
+      return {
+        risk: env.length ? 'danger' : 'caution',
+        title: `Remove ${picked.length} clutter item${picked.length > 1 ? 's' : ''}`,
+        steps, warnings,
+        undo: trashed ? 'Restore from your trash. Regenerable caches are rebuilt by your tools.' : 'Regenerable caches are rebuilt by your tools.',
+      };
+    },
+  },
+
+  // Append known-safe ignore rules (from a fixed allowlist) to .gitignore.
+  'gitignore-append': {
+    plan(r, p, ctx) {
+      const entries = [...new Set(Array.isArray(p.entries) ? p.entries : [])];
+      if (!entries.length || !entries.every((e) => IGNORE_OK.has(e))) fail('Those rules are not on the list of rules GutCheck can add.');
+      const target = path.join(r.path, '.gitignore');
+      let cur = '';
+      try { cur = ctx.fs.readFileSync(target, 'utf8'); } catch {}
+      const have = new Set(cur.split('\n').map((l) => l.trim()));
+      const add = entries.filter((e) => !have.has(e));
+      if (!add.length) fail('.gitignore already has those rules.');
+      const content = add.join('\n') + '\n';
+      return { risk: 'safe', title: `Add ${add.length} rule${add.length > 1 ? 's' : ''} to .gitignore`, steps: [{ kind: 'append', path: target, content, display: `append to .gitignore: ${add.join('  ')}`, preview: content }], undo: 'Delete the added lines from .gitignore.' };
+    },
+  },
 };
 
 // Names the UI may request, in addition to the type -> plan mapping.
-const defaultCtx = (over = {}) => ({ run, fs, readOnly: false, ...over });
+const defaultCtx = (over = {}) => {
+  const ctx = { run, fs, readOnly: false, clutter: scanClutter, ...over };
+  // Recoverable removal. The app passes Electron's shell.trashItem; this fallback uses gio.
+  ctx.trash = ctx.trash || (async (p) => {
+    const t = await ctx.run('gio', ['trash', '--', p]);
+    if (!t.ok) throw new Error('Could not move to trash (is gio installed?): ' + t.stderr.trim());
+  });
+  return ctx;
+};
 
 async function plan(repo, action, ctx = {}) {
   ctx = defaultCtx(ctx);
@@ -316,6 +368,29 @@ async function apply(p, ctx = {}) {
         fs.writeFileSync(s.path, s.content, { flag: 'wx' });
         results.push({ text: s.display, ok: true, out: '' });
       } catch (e) {
+        results.push({ text: s.display, ok: false, out: String(e.message) });
+        return { ok: false, results };
+      }
+    } else if (s.kind === 'append') {
+      try {
+        const cur = fs.existsSync(s.path) ? fs.readFileSync(s.path, 'utf8') : '';
+        fs.appendFileSync(s.path, (cur && !cur.endsWith('\n') ? '\n' : '') + s.content);
+        results.push({ text: s.display, ok: true, out: '' });
+      } catch (e) {
+        results.push({ text: s.display, ok: false, out: String(e.message) });
+        return { ok: false, results };
+      }
+    } else if (s.kind === 'remove') {
+      try {
+        // Re-check at the last moment: the item must still sit directly inside the repo tree.
+        const rootReal = fs.realpathSync(s.root);
+        const parentReal = fs.realpathSync(path.dirname(s.path));
+        if (parentReal !== rootReal && !parentReal.startsWith(rootReal + path.sep)) throw new Error('Path is outside the repository.');
+        if (s.mode === 'trash') await ctx.trash(s.path);
+        else fs.rmSync(s.path, { recursive: true, force: true });
+        results.push({ text: s.display, ok: true, out: '' });
+      } catch (e) {
+        if (e && e.code === 'ENOENT') { results.push({ text: s.display, ok: true, out: 'already gone' }); continue; }
         results.push({ text: s.display, ok: false, out: String(e.message) });
         return { ok: false, results };
       }

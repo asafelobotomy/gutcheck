@@ -70,3 +70,8 @@ button.danger:not(:disabled) { background: var(--err); color: #1a0b0b; font-weig
 code { font: 12px ui-monospace, monospace; background: #0b0d12; padding: 2px 6px; border-radius: 4px; word-break: break-all; display: inline-block; margin: 2px 0; }
 pre.prev, pre.warnbox { font: 11px ui-monospace, monospace; background: #0b0d12; padding: 6px 8px; border-radius: 4px; margin: 4px 0; white-space: pre-wrap; max-height: 160px; overflow: auto; }
 pre.warnbox { border-left: 3px solid var(--warn); color: var(--warn); }
+
+.crow { display: flex; gap: 10px; align-items: flex-start; padding: 5px 8px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.crow:hover { background: var(--panel); } .crow input { margin-top: 3px; }
+.cblock { margin-bottom: 22px; } .cblock h3 { display: flex; gap: 10px; align-items: center; }
+.badge.conf-high { color: var(--ok); } .badge.conf-medium { color: var(--warn); } .badge.conf-low { color: var(--muted); }

@@ -29,6 +29,17 @@ Everything is done from the repo view, or in bulk from the workspace overview ("
 
 Safety rails: a **Read-only** switch in the header disables every action, every change is recorded in **History**, many actions show an undo command, and GutCheck never deletes repos, changes visibility, force-pushes or rewrites history.
 
+## Clutter & tidy-up
+
+The **Clutter & tidy-up** view scans every repo (read-only) for things nothing needs:
+
+- **Env files**: backups and copies (`.env.bak`, `.env (1)`, `.env.2024-01-02`), env files identical to another in the same folder, empty ones, and `.env.test` in repos with no tests. Templates such as `.env.example` are never flagged. Env files are only compared by checksum; their contents are never kept.
+- **Caches and test output**: `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `coverage/`, `htmlcov/`, `test-results/` and similar.
+- **Temp, backup and junk files**: `*.tmp`, `*.bak`, `*.orig`, swap files, `.DS_Store`, `Thumbs.db`, package-manager crash logs, and `name (1).ext` / `name copy.ext` copies (exact copies rate higher than diverged ones).
+- **Organisation advice**: committed or un-ignored `.env` files, missing `.env.example`, clutter missing from `.gitignore` (one-click append), several lockfiles, split `test`/`tests` or `doc`/`docs` folders, loose files and media in the repo root, plus workspace-level hints (projects without git, `foo-old` next to `foo`, the same remote cloned twice, inconsistent naming).
+
+Files tracked by git are never offered for removal. Removal shows every item first; env files need you to type the repo name, and anything that is not a regenerable cache goes to your trash rather than being deleted. Only high-confidence items are pre-selected.
+
 ## Install
 
 Download the AppImage from the [latest release](../../releases/latest), then:

@@ -4,6 +4,7 @@ const path = require('node:path');
 const { discover, scanRepo, scanAll } = require('./scanner');
 const github = require('./github');
 const actions = require('./actions');
+const { scanClutter, workspaceAdvice } = require('./clutter');
 const crypto = require('node:crypto');
 const { run } = require('./exec');
 
@@ -128,7 +129,7 @@ handle('action:apply', async (_e, { tokens }) => {
     if (busy.has(p.repoPath)) { out.push({ ok: false, repoName: p.repoName, error: 'Another action is running on this repo.' }); continue; }
     busy.add(p.repoPath);
     try {
-      const r = await actions.apply(p);
+      const r = await actions.apply(p, { trash: (f) => shell.trashItem(f) });
       audit({ repo: p.repoName, path: p.repoPath, action: p.type, risk: p.risk, title: p.title, ok: r.ok, steps: r.results.map((x) => ({ cmd: x.text, ok: x.ok })) });
       let res = null;
       try { res = await scanRepo(p.repoPath, { deep: false }); known.set(p.repoPath, res); } catch {}
@@ -138,6 +139,32 @@ handle('action:apply', async (_e, { tokens }) => {
     }
   }
   return out;
+});
+
+// ---- Clutter: read-only scan of repos already found by a scan; removal goes through actions ----
+let clutterScanning = false;
+handle('clutter:scan', async (_e, { dirs } = {}) => {
+  if (clutterScanning) return { ok: false, error: 'A clutter scan is already running' };
+  const targets = (Array.isArray(dirs) && dirs.length ? dirs : [...known.keys()]).filter((d) => known.has(d) && !known.get(d).error);
+  if (!targets.length) return { ok: false, error: 'Scan a workspace first.' };
+  clutterScanning = true;
+  try {
+    const repos = [];
+    for (const d of targets) {
+      try {
+        const c = await scanClutter(d);
+        repos.push({ path: d, name: path.basename(d), ...c });
+      } catch (e) {
+        repos.push({ path: d, name: path.basename(d), items: [], advice: [], count: 0, totalSize: 0, error: String(e.message || e) });
+      }
+    }
+    const root = loadSettings().root;
+    const all = [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name, originUrl: r.originUrl }));
+    const workspace = !dirs && root && fs.existsSync(root) ? await workspaceAdvice(root, all) : null;
+    return { ok: true, repos, workspace };
+  } finally {
+    clutterScanning = false;
+  }
 });
 
 handle('audit:list', () => {

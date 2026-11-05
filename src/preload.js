@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   rescan: (dir, deep) => ipcRenderer.invoke('scan:one', { dir, deep }),
   planActions: (items) => ipcRenderer.invoke('action:plan', { items }),
   applyActions: (tokens) => ipcRenderer.invoke('action:apply', { tokens }),
+  clutterScan: (dirs) => ipcRenderer.invoke('clutter:scan', { dirs }),
   audit: () => ipcRenderer.invoke('audit:list'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   openUrl: (u) => ipcRenderer.invoke('open:url', u),
