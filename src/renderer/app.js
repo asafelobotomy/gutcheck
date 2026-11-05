@@ -304,6 +304,7 @@ function renderRepo() {
   const mk = (label, fn) => { const b = h('button', {}, label); b.addEventListener('click', () => fn(b)); toolbar.append(b); };
   mk('Rescan', async (b) => { b.disabled = true; await refreshOne(r.path); });
   mk('Fetch & prune', () => runActions([{ repo: r, action: { type: 'fetch' } }]));
+  mk('Copy for LLM', (b) => copyForLlm(b, r.path, r.name));
   mk('Open folder', () => window.api.openFolder(r.path));
   if (r.remote) mk('Open on GitHub ↗', () => window.api.openUrl(r.remote.url));
   const cats = [...new Set(r.findings.map((f) => f.category))];
@@ -314,6 +315,15 @@ function renderRepo() {
     r.findings.length ? null : h('p', { class: 'ok-msg' }, 'No issues found. Nice.'),
     ...cats.flatMap((c) => [h('h3', {}, c), ...r.findings.filter((f) => f.category === c).map((f) => findingEl(r, f))]),
     ...prsPanel(r), ...branchesPanel(r), ...settingsPanel(r), ...filesPanel(r));
+}
+
+async function copyForLlm(b, dir, label) {
+  b.disabled = true;
+  try {
+    const out = await window.api.copyReport(dir);
+    if (!out.ok) return toast(out.error, 'bad');
+    toast(`Copied a ${Math.round(out.chars / 1000)}k-character report for ${label} to the clipboard. Paste it into your LLM. It includes repo paths, PR and branch titles and clutter file names, but no file contents.`);
+  } finally { b.disabled = false; }
 }
 
 async function refreshOne(dir) {
@@ -342,6 +352,7 @@ function renderOverview() {
   const list = [...groups.values()].sort((a, b) => order[a.sev] - order[b.sev] || b.repos.length - a.repos.length);
   put($('detail'), 
     h('h2', {}, 'Workspace overview'),
+    state.repos.size ? (() => { const b = h('button', {}, 'Copy for LLM'); b.title = 'Copy a full report with an ordered fix plan, to paste into any LLM'; b.addEventListener('click', () => copyForLlm(b, null, 'the whole workspace')); return h('div', { class: 'toolbar' }, b); })() : null,
     list.length ? h('p', { class: 'sub' }, 'Recommendations grouped across all repositories, most severe first. "Fix all" previews every command before anything runs.') : h('p', { class: 'empty' }, state.repos.size ? 'Nothing to recommend.' : 'Choose a workspace folder and press Scan.'),
     ...list.map((g) => {
       const bulk = g.fixes.every((f) => f && BULKABLE.has(f.action.type)) && g.fixes.length > 1;

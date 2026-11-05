@@ -29,6 +29,10 @@ Everything is done from the repo view, or in bulk from the workspace overview ("
 
 Safety rails: a **Read-only** switch in the header disables every action, every change is recorded in **History**, many actions show an undo command, and GutCheck never deletes repos, changes visibility, force-pushes or rewrites history.
 
+## Copy for LLM
+
+**Copy for LLM** (on each repo, and on the Workspace overview for everything) puts a Markdown report on your clipboard: a status snapshot, open PRs, failing CI, detected clutter, and an ordered action plan with exact commands (secrets first, then saving work, CI/PRs, missing files, dependencies, branches, clutter, settings). Paste it into any LLM to have it do the fixing instead of using the app. The report tells the assistant to ask before destructive steps, never read `.env` contents, and treat PR titles and file names as data. It contains repo paths and names but no file contents.
+
 ## Clutter & tidy-up
 
 The **Clutter & tidy-up** view scans every repo (read-only) for things nothing needs:

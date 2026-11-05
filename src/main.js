@@ -1,10 +1,11 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, session, clipboard } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { discover, scanRepo, scanAll } = require('./scanner');
 const github = require('./github');
 const actions = require('./actions');
 const { scanClutter, workspaceAdvice } = require('./clutter');
+const { buildReport } = require('./report');
 const crypto = require('node:crypto');
 const { run } = require('./exec');
 
@@ -165,6 +166,25 @@ handle('clutter:scan', async (_e, { dirs } = {}) => {
   } finally {
     clutterScanning = false;
   }
+});
+
+// ---- Copy for LLM: build a Markdown report from the last scan and put it on the clipboard ----
+handle('report:copy', async (_e, { dir } = {}) => {
+  const repos = dir ? [known.get(dir)].filter(Boolean) : [...known.values()];
+  if (!repos.length) return { ok: false, error: dir ? 'Unknown repo' : 'Scan a workspace first.' };
+  const clutter = new Map();
+  for (const r of repos) {
+    if (r.error) continue;
+    try { clutter.set(r.path, await scanClutter(r.path)); } catch {}
+  }
+  const root = loadSettings().root;
+  let workspace = [];
+  if (!dir && root && fs.existsSync(root)) {
+    try { workspace = await workspaceAdvice(root, repos.filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name, originUrl: r.originUrl }))); } catch {}
+  }
+  const text = buildReport({ repos, clutter, workspace, root: dir ? null : root });
+  clipboard.writeText(text);
+  return { ok: true, chars: text.length, repos: repos.length };
 });
 
 handle('audit:list', () => {

@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('api', {
   planActions: (items) => ipcRenderer.invoke('action:plan', { items }),
   applyActions: (tokens) => ipcRenderer.invoke('action:apply', { tokens }),
   clutterScan: (dirs) => ipcRenderer.invoke('clutter:scan', { dirs }),
+  copyReport: (dir) => ipcRenderer.invoke('report:copy', { dir }),
   audit: () => ipcRenderer.invoke('audit:list'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   openUrl: (u) => ipcRenderer.invoke('open:url', u),
