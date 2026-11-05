@@ -6,6 +6,7 @@
 // to treat it as data. Env file contents never reach this module.
 
 const { PROTECTION } = require('./protection');
+const { hygieneFix, REFS } = require('./report-fixes');
 const { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches } = require('./checks');
 const { daysAgo, sq, plural } = require('./util');
 
@@ -16,7 +17,7 @@ const SEV = { error: 0, warn: 1, info: 2 };
 const MAX_CLUTTER_LINES = 40;
 
 const PHASES = [
-  'Protect secrets',
+  'Protect secrets and access',
   'Save your work',
   'Fix CI and pull requests',
   'Add missing project files',
@@ -28,7 +29,6 @@ const PHASES = [
 ];
 
 const FILE_HELP = {
-  'no-license': ['LICENSE', 'Add a LICENSE file. MIT is a permissive default; ask the owner if they want something else.'],
   'no-readme': ['README.md', 'Add a README.md covering what the project is, how to install/run it, and how to run tests.'],
   'no-gitignore': ['.gitignore', 'Add a .gitignore suited to the languages used here (build output, dependencies, caches, .env files).'],
   'no-security': ['SECURITY.md', 'Add SECURITY.md explaining how to privately report vulnerabilities.'],
@@ -50,6 +50,8 @@ function fixFor(f, r) {
   const install = ((r.deps && r.deps.installer) || ['npm', 'install']).join(' ');
 
   if (id.startsWith('q-')) return qualityFix(id);
+  const hy = hygieneFix(id, r);
+  if (hy) return hy;
   if (id === 'env-tracked') return { phase: 0, rank: 0, why: 'Committed secrets are readable by anyone with repo access and stay in history.', cmds: ['# for each file listed above:', 'git rm --cached <file>', 'git commit -m "Stop tracking env files"'], note: 'Tell the owner to rotate every secret those files held. Removing them from history needs a history rewrite: do NOT do that without explicit approval.' };
   if (id === 'env-not-ignored') return { phase: 0, rank: 1, why: 'One careless "git add ." would commit your secrets.', cmds: ["printf '\\n.env\\n.env.*\\n!.env.example\\n' >> .gitignore"], note: 'Check .gitignore does not already contain these lines first.' };
   if (id === 'env-no-template') return { phase: 3, rank: 5, why: 'Others cannot tell which variables to set.', cmds: [], note: 'Create .env.example with the variable NAMES from the real .env and empty or fake values. Never copy real values.' };
@@ -72,7 +74,7 @@ function fixFor(f, r) {
   if (id.startsWith('pr-stale-')) return { phase: 2, rank: 5, why: `No activity for ${STALE_PR_DAYS}+ days.`, cmds: [`gh pr view ${num}${R} --comments`], note: `Decide with the owner: merge, update, or close (gh pr close ${num}${R} --comment "Closing as stale").` };
   if (id === 'ci-none') return { phase: 2, rank: 6, why: 'Nothing runs tests automatically.', cmds: [], note: `Add .github/workflows/ci.yml that installs dependencies and runs the test script${r.deps && r.deps.manifests && r.deps.manifests.includes('package.json') ? ' (Node project: use actions/setup-node and npm ci / npm test)' : ''}.` };
 
-  if (FILE_HELP[id]) return { phase: 3, rank: id === 'no-license' || id === 'no-readme' ? 0 : 1, why: 'Missing project file.', cmds: [], note: FILE_HELP[id][1] };
+  if (FILE_HELP[id]) return { phase: 3, rank: id === 'no-readme' ? 0 : 1, why: 'Missing project file.', cmds: [], note: FILE_HELP[id][1] + (id === 'no-readme' ? '' : ' A default in the owner\'s .github repository also counts.'), ref: id === 'no-security' ? REFS.security : REFS.healthFiles };
   if (id === 'no-description') return { phase: 3, rank: 6, why: 'Helps discovery and context.', cmds: slug ? [`gh repo edit ${slug} --description "<one sentence>"`] : [] };
 
   if (id.startsWith('no-lock-')) {
@@ -93,7 +95,8 @@ function fixFor(f, r) {
   }
 
   if (id === 'no-remote') return { phase: 7, rank: 0, why: 'Not backed up anywhere.', cmds: ['gh repo create <name> --private --source . --remote origin --push'], note: 'Ask the owner whether it should be private or public before creating it.' };
-  if (id === 'no-protection') return { phase: 7, rank: 1, why: 'Anyone with write access can push straight to the default branch.', cmds: slug ? [`echo '${JSON.stringify(PROTECTION.basic.body)}' | gh api -X PUT ${sq(`repos/${slug}/branches/${def}/protection`)} -H 'Accept: application/vnd.github+json' --input -`] : [], note: 'Needs admin rights; private repos on a free plan will get an error. Optional.' };
+  if (id === 'no-protection') return { phase: 7, rank: 1, why: 'Anyone with write access can force-push to, or delete, the default branch.', cmds: slug ? [`echo '${JSON.stringify(PROTECTION.basic.body)}' | gh api -X PUT ${sq(`repos/${slug}/branches/${def}/protection`)} -H 'Accept: application/vnd.github+json' --input -`] : [], note: 'Needs admin rights; private repos on a free plan will get an error. A ruleset (Settings > Rules) does the same job and can cover several branches. Requiring PRs blocks direct pushes, so ask the owner how they work first.', ref: REFS.rulesets };
+  if (id === 'no-license') return { phase: 3, rank: 0, why: r.remote && r.remote.isPublic ? 'Public code without a licence cannot legally be reused.' : 'Needed only once the code is shared.', cmds: [], note: 'Ask the owner which licence they want (MIT is a common permissive choice) and add it as LICENSE at the top level.', ref: REFS.license };
   if (id === 'inactive') return { phase: 7, rank: 2, why: 'No pushes for a year.', cmds: slug ? [`gh repo archive ${slug}   # only if the project is finished, ask first`] : [] };
   if (id === 'many-issues') return { phase: 7, rank: 3, why: 'Lots of open issues/PRs.', cmds: slug ? [`gh issue list${R} --state open --limit 50`] : [], note: 'Triage with the owner.' };
   if (id === 'ci-unavailable') return { phase: 7, rank: 4, why: 'GutCheck could not read CI status.', cmds: ['gh auth status'], note: `Reason given: ${t(f.detail)}` };
@@ -132,6 +135,8 @@ function snapshot(r) {
   else L.push('- Remote: none (local only)');
   L.push(`- Git: on \`${t(g.branch || 'DETACHED', LEN.short)}\`${g.upstream ? `, tracking \`${t(g.upstream, LEN.short)}\`` : ', no upstream'}; ahead ${g.ahead || 0}, behind ${g.behind || 0}, ${g.dirty || 0} uncommitted change${g.dirty === 1 ? '' : 's'}`);
   L.push(`- Branches: ${(g.branches || []).length} local, ${(g.remoteBranches || []).length} remote, ${(g.mergedBranches || []).length} merged`);
+  const hy = r.hygiene;
+  if (hy) L.push(`- Housekeeping: git data ${hy.storage.packKiB >= 1048576 ? (hy.storage.packKiB / 1048576).toFixed(1) + ' GB' : Math.round(hy.storage.packKiB / 1024) + ' MB'}, ${hy.stashes} stash${hy.stashes === 1 ? '' : 'es'}, ${hy.tags} tag${hy.tags === 1 ? '' : 's'}, ${hy.workflows ? hy.workflows.files : 0} workflow file${hy.workflows && hy.workflows.files === 1 ? '' : 's'}`);
   L.push(`- Open PRs: ${(r.prs || []).length}; failing CI runs: ${((r.ci && r.ci.failed) || []).length}; Dependabot alerts: ${(r.alerts || []).length}`);
   if (r.deps && r.deps.manifests && r.deps.manifests.length) L.push(`- Manifests: ${r.deps.manifests.join(', ')}`);
   return L.join('\n');
@@ -198,6 +203,7 @@ function renderSteps(steps, level = 2) {
     out.push(`Why: ${s.why}`);
     if (s.cmds.length) out.push('```bash\n' + s.cmds.join('\n') + '\n```');
     if (s.note) out.push(`Note: ${s.note}`);
+    if (s.ref) out.push(`Source: ${s.ref}`);
     out.push('');
   }
   return out.join('\n');
@@ -250,7 +256,7 @@ function buildReport({ repos, clutter = new Map(), quality = new Map(), workspac
     const sorted = [...repos].sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
     out.push('Repos, worst first:\n' + sorted.map((r) => `- ${t(r.name)}: ${r.error ? 'scan failed' : `${r.grade} (${r.score}/100), ${plural(r.findings.length, 'finding')}`}`).join('\n') + '\n');
     if (workspace.length) {
-      const ws = workspace.map((f) => ({ ...f, phase: 7, rank: 9, why: t(f.detail, LEN.detail), cmds: [], sev: f.severity }));
+      const ws = workspace.map((f) => ({ ...f, phase: 7, rank: 9, why: t(f.detail, LEN.detail), cmds: f.cmds || [], sev: f.severity }));
       out.push(`## Workspace-level tidy-up\n\n${renderSteps(ws.map((s) => ({ ...s, detail: '' })), 1)}`);
     }
     out.push('## Repositories\n\nHandle repos in the order listed above.\n');

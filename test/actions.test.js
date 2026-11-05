@@ -192,6 +192,24 @@ test('append and write refuse to follow a symlink out of the repo', async () => 
   }
 });
 
+test('hygiene fixes: worktree prune and security features plan the exact documented calls, admin only', async () => {
+  const wt = await plan(ghRepo(), { type: 'worktree-prune' });
+  assert.ok(wt.ok, wt.error);
+  assert.deepEqual(wt.display.map((d) => d.text), ['git worktree prune -v']);
+  const want = {
+    'code-scanning': 'gh api -X PATCH repos/o/demo/code-scanning/default-setup -f state=configured',
+    'private-reporting': 'gh api -X PUT repos/o/demo/private-vulnerability-reporting',
+    'push-protection': 'gh api -X PATCH repos/o/demo --input -',
+  };
+  for (const [feature, text] of Object.entries(want)) {
+    const p = await plan(ghRepo(), { type: 'security-enable', feature });
+    assert.ok(p.ok, feature);
+    assert.ok(p.display[0].text.startsWith(text), `${feature}: ${p.display[0].text}`);
+  }
+  const notAdmin = await plan(ghRepo({ remote: { ...ghRepo().remote, viewerPermission: 'WRITE' } }), { type: 'security-enable', feature: 'code-scanning' });
+  assert.equal(notAdmin.ok, false);
+});
+
 test('read-only mode and unknown actions are refused at plan time', async () => {
   const repo = ghRepo();
   assert.equal((await plan(repo, { type: 'fetch' }, { readOnly: true })).ok, false);

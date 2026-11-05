@@ -9,9 +9,16 @@ A desktop dashboard that gives you a health check across every GitHub project in
 - **CI**: failing workflow runs on the default branch
 - **Pull requests**: conflicts, failing checks, stale PRs, approved and mergeable PRs
 - **Branches**: uncommitted or unpushed work, behind upstream, merged and stale branches
-- **Licence and docs**: LICENSE, README, `.gitignore`, SECURITY, CONTRIBUTING, CODE_OF_CONDUCT, PR template
-- **Dependencies**: missing lockfiles, uninstalled packages, Dependabot alerts, outdated npm packages (Deep scan)
-- **Repo settings**: missing remote, unprotected default branch, inactivity
+- **Licence and docs**: LICENSE (an error only for public repos), README (and whether it says how to install or use the project), `.gitignore`, SECURITY, CONTRIBUTING, CODE_OF_CONDUCT, PR template. Files are found where GitHub looks (`.github/`, the root, `docs/`), and defaults from your account's `.github` repository count.
+- **Project setup**: CHANGELOG or GitHub releases for tagged versions, `.gitattributes`, `.editorconfig`, pinned Node/Python version, and for public repos CODEOWNERS, issue templates and topics
+- **Actions security**: script injection (`${{ github.event... }}` inside `run:`), `pull_request_target`/`workflow_run` that check out PR code, missing or `write-all` permissions, actions not pinned to a commit SHA, self-hosted runners on public repos, Dependabot not updating actions. Workflow files are read as text, never run.
+- **Git hygiene**: credentials or `http://` in the remote URL, stash pile-ups, branches whose upstream was deleted, stale worktrees, uninitialised submodules, repos nested inside repos, repository size (GitHub's 1 GB / 5 GB guidance), loose objects, and with Deep scan files of 50 MB+ anywhere in history
+- **Security features** (repos you administer): secret scanning, push protection, CodeQL default setup and private vulnerability reporting on public repos; Dependabot security updates everywhere
+- **Dependencies**: missing lockfiles, uninstalled packages (with the right package manager), Dependabot alerts, outdated npm packages (Deep scan)
+- **Repo settings**: missing remote, unprotected default branch (branch protection or an active ruleset both count), auto-delete of merged branches, inactivity
+- **Workspace**: loose files, projects without git, copies and duplicate clones, naming, missing global git email or gitignore, plain-text credential storage, and disk used by dependency folders of projects untouched for 90 days
+
+Where the advice comes from (GitHub docs, OpenSSF Scorecard, git documentation and community conventions) is listed in [docs/sources.md](docs/sources.md). The Copy for LLM report links the source next to each fix.
 
 Each repo gets a grade (A to D). A workspace overview groups the same issue across repos into ranked recommendations.
 

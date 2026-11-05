@@ -8,6 +8,7 @@ const actions = require('./actions');
 const github = require('./github');
 const { scanRepo } = require('./scanner');
 const { scanClutter, workspaceAdvice } = require('./clutter');
+const { devAdvice } = require('./workspace');
 const { buildReport } = require('./report');
 const Metrics = require('./renderer/metrics');
 const { scanQuality, normalizeSettings, LINE_LIMITS } = require('./quality');
@@ -98,10 +99,12 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
     return out;
   }
 
-  const wsRepos = () => [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name, originUrl: r.originUrl }));
+  // activeAt: newest of the last push and the newest local branch commit.
+  const activeAt = (r) => [(r.remote && r.remote.pushedAt), ...((r.git && r.git.branches) || []).map((b) => b.date)].filter(Boolean).sort().pop() || null;
+  const wsRepos = () => [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name, originUrl: r.originUrl, activeAt: activeAt(r) }));
   const wsAdvice = async (root) => {
     if (!root || !fs.existsSync(root)) return null;
-    try { return await workspaceAdvice(root, wsRepos()); } catch { return null; }
+    try { return [...(await workspaceAdvice(root, wsRepos())), ...(await devAdvice(wsRepos()))]; } catch { return null; }
   };
 
   // Read-only. `dirs` (optional) limits the scan to those repos, otherwise every known repo.

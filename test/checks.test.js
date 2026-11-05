@@ -77,6 +77,16 @@ test('public repos get community-file nudges, private ones do not', () => {
   assert.ok(!checkFiles({ ...base, remote: { isPublic: false, description: 'x' } }).some((f) => f.id === 'no-security'));
 });
 
+test('community files: defaults from the owner\'s .github repo count; licence severity follows visibility', () => {
+  const files = { license: false, readme: true, gitignore: true, prTemplate: true };
+  const withDefaults = checkFiles({ files, remote: { isPublic: true, description: 'x', securityPolicy: true, contributing: true, codeOfConduct: true } }).map((f) => f.id);
+  assert.deepEqual(withDefaults, ['no-license'], 'GitHub-provided defaults are not reported missing');
+  const sev = (remote) => checkFiles({ files, remote }).find((f) => f.id === 'no-license').severity;
+  assert.equal(sev({ isPublic: true, description: 'x', securityPolicy: true, contributing: true, codeOfConduct: true }), 'error');
+  assert.equal(sev({ isPublic: false, description: 'x' }), 'info');
+  assert.equal(sev(null), 'info');
+});
+
 test('repo settings: unprotected default branch and long inactivity', () => {
   const ids = checkRepoSettings({ remote: { archived: false, defaultBranch: 'main', pushedAt: iso(400), openIssues: 30 }, protection: false }).map((f) => f.id);
   assert.deepEqual(ids.sort(), ['inactive', 'many-issues', 'no-protection']);

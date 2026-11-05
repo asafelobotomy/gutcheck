@@ -144,6 +144,7 @@ async function scanClutter(dir) {
   const trackedClutter = [];
   const liveEnv = []; // env files that are kept (rel paths)
   const root = { files: [], dirs: [], names: new Set() };
+  const nested = []; // git repos inside this one that are not submodules
   let seen = 0;
   let truncated = false;
 
@@ -194,7 +195,9 @@ async function scanClutter(dir) {
     let ents;
     try { ents = await fsp.readdir(abs, { withFileTypes: true }); } catch { return; }
     // Nested repos, git worktrees and virtualenvs are separate things: leave them alone.
-    if (depth > 0 && ents.some((e) => e.name === '.git' || e.name === 'pyvenv.cfg')) return;
+    // A .git FILE is a linked worktree or a submodule checkout (it points back at a git dir): not a stray repo.
+    if (depth > 0 && ents.some((e) => e.name === '.git')) { if (nested.length < 20 && ents.some((e) => e.name === '.git' && e.isDirectory())) nested.push(rel); return; }
+    if (depth > 0 && ents.some((e) => e.name === 'pyvenv.cfg')) return;
     if (depth === 0) {
       for (const e of ents) {
         root.names.add(e.name);
@@ -266,12 +269,18 @@ async function scanClutter(dir) {
   const order = { env: 0, duplicate: 1, backup: 2, temp: 3, junk: 4, cache: 5, 'test-artifact': 6, log: 7 };
   items.sort((a, b) => (order[a.category] ?? 9) - (order[b.category] ?? 9) || a.path.localeCompare(b.path));
 
-  const advice = buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, root });
+  let gitmodules = '';
+  try { gitmodules = await fsp.readFile(path.join(dir, '.gitmodules'), 'utf8'); } catch {}
+  const subs = new Set([...gitmodules.matchAll(/^\s*path\s*=\s*(.+?)\s*$/gm)].map((m) => m[1]));
+  // Declared submodules and git-ignored folders (build areas, vendored checkouts) are deliberate.
+  const nestedIgnored = await ignoredSet(dir, nested);
+  const strays = nested.filter((n) => !subs.has(n) && !nestedIgnored.has(n));
+  const advice = buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, root, nested: strays });
   return { items, advice, count: items.length, totalSize: items.reduce((n, i) => n + i.size, 0), truncated };
 }
 
 
-function buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, root }) {
+function buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, root, nested = [] }) {
   const out = [];
   const add = (id, severity, title, detail, fix) => out.push({ id, category: 'Organisation', severity, title, detail, fix });
 
@@ -290,6 +299,9 @@ function buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, ro
     add('clutter-not-ignored', 'warn', `${plural(patterns.length, 'clutter pattern is', 'clutter patterns are')} not in .gitignore`, `${list(patterns, 8)}. Ignoring them stops the clutter coming back into commits.`, { type: 'gitignore-append', label: 'Add to .gitignore', entries: patterns });
   if (trackedClutter.length)
     add('tracked-clutter', 'warn', `${plural(trackedClutter.length, 'clutter file is', 'clutter files are')} committed`, `${list(trackedClutter)}. Untrack with "git rm --cached" and ignore them.`);
+
+  if (nested.length)
+    add('nested-repo', 'warn', `${plural(nested.length, 'git repository', 'git repositories')} inside this repo`, `${list(nested)}. This repo does not track their files, so they are easy to lose or commit by accident. Make each a submodule, or move it out.`);
 
   const locks = LOCKFILES.filter((l) => root.names.has(l));
   if (locks.length > 1) add('multiple-lockfiles', 'warn', 'More than one lockfile', `${locks.join(', ')}. Pick one package manager and delete the others, or installs will drift apart.`);

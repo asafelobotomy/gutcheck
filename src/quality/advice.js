@@ -35,8 +35,10 @@ function buildAdvice(q, lim) {
 
   if (q.markers.total)
     add('q-markers', q.markers.FIXME + q.markers.HACK ? 'warn' : 'info', `${plural(q.markers.total, 'TODO/FIXME marker')}`, `TODO ${q.markers.TODO}, FIXME ${q.markers.FIXME}, HACK ${q.markers.HACK}, XXX ${q.markers.XXX}. ${list(q.markers.items.map((m) => `${at(m)}`), 4)}.`);
+  // GitHub warns on files of 50 MiB and rejects pushes with files over 100 MiB.
+  const biggest = q.largeFiles.length ? q.largeFiles[0].size : 0;
   if (q.largeFiles.length)
-    add('q-large-files', 'warn', `${plural(q.largeFiles.length, 'file')} over ${fmtSize(lim.bigFile)}`, `${list(q.largeFiles.map((f) => `${f.path} (${fmtSize(f.size)})`), 5)}. Large binaries bloat clones: use Git LFS or keep them out of the repo.`);
+    add('q-large-files', biggest > 100 * 1048576 ? 'error' : biggest >= 50 * 1048576 ? 'warn' : 'info', `${plural(q.largeFiles.length, 'file')} over ${fmtSize(lim.bigFile)}`, `${list(q.largeFiles.map((f) => `${f.path} (${fmtSize(f.size)})`), 5)}. Large binaries bloat clones${biggest > 100 * 1048576 ? ' and GitHub rejects files over 100 MB' : ''}: use Git LFS, release assets, or keep them out of the repo.`);
   if (q.sourceFiles >= 5 && !q.testFiles) add('q-no-tests', 'info', 'No test files found', `${q.sourceFiles} source files and no tests. Add some so changes can be checked.`);
   if (q.truncated) add('q-truncated', 'info', 'Very large repo: scan was capped', `Only the first ${lim.maxFiles} files were analysed.`);
   return out;

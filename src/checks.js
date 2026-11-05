@@ -3,6 +3,7 @@
 // `fix` is an optional action descriptor the UI can offer as a button.
 
 const { daysAgo, DAYS_PER_YEAR } = require('./util');
+const { checkWorkflows, checkGitHygiene, checkProject, checkSecurityFeatures } = require('./checks-hygiene');
 
 const { STALE_BRANCH_DAYS } = require('./renderer/metrics'); // one value for findings and the dashboard
 
@@ -72,13 +73,17 @@ function checkFiles(s) {
   const out = [];
   const f = s.files;
   const add = (id, sev, title, detail, fix) => out.push({ id, category: 'Docs & Licence', severity: sev, title, detail, fix });
-  if (!f.license) add('no-license', 'error', 'Missing LICENSE', 'Without a licence, others have no right to use or contribute to the code.', { type: 'add-file', label: 'Add MIT licence', template: 'license' });
+  const pub = !!(s.remote && s.remote.isPublic);
+  const r = s.remote || {};
+  // Public code without a licence cannot legally be reused; for private or local repos it only matters if that changes.
+  if (!f.license) add('no-license', pub ? 'error' : 'info', 'Missing LICENSE', pub ? 'Without a licence nobody may legally use, copy or contribute to the code.' : 'Not needed while private, but add one before you share it.', { type: 'add-file', label: 'Add MIT licence', template: 'license' });
   if (!f.readme) add('no-readme', 'error', 'Missing README', 'Describe what the project is and how to run it.', { type: 'add-file', label: 'Create README', template: 'readme' });
   if (!f.gitignore) add('no-gitignore', 'warn', 'Missing .gitignore', 'Build output and secrets may get committed.', { type: 'add-file', label: 'Create .gitignore', template: 'gitignore' });
-  if (s.remote && s.remote.isPublic) {
-    if (!f.security) add('no-security', 'info', 'Missing SECURITY.md', 'Tell people how to report vulnerabilities.', { type: 'add-file', label: 'Add SECURITY.md', template: 'security' });
-    if (!f.contributing) add('no-contributing', 'info', 'Missing CONTRIBUTING.md', 'Explain how to contribute.', { type: 'add-file', label: 'Add CONTRIBUTING.md', template: 'contributing' });
-    if (!f.codeOfConduct) add('no-coc', 'info', 'Missing CODE_OF_CONDUCT.md', 'Set community expectations.', { type: 'add-file', label: 'Add code of conduct', template: 'conduct' });
+  // GitHub also counts defaults from the owner's .github repository (the remote.* flags include those).
+  if (pub && !r.isFork) {
+    if (!f.security && !r.securityPolicy) add('no-security', 'warn', 'No security policy', 'Tell people how to report vulnerabilities privately (SECURITY.md).', { type: 'add-file', label: 'Add SECURITY.md', template: 'security' });
+    if (!f.contributing && !r.contributing) add('no-contributing', 'info', 'Missing CONTRIBUTING.md', 'Explain how to contribute.', { type: 'add-file', label: 'Add CONTRIBUTING.md', template: 'contributing' });
+    if (!f.codeOfConduct && !r.codeOfConduct) add('no-coc', 'info', 'Missing CODE_OF_CONDUCT.md', 'Set community expectations.', { type: 'add-file', label: 'Add code of conduct', template: 'conduct' });
   }
   if (s.remote && !f.prTemplate && s.remote.isPublic) add('no-pr-template', 'info', 'No pull request template', 'Add .github/pull_request_template.md.', { type: 'add-file', label: 'Add PR template', template: 'pr-template' });
   if (s.remote && !s.remote.description) add('no-description', 'info', 'Repo has no GitHub description', 'Helps discovery and sets context.', { type: 'repo-edit', label: 'Set description…' });
@@ -113,7 +118,9 @@ function checkRepoSettings(s) {
   }
   if (s.remote.archived) out.push({ id: 'archived', category: 'Repo', severity: 'info', title: 'Repository is archived', detail: 'Read-only on GitHub.' });
   if (s.protection === false && !s.remote.archived)
-    out.push({ id: 'no-protection', category: 'Repo', severity: 'info', title: `Default branch ${s.remote.defaultBranch} is unprotected`, detail: 'Consider requiring PR review and status checks.', fix: { type: 'protect-branch', label: 'Protect…', preset: 'basic' } });
+    out.push({ id: 'no-protection', category: 'Repo', severity: s.remote.isPublic ? 'warn' : 'info', title: `Default branch ${s.remote.defaultBranch} is unprotected`, detail: 'No branch protection rule or active ruleset. At minimum block force-pushes and deletion; ideally require PRs and status checks.', fix: { type: 'protect-branch', label: 'Protect…', preset: 'basic' } });
+  if (s.remote.deleteBranchOnMerge === false && !s.remote.archived && s.remote.viewerPermission === 'ADMIN')
+    out.push({ id: 'no-auto-delete', category: 'Repo', severity: 'info', title: 'Merged branches are not deleted automatically', detail: 'Head branches pile up after every merged PR.', fix: { type: 'repo-edit', label: 'Turn on auto-delete…', deleteBranchOnMerge: true } });
   if (s.remote.openIssues > 25) out.push({ id: 'many-issues', category: 'Repo', severity: 'info', title: `${s.remote.openIssues} open issues/PRs`, detail: 'Consider triaging.' });
   const pushed = daysAgo(s.remote.pushedAt);
   if (pushed != null && pushed > DAYS_PER_YEAR && !s.remote.archived) out.push({ id: 'inactive', category: 'Repo', severity: 'info', title: `No pushes in ${pushed} days`, detail: 'Archive it if it is finished.' });
@@ -123,7 +130,8 @@ function checkRepoSettings(s) {
 const WEIGHT = { error: 15, warn: 5, info: 1 };
 
 function evaluate(snapshot) {
-  const findings = [...checkCI(snapshot), ...checkPRs(snapshot), ...checkBranches(snapshot), ...checkFiles(snapshot), ...checkDeps(snapshot), ...checkRepoSettings(snapshot)];
+  const findings = [...checkCI(snapshot), ...checkPRs(snapshot), ...checkBranches(snapshot), ...checkFiles(snapshot), ...checkDeps(snapshot), ...checkRepoSettings(snapshot),
+    ...checkWorkflows(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkSecurityFeatures(snapshot)];
   const penalty = findings.reduce((n, f) => n + WEIGHT[f.severity], 0);
   const score = Math.max(0, 100 - penalty);
   const order = { error: 0, warn: 1, info: 2 };

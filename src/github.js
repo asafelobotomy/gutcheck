@@ -20,7 +20,12 @@ const NAME_RE = /^[A-Za-z0-9._-]+$/;
 
 const FRAGMENT = `
 fragment F on Repository {
-  url description isPrivate isArchived pushedAt viewerPermission hasVulnerabilityAlertsEnabled deleteBranchOnMerge
+  url description isPrivate isArchived isFork pushedAt viewerPermission hasVulnerabilityAlertsEnabled deleteBranchOnMerge
+  hasIssuesEnabled isSecurityPolicyEnabled
+  contributingGuidelines { url } codeOfConduct { key }
+  repositoryTopics(first: 1) { totalCount }
+  latestRelease { tagName }
+  rulesets(first: 20, includeParents: true) { nodes { enforcement target conditions { refName { include exclude } } } }
   issues(states: OPEN) { totalCount }
   licenseInfo { key }
   defaultBranchRef { name branchProtectionRule { id } }
@@ -62,8 +67,22 @@ function rollup(state) {
   return 'PENDING';
 }
 
+// An active branch ruleset (repo or inherited from the org) that covers the default branch.
+// Readers can see active rulesets, so this works without admin rights.
+function rulesetCovers(rulesets, branch) {
+  return ((rulesets && rulesets.nodes) || []).some((r) => {
+    if (r.enforcement !== 'ACTIVE' || r.target !== 'BRANCH') return false;
+    const inc = (r.conditions && r.conditions.refName && r.conditions.refName.include) || [];
+    const exc = (r.conditions && r.conditions.refName && r.conditions.refName.exclude) || [];
+    const hit = (pats) => pats.some((p) => p === '~ALL' || p === '~DEFAULT_BRANCH' || p === `refs/heads/${branch}`);
+    return hit(inc) && !hit(exc);
+  });
+}
+
 function toSnapshot(ref, n) {
   const isAdmin = n.viewerPermission === 'ADMIN';
+  const branch = n.defaultBranchRef && n.defaultBranchRef.name;
+  const ruleset = rulesetCovers(n.rulesets, branch);
   return {
     remote: {
       owner: ref.owner,
@@ -79,6 +98,15 @@ function toSnapshot(ref, n) {
       viewerPermission: n.viewerPermission,
       alertsEnabled: n.hasVulnerabilityAlertsEnabled,
       deleteBranchOnMerge: n.deleteBranchOnMerge,
+      isFork: n.isFork,
+      hasIssues: n.hasIssuesEnabled,
+      topics: n.repositoryTopics ? n.repositoryTopics.totalCount : null,
+      latestRelease: n.latestRelease && n.latestRelease.tagName,
+      // These include defaults inherited from the owner's .github repository.
+      securityPolicy: n.isSecurityPolicyEnabled,
+      contributing: !!n.contributingGuidelines,
+      codeOfConduct: !!n.codeOfConduct,
+      ruleset,
     },
     prs: ((n.pullRequests && n.pullRequests.nodes) || []).map((p) => ({
       number: p.number, title: p.title, url: p.url, isDraft: p.isDraft, updatedAt: p.updatedAt,
@@ -86,7 +114,8 @@ function toSnapshot(ref, n) {
       statusCheckRollup: rollup(p.commits && p.commits.nodes[0] && p.commits.nodes[0].commit.statusCheckRollup && p.commits.nodes[0].commit.statusCheckRollup.state),
     })),
     // Only admins can see protection rules; for everyone else "no rule visible" means unknown, not unprotected.
-    protection: n.defaultBranchRef && n.defaultBranchRef.branchProtectionRule ? true : isAdmin ? false : null,
+    // Rulesets count too (GitHub stacks them with classic protection).
+    protection: (n.defaultBranchRef && n.defaultBranchRef.branchProtectionRule) || ruleset ? true : isAdmin ? false : null,
     alerts: ((n.vulnerabilityAlerts && n.vulnerabilityAlerts.nodes) || []).map((a) => ({ severity: a.securityVulnerability && String(a.securityVulnerability.severity || '').toLowerCase() })),
   };
 }
@@ -179,4 +208,32 @@ async function fetchFailedRunsUncached(ref, defaultBranch, cwd) {
   return { failed, error: null };
 }
 
-module.exports = { fetchRepos, fetchFailedRuns, refreshRate, getRate };
+// Security feature settings. Only admins can read them, so callers ask for repos they administer.
+// security_and_analysis is null when not visible; 404/403 answers mean "not available", not "off".
+const secCache = new Map();
+async function fetchSecurity(ref, opts = {}) {
+  const key = `${ref.owner}/${ref.name}`;
+  const hit = secCache.get(key);
+  if (!opts.force && hit && Date.now() - hit.at < TTL_MS) return hit.val;
+  if (rate.core && rate.core.remaining < MIN_CORE) return null;
+  const slug = `repos/${ref.owner}/${ref.name}`;
+  const [repo, cs, pvr] = await Promise.all([
+    json('gh', ['api', slug, '--jq', '.security_and_analysis']),
+    json('gh', ['api', `${slug}/code-scanning/default-setup`, '--jq', '{state: .state}']),
+    json('gh', ['api', `${slug}/private-vulnerability-reporting`]),
+  ]);
+  noteCall('core', 3);
+  const st = (o, k) => (o && o[k] && o[k].status) || null;
+  const sa = repo.ok ? repo.data : null;
+  const val = {
+    secretScanning: st(sa, 'secret_scanning'),
+    pushProtection: st(sa, 'secret_scanning_push_protection'),
+    securityUpdates: st(sa, 'dependabot_security_updates'),
+    codeScanning: cs.ok && cs.data ? cs.data.state : null,
+    privateReporting: pvr.ok && pvr.data ? !!pvr.data.enabled : null,
+  };
+  secCache.set(key, { at: Date.now(), val });
+  return val;
+}
+
+module.exports = { fetchRepos, fetchFailedRuns, fetchSecurity, refreshRate, getRate, rulesetCovers };

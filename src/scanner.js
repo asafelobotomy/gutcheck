@@ -3,6 +3,7 @@ const path = require('node:path');
 const { run, git } = require('./exec');
 const { HEAVY_DIRS, NODE_LOCKFILES, installCommand, cmpVersion } = require('./util');
 const { evaluate } = require('./checks');
+const { collectHygiene } = require('./hygiene');
 const gh = require('./github');
 
 const SKIP = new Set(HEAVY_DIRS); // dot-folders are skipped separately
@@ -93,16 +94,21 @@ function collectFiles(dir) {
   try {
     ghNames = fs.readdirSync(gh_);
   } catch {}
-  const any = (re) => has(re) || ghNames.some((n) => re.test(n));
+  let docsNames = [];
+  try { docsNames = fs.readdirSync(path.join(dir, 'docs')); } catch {}
+  // GitHub looks for community health files in .github/, the root, then docs/.
+  const any = (re) => has(re) || ghNames.some((n) => re.test(n)) || docsNames.some((n) => re.test(n));
   return {
-    license: has(/^(licen[cs]e|copying|unlicense)(\.[a-z]+)?$/i),
-    readme: has(/^readme(\.[a-z]+)?$/i),
+    // A licence must sit at the top level (it ships with clones); LICENSES/ is the REUSE layout.
+    license: has(/^(licen[cs]e|copying|copyright|unlicense)([.-][\w.-]+)?$/i) || names.includes('LICENSES'),
+    readme: any(/^readme(\.[a-z]+)?$/i),
     gitignore: names.includes('.gitignore'),
     security: any(/^security(\.[a-z]+)?$/i),
     contributing: any(/^contributing(\.[a-z]+)?$/i),
     codeOfConduct: any(/^code_of_conduct(\.[a-z]+)?$/i),
     dependabotConfig: ghNames.some((n) => /^dependabot\.ya?ml$/i.test(n)),
-    prTemplate: ghNames.some((n) => /^pull_request_template/i.test(n)) || has(/^pull_request_template/i),
+    dependabotActions: (() => { const n = ghNames.find((x) => /^dependabot\.ya?ml$/i.test(x)); return n ? /package-ecosystem:\s*['"]?github-actions\b/.test(safeRead(path.join(gh_, n))) : null; })(),
+    prTemplate: any(/^pull_request_template(\.[a-z]+)?$/i) || ghNames.includes('PULL_REQUEST_TEMPLATE'),
     names,
   };
 }
@@ -161,15 +167,17 @@ const safeJSON = (p) => {
 // Everything that needs no network: git state, files, manifests.
 async function collectLocal(dir, opts) {
   // Strip any user:token@ from the URL so credentials never reach the UI, logs or reports.
-  const originUrl = (await git(['remote', 'get-url', 'origin'], { cwd: dir })).stdout.trim().replace(/^([a-z+]+:\/\/)[^/@]*@/i, '$1');
+  const rawOrigin = (await git(['remote', 'get-url', 'origin'], { cwd: dir })).stdout.trim();
+  const originUrl = rawOrigin.replace(/^([a-z+]+:\/\/)[^/@]*@/i, '$1');
   const ref = parseGithubRemote(originUrl);
   const files = collectFiles(dir);
   const wfDir = path.join(dir, '.github', 'workflows');
   let hasWorkflows = false;
   try { hasWorkflows = fs.readdirSync(wfDir).length > 0; } catch {} // missing, or not a folder
   const [g, deps] = await Promise.all([collectGit(dir), collectDeps(dir, files.names, opts.deep)]);
+  const hygiene = await collectHygiene(dir, { names: files.names, rawOrigin, deep: opts.deep, branch: g.branch });
   delete files.names;
-  return { dir, ref, originUrl, files, hasWorkflows, git: g, deps };
+  return { dir, ref, originUrl, files, hasWorkflows, git: g, deps, hygiene };
 }
 
 const EMPTY_GH = () => ({ remote: null, prs: [], ci: { failed: [], error: null }, protection: null, alerts: [] });
@@ -182,6 +190,7 @@ async function finish(local, ghRes, opts) {
     if (ghRes && ghRes.ok) {
       remote = { ...ghRes.snap, ci: { failed: [], error: null } };
       if (local.hasWorkflows && !remote.remote.archived) remote.ci = await gh.fetchFailedRuns(ref, remote.remote.defaultBranch, dir, { force: opts.force });
+      if (remote.remote.viewerPermission === 'ADMIN' && !remote.remote.archived) remote.security = await gh.fetchSecurity(ref, { force: opts.force });
     } else {
       remote.remote = { owner: ref.owner, name: ref.name, url: `https://github.com/${ref.owner}/${ref.name}`, isPublic: false, unreachable: true, description: 'unknown', defaultBranch: null };
       remote.ci.error = ghRes ? ghRes.error : 'GitHub data unavailable';
@@ -190,7 +199,7 @@ async function finish(local, ghRes, opts) {
   const g = local.git;
   const base = (remote.remote && remote.remote.defaultBranch) || (g.branches.some((b) => b.name === 'main') ? 'main' : g.branches.some((b) => b.name === 'master') ? 'master' : null);
   g.mergedBranches = await mergedInto(dir, base, g);
-  const snapshot = { path: dir, name: path.basename(dir), originUrl: local.originUrl, git: g, files: local.files, deps: local.deps, hasWorkflows: local.hasWorkflows, scannedAt: new Date().toISOString(), ...remote };
+  const snapshot = { path: dir, name: path.basename(dir), originUrl: local.originUrl, git: g, files: local.files, deps: local.deps, hasWorkflows: local.hasWorkflows, hygiene: local.hygiene, scannedAt: new Date().toISOString(), ...remote };
   return { ...snapshot, ...evaluate(snapshot) };
 }
 

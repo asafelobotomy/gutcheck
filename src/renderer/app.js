@@ -123,7 +123,7 @@ async function runActions(items, { ask = true } = {}) {
     if (spec) {
       const prefill = { ...a };
       if (a.type === 'repo-edit' && prefill.description == null) prefill.description = items[0].repo.remote?.description || '';
-      if (a.type === 'repo-edit') prefill.deleteBranchOnMerge = items[0].repo.remote?.deleteBranchOnMerge ?? false;
+      if (a.type === 'repo-edit') prefill.deleteBranchOnMerge = a.deleteBranchOnMerge ?? items[0].repo.remote?.deleteBranchOnMerge ?? false;
       const vals = await askInputs(spec, prefill);
       if (!vals) return;
       if (a.type === 'repo-edit') {
@@ -280,7 +280,7 @@ async function refreshOne(dir) {
 
 /* ---------------------------------------------------------------- overview + history */
 
-const BULKABLE = new Set(['add-file', 'run-rerun', 'pull', 'push', 'delete-merged', 'security-enable', 'fetch', 'npm-install']);
+const BULKABLE = new Set(['add-file', 'run-rerun', 'pull', 'push', 'delete-merged', 'security-enable', 'fetch', 'npm-install', 'worktree-prune']);
 
 // Workspace-wide recommendations: group identical findings across repos, biggest impact first.
 function renderOverview() {

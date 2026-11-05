@@ -222,8 +222,16 @@ const ACTIONS = {
       if (p.feature === 'alerts') return { risk: 'safe', title: 'Enable Dependabot alerts', steps: [gh(['api', '-X', 'PUT', `repos/${slug}/vulnerability-alerts`], r.path)], undo: `gh api -X DELETE repos/${slug}/vulnerability-alerts` };
       if (p.feature === 'security-fixes') return { risk: 'caution', title: 'Enable Dependabot security updates (opens PRs automatically)', steps: [gh(['api', '-X', 'PUT', `repos/${slug}/automated-security-fixes`], r.path)], undo: `gh api -X DELETE repos/${slug}/automated-security-fixes` };
       if (p.feature === 'secret-scanning') return { risk: 'caution', title: 'Enable secret scanning', steps: [gh(['api', '-X', 'PATCH', `repos/${slug}`, '--input', '-'], r.path, JSON.stringify({ security_and_analysis: { secret_scanning: { status: 'enabled' } } }))] };
+      if (p.feature === 'push-protection') return { risk: 'caution', title: 'Enable secret scanning push protection', steps: [gh(['api', '-X', 'PATCH', `repos/${slug}`, '--input', '-'], r.path, JSON.stringify({ security_and_analysis: { secret_scanning: { status: 'enabled' }, secret_scanning_push_protection: { status: 'enabled' } } }))], note: 'Pushes that contain a recognised secret are blocked; whoever pushes can still bypass it with a reason.' };
+      if (p.feature === 'code-scanning') return { risk: 'caution', title: 'Enable CodeQL default setup', steps: [gh(['api', '-X', 'PATCH', `repos/${slug}/code-scanning/default-setup`, '-f', 'state=configured'], r.path)], note: 'Runs CodeQL through GitHub Actions on pushes, pull requests and weekly.', undo: `gh api -X PATCH repos/${slug}/code-scanning/default-setup -f state=not-configured` };
+      if (p.feature === 'private-reporting') return { risk: 'safe', title: 'Enable private vulnerability reporting', steps: [gh(['api', '-X', 'PUT', `repos/${slug}/private-vulnerability-reporting`], r.path)], undo: `gh api -X DELETE repos/${slug}/private-vulnerability-reporting` };
       return fail('Unknown security feature.');
     },
+  },
+
+  // Forget worktrees whose folders no longer exist. Never touches a worktree that is still on disk.
+  'worktree-prune': {
+    plan: (r) => ({ risk: 'safe', title: 'Prune stale worktrees', steps: [git(['worktree', 'prune', '-v'], r.path)], note: 'Only removes git\'s records of worktrees whose folders are already gone.' }),
   },
 
   'repo-edit': {

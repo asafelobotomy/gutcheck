@@ -235,3 +235,21 @@ test('adding the suggested ignore rules clears the "not in .gitignore" advice', 
     assert.equal((await scanClutter(dir)).advice.find((a) => a.id === 'clutter-not-ignored'), undefined);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('a git repo nested inside another is flagged, a declared submodule is not', async () => {
+  const dir = repo();
+  try {
+    sh(dir, 'init', '-q', path.join(dir, 'tools', 'stray'));
+    sh(dir, 'init', '-q', path.join(dir, 'libs', 'sub'));
+    put(dir, '.gitmodules', '[submodule "sub"]\n\tpath = libs/sub\n\turl = https://example.com/sub.git\n');
+    sh(dir, 'init', '-q', path.join(dir, 'build', 'checkout'));
+    put(dir, '.gitignore', '/build/\n');
+    put(dir, 'wt/.git', 'gitdir: /elsewhere/.git/worktrees/wt\n'); // a linked worktree: .git is a file
+    const adv = (await scanClutter(dir)).advice.find((a) => a.id === 'nested-repo');
+    assert.ok(adv);
+    assert.match(adv.detail, /tools\/stray/);
+    assert.ok(!adv.detail.includes('libs/sub'), 'declared submodule');
+    assert.ok(!adv.detail.includes('build/checkout'), 'git-ignored build area');
+    assert.ok(!/\bwt\b/.test(adv.detail), 'linked worktree');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
