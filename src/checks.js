@@ -2,7 +2,7 @@
 // Finding: { id, category, severity: 'error'|'warn'|'info', title, detail, fix? }
 // `fix` is an optional action descriptor the UI can offer as a button.
 
-const { daysAgo } = require('./util');
+const { daysAgo, DAYS_PER_YEAR } = require('./util');
 
 function checkCI(s) {
   const out = [];
@@ -110,7 +110,7 @@ function checkRepoSettings(s) {
     out.push({ id: 'no-protection', category: 'Repo', severity: 'info', title: `Default branch ${s.remote.defaultBranch} is unprotected`, detail: 'Consider requiring PR review and status checks.', fix: { type: 'protect-branch', label: 'Protect…', preset: 'basic' } });
   if (s.remote.openIssues > 25) out.push({ id: 'many-issues', category: 'Repo', severity: 'info', title: `${s.remote.openIssues} open issues/PRs`, detail: 'Consider triaging.' });
   const pushed = daysAgo(s.remote.pushedAt);
-  if (pushed != null && pushed > 365 && !s.remote.archived) out.push({ id: 'inactive', category: 'Repo', severity: 'info', title: `No pushes in ${pushed} days`, detail: 'Archive it if it is finished.' });
+  if (pushed != null && pushed > DAYS_PER_YEAR && !s.remote.archived) out.push({ id: 'inactive', category: 'Repo', severity: 'info', title: `No pushes in ${pushed} days`, detail: 'Archive it if it is finished.' });
   return out;
 }
 

@@ -13,7 +13,7 @@ const fsp = fs.promises;
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { git } = require('./exec');
-const { DAY, plural, list, HEAVY_DIRS } = require('./util');
+const { DAY, COMMAND_TIMEOUT_MS, plural, list, HEAVY_DIRS } = require('./util');
 
 const MAX_FILES = 40000;
 const MAX_DEPTH = 6;
@@ -100,7 +100,7 @@ async function dirSize(p, budget = { n: 20000 }) {
 }
 
 async function trackedSet(dir) {
-  const r = await git(['ls-files', '-z'], { cwd: dir, timeout: 60000 });
+  const r = await git(['ls-files', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
   const files = new Set();
   const dirs = new Set();
   for (const f of r.stdout.split('\0')) {
@@ -117,7 +117,7 @@ async function trackedSet(dir) {
 
 async function ignoredSet(dir, paths) {
   if (!paths.length) return new Set();
-  const r = await git(['check-ignore', '-z', '--stdin'], { cwd: dir, input: paths.join('\0') + '\0', timeout: 60000 });
+  const r = await git(['check-ignore', '-z', '--stdin'], { cwd: dir, input: paths.join('\0') + '\0', timeout: COMMAND_TIMEOUT_MS });
   return new Set(r.stdout.split('\0').filter(Boolean)); // exit 1 (nothing ignored) just yields empty output
 }
 

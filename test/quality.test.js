@@ -162,3 +162,13 @@ test('clean small repo has no advice; language totals add up', async () => {
     assert.deepEqual(q.languages.map((l) => [l.lang, l.lines]).sort(), [['JavaScript', 2], ['Python', 2]]);
   } finally { cleanup(dir); }
 });
+
+test('single-digit numbers are never reported as unnamed repeated constants', async () => {
+  const dir = repo();
+  try {
+    put(dir, 'a.js', 'f(7); g(7); h(7); i(7);\nj(4242); k(4242); l(4242);\n');
+    sh(dir, 'add', '-A');
+    const q = await scanQuality(dir, {});
+    assert.deepEqual(q.magic.repeated.map((r) => r.value), [4242]);
+  } finally { cleanup(dir); }
+});

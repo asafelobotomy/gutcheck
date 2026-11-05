@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { run, git } = require('./exec');
-const { HEAVY_DIRS } = require('./util');
+const { HEAVY_DIRS, cmpVersion } = require('./util');
 const { evaluate } = require('./checks');
 const gh = require('./github');
 
@@ -133,7 +133,9 @@ async function collectDeps(dir, names, deep) {
     const r = await run('npm', ['outdated', '--json'], { cwd: dir, timeout: 45000 });
     try {
       const o = JSON.parse(r.stdout || '{}'); // npm exits 1 when anything is outdated
-      d.outdatedNames = Object.keys(o);
+      // Only packages that are really behind: npm also lists ones AHEAD of a retracted "latest".
+      const behind = (i) => !i || !i.current || cmpVersion(i.current, i.latest || i.wanted || i.current) < 0 || cmpVersion(i.current, i.wanted || i.current) < 0;
+      d.outdatedNames = Object.keys(o).filter((k) => behind(o[k]));
       d.outdated = d.outdatedNames.length;
     } catch {}
   }

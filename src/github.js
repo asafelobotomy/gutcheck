@@ -6,6 +6,7 @@
 // disk) so repeated scans don't re-spend quota.
 
 const { run, json } = require('./exec');
+const { COMMAND_TIMEOUT_MS } = require('./util');
 
 const BATCH = 10;
 const TTL_MS = 2 * 60 * 1000;
@@ -96,7 +97,7 @@ async function queryBatch(refs) {
   const query = `query(${decl}){ rateLimit { remaining resetAt } ${body} } ${FRAGMENT}`;
   const args = ['api', 'graphql', '-f', `query=${query}`];
   refs.forEach((r, i) => args.push('-f', `o${i}=${r.owner}`, '-f', `n${i}=${r.name}`)); // variables, never string-built
-  const r = await run('gh', args, { timeout: 60000 });
+  const r = await run('gh', args, { timeout: COMMAND_TIMEOUT_MS });
   noteCall('graphql');
   let payload = null;
   try { payload = JSON.parse(r.stdout); } catch {}

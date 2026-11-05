@@ -81,3 +81,11 @@ test('repo settings: unprotected default branch and long inactivity', () => {
   const ids = checkRepoSettings({ remote: { archived: false, defaultBranch: 'main', pushedAt: iso(400), openIssues: 30 }, protection: false }).map((f) => f.id);
   assert.deepEqual(ids.sort(), ['inactive', 'many-issues', 'no-protection']);
 });
+
+test('cmpVersion tells behind from ahead (npm lists a package ahead of a retracted latest)', () => {
+  const { cmpVersion } = require('../src/util');
+  assert.equal(cmpVersion('26.18.1', '26.18.0'), 1);
+  assert.equal(cmpVersion('1.2.3', '1.10.0'), -1);
+  assert.equal(cmpVersion('v2.0.0-beta.1', '2.0.0'), 0);
+  assert.equal(cmpVersion('1.0', '1.0.0'), 0);
+});

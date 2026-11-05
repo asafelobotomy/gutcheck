@@ -13,7 +13,8 @@ const Metrics = require('./renderer/metrics');
 const { scanQuality, normalizeSettings } = require('./quality');
 
 const PLAN_TTL = 5 * 60 * 1000;
-const TREND_MAX = 365; // snapshots kept on disk
+const { DAYS_PER_YEAR } = require('./util');
+const TREND_MAX = DAYS_PER_YEAR; // about a year of daily snapshots kept on disk
 const TREND_MERGE_MS = 10 * 60 * 1000; // scans closer together than this replace each other
 
 const publicPlan = (token, p) => ({ ok: true, token, type: p.type, repoPath: p.repoPath, repoName: p.repoName, title: p.title, risk: p.risk, display: p.display, warnings: p.warnings, undo: p.undo, body: p.body, note: p.note, confirmName: p.confirmName });

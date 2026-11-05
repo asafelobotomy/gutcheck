@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
 const { git } = require('../exec');
+const { COMMAND_TIMEOUT_MS } = require('../util');
 const { LANGS, lex } = require('./lexer');
 const R = require('./rules');
 const { buildAdvice } = require('./advice');
@@ -15,7 +16,8 @@ const MAX_FILES = 6000;
 const MAX_READ = 1024 * 1024;
 const BIG_FILE = 5 * 1024 * 1024;
 const DENSE_FILE = 15; // magic numbers in one file before it is called out
-const CANDIDATE_MIN = 3; // a literal repeated this often deserves a name
+const CANDIDATE_MIN = 3;
+const CANDIDATE_MIN_VALUE = 10; // single digits are indices and counts, not worth a name // a literal repeated this often deserves a name
 const REUSE_MIN = 100; // smaller values (3, 5, 30...) collide by accident, so only larger ones count as "the same constant"
 
 // Validate user settings (they come from disk and from the UI): anything odd falls back to defaults.
@@ -32,7 +34,7 @@ function ignored(rel, rules) {
 }
 
 async function listFiles(dir) {
-  const r = await git(['ls-files', '-co', '--exclude-standard', '-z'], { cwd: dir, timeout: 60000 });
+  const r = await git(['ls-files', '-co', '--exclude-standard', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
   return [...new Set(r.stdout.split('\0').filter(Boolean))].sort();
 }
 
@@ -143,7 +145,7 @@ async function scanQuality(dir, rawSettings) {
   for (const [key, v] of values) {
     const ds = (defByValue.get(key) || []).filter((d) => d.fam === v.fam);
     if (ds.length) reuse.push({ value: v.value, constant: ds[0].name, definedIn: `${ds[0].path}:${ds[0].line}`, count: v.count, uses: v.uses.slice(0, 6) });
-    else if (v.count >= CANDIDATE_MIN) candidatesOut.push({ value: v.value, count: v.count, files: v.files.size, uses: v.uses.slice(0, 4) });
+    else if (v.count >= CANDIDATE_MIN && Math.abs(v.value) >= CANDIDATE_MIN_VALUE) candidatesOut.push({ value: v.value, count: v.count, files: v.files.size, uses: v.uses.slice(0, 4) });
   }
   reuse.sort((a, b) => b.count - a.count);
   candidatesOut.sort((a, b) => b.count - a.count);

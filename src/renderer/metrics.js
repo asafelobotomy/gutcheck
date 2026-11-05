@@ -2,6 +2,7 @@
 // from node tests (module.exports). No DOM here.
 (function (root) {
   const DAY = 86400000;
+  const DAYS_PER_YEAR = 365;
   const ageDays = (iso, now) => (iso ? Math.floor((now - new Date(iso).getTime()) / DAY) : null);
   const bucket = (value, edges, labels) => {
     for (let i = 0; i < edges.length; i++) if (value <= edges[i]) return labels[i];
@@ -70,7 +71,7 @@
       // Activity: last push if GitHub told us, else the newest local branch commit.
       const newest = (g.branches || []).map((b) => b.date).filter(Boolean).sort().pop();
       const last = ageDays((r.remote && r.remote.pushedAt) || newest, now);
-      activity[last == null ? 'Unknown' : bucket(last, [7, 30, 90, 365], ACTIVITY)]++;
+      activity[last == null ? 'Unknown' : bucket(last, [7, 30, 90, DAYS_PER_YEAR], ACTIVITY)]++;
       perRepo.push({ name: r.name, path: r.path, score: r.score ?? 0, grade: r.grade, errors: e, warns: w });
     }
 

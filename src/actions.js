@@ -1,12 +1,11 @@
 // Action engine: plan() turns a request into an exact, inspectable list of steps (no side
 // effects); apply() runs a plan. The UI shows the plan, the user confirms, and main applies the
-// stored plan, so what is previewed is exactly what runs.
-//
-// Deliberately NOT offered: deleting repos, changing visibility, force-push, history rewriting.
+// stored plan, so what is previewed is exactly what runs. Deliberately NOT offered: deleting repos, changing visibility, force-push, history rewriting.
 
 const fs = require('node:fs');
 const path = require('node:path');
 const { run } = require('./exec');
+const { COMMAND_TIMEOUT_MS, MAX_PLAN_ITEMS } = require('./util');
 const { TEMPLATES } = require('./templates');
 const { scanClutter, IGNORE_OK } = require('./clutter');
 const { PROTECTION } = require('./protection');
@@ -267,7 +266,7 @@ const ACTIONS = {
   'clean-clutter': {
     async plan(r, p, ctx) {
       const want = [...new Set(Array.isArray(p.paths) ? p.paths : [])];
-      if (!want.length || want.length > 500 || want.some((x) => typeof x !== 'string')) fail('Choose at least one item.');
+      if (!want.length || want.length > MAX_PLAN_ITEMS || want.some((x) => typeof x !== 'string')) fail('Choose at least one item.');
       const found = new Map((await ctx.clutter(r.path)).items.map((i) => [i.path, i]));
       const picked = want.map((x) => found.get(x) || fail(`"${x}" is no longer detected as clutter. Rescan and try again.`));
       const chosen = new Set(want);
@@ -389,7 +388,7 @@ async function apply(p, ctx = {}) {
         return { ok: false, results };
       }
     } else {
-      const r = await ctx.run(s.cmd, s.args, { cwd: s.cwd, input: s.input, timeout: s.timeout || 60000 });
+      const r = await ctx.run(s.cmd, s.args, { cwd: s.cwd, input: s.input, timeout: s.timeout || COMMAND_TIMEOUT_MS });
       results.push({ text: s.display, ok: r.ok, out: (r.stdout + r.stderr).trim().slice(0, 2000) });
       if (!r.ok) return { ok: false, results };
     }
