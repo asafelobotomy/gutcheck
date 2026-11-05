@@ -42,6 +42,7 @@ function fixFor(f, r) {
   const slug = r.remote && !r.remote.unreachable ? `${r.remote.owner}/${r.remote.name}` : null;
   const R = slug ? ` -R ${slug}` : '';
   const def = (r.remote && r.remote.defaultBranch) || 'main';
+  const D = sq(def); // branch names come from GitHub and may contain shell metacharacters
   const num = (/-(\d+)$/.exec(f.id) || [])[1];
   const pr = num && (r.prs || []).find((p) => String(p.number) === num);
   const run = num && ((r.ci && r.ci.failed) || []).find((x) => String(x.databaseId) === num);
@@ -56,14 +57,14 @@ function fixFor(f, r) {
   if (id.startsWith('split-')) return { phase: 7, rank: 5, why: 'Two folders serve one purpose.', cmds: [], note: 'Merge into the single conventional folder named above with "git mv", then fix any paths in scripts, configs and docs.' };
   if (id === 'root-sprawl' || id === 'root-media' || id === 'root-archives') return { phase: 7, rank: 6, why: 'The repo root is crowded.', cmds: [], note: 'Move files into src/, scripts/, docs/ or assets/ with "git mv" and update references. Ask before moving anything the build depends on.' };
 
-  if (id === 'git-detached') return { phase: 1, rank: 0, why: 'Commits made on a detached HEAD can be lost.', cmds: ['git switch -c rescue-work   # keeps any commits made here', `# or go back: git switch ${sq(def)}`] };
+  if (id === 'git-detached') return { phase: 1, rank: 0, why: 'Commits made on a detached HEAD can be lost.', cmds: ['git switch -c rescue-work   # keeps any commits made here', `# or go back: git switch ${D}`] };
   if (id === 'git-dirty') return { phase: 1, rank: 1, why: 'Uncommitted work is not backed up.', cmds: ['git status --short', '# review the files, make sure none are secrets or clutter, then:', 'git add -A', 'git commit -m "<describe the change>"'], note: 'Do the "Protect secrets" and "Remove clutter" steps first so they are not committed by accident.' };
   if (id === 'git-behind') return { phase: 1, rank: 2, why: 'Local branch is behind its upstream.', cmds: ['git pull --ff-only'] };
   if (id === 'git-ahead') return { phase: 1, rank: 3, why: 'Unpushed commits exist only on this machine.', cmds: ['git push'] };
   if (id === 'git-no-upstream') return { phase: 1, rank: 4, why: 'Branch is not tracking a remote.', cmds: [`git push -u origin ${sq(g.branch || 'HEAD')}`] };
 
   if (id.startsWith('ci-failed-')) return { phase: 2, rank: 0, why: run ? `Workflow "${t(run.workflowName)}" failed on ${t(run.headBranch)}.` : 'A CI run failed.', cmds: [`gh run view ${num}${R} --log-failed`, '# fix the cause in the code, commit, push; or if it was a flaky failure:', `gh run rerun ${num} --failed${R}`], note: run && run.url ? `Run URL: ${t(run.url, 200)}` : undefined };
-  if (id.startsWith('pr-conflict-')) return { phase: 2, rank: 1, why: 'The PR cannot merge until conflicts are resolved.', cmds: [`gh pr checkout ${num}${R}`, `git fetch origin && git merge origin/${def}`, '# resolve conflicts, run the tests', 'git commit && git push'] };
+  if (id.startsWith('pr-conflict-')) return { phase: 2, rank: 1, why: 'The PR cannot merge until conflicts are resolved.', cmds: [`gh pr checkout ${num}${R}`, `git fetch origin && git merge ${sq('origin/' + def)}`, '# resolve conflicts, run the tests', 'git commit && git push'] };
   if (id.startsWith('pr-ci-')) return { phase: 2, rank: 2, why: 'Checks are failing on the PR.', cmds: [`gh pr checks ${num}${R}`, `gh pr checkout ${num}${R}`, '# fix, commit, push'] };
   if (id.startsWith('pr-ready-')) return { phase: 2, rank: 4, why: 'Approved, mergeable and passing.', cmds: [`gh pr merge ${num} --squash --delete-branch${R}`], note: 'Confirm with the owner before merging.' };
   if (id.startsWith('pr-stale-')) return { phase: 2, rank: 5, why: 'No activity for 30+ days.', cmds: [`gh pr view ${num}${R} --comments`], note: `Decide with the owner: merge, update, or close (gh pr close ${num}${R} --comment "Closing as stale").` };
@@ -86,11 +87,11 @@ function fixFor(f, r) {
   if (id === 'git-merged') return { phase: 5, rank: 0, why: 'These branches are already merged, so deleting them loses nothing.', cmds: [`git branch -d ${(g.mergedBranches || []).map(sq).join(' ')}`] };
   if (id === 'git-stale') {
     const stale = (g.branches || []).filter((b) => !b.current && daysAgo(b.date) >= 60 && !(g.mergedBranches || []).includes(b.name)).map((b) => b.name);
-    return { phase: 5, rank: 1, why: 'Unmerged branches untouched for 60+ days.', cmds: stale.map((b) => `git log --oneline ${sq(def)}..${sq(b)}   # unique commits on ${t(b, 60)}`), note: 'Ask the owner per branch: merge, keep, or delete. Never force-delete (-D) or delete remote branches without approval.' };
+    return { phase: 5, rank: 1, why: 'Unmerged branches untouched for 60+ days.', cmds: stale.map((b) => `git log --oneline ${D}..${sq(b)}   # unique commits on ${t(b, 60)}`), note: 'Ask the owner per branch: merge, keep, or delete. Never force-delete (-D) or delete remote branches without approval.' };
   }
 
   if (id === 'no-remote') return { phase: 7, rank: 0, why: 'Not backed up anywhere.', cmds: ['gh repo create <name> --private --source . --remote origin --push'], note: 'Ask the owner whether it should be private or public before creating it.' };
-  if (id === 'no-protection') return { phase: 7, rank: 1, why: 'Anyone with write access can push straight to the default branch.', cmds: slug ? [`echo '${JSON.stringify(PROTECTION.basic.body)}' | gh api -X PUT repos/${slug}/branches/${def}/protection -H 'Accept: application/vnd.github+json' --input -`] : [], note: 'Needs admin rights; private repos on a free plan will get an error. Optional.' };
+  if (id === 'no-protection') return { phase: 7, rank: 1, why: 'Anyone with write access can push straight to the default branch.', cmds: slug ? [`echo '${JSON.stringify(PROTECTION.basic.body)}' | gh api -X PUT ${sq(`repos/${slug}/branches/${def}/protection`)} -H 'Accept: application/vnd.github+json' --input -`] : [], note: 'Needs admin rights; private repos on a free plan will get an error. Optional.' };
   if (id === 'inactive') return { phase: 7, rank: 2, why: 'No pushes for a year.', cmds: slug ? [`gh repo archive ${slug}   # only if the project is finished, ask first`] : [] };
   if (id === 'many-issues') return { phase: 7, rank: 3, why: 'Lots of open issues/PRs.', cmds: slug ? [`gh issue list${R} --state open --limit 50`] : [], note: 'Triage with the owner.' };
   if (id === 'ci-unavailable') return { phase: 7, rank: 4, why: 'GutCheck could not read CI status.', cmds: ['gh auth status'], note: `Reason given: ${t(f.detail)}` };

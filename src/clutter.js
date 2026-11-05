@@ -256,6 +256,8 @@ async function scanClutter(dir) {
   for (const it of items) {
     it.ignored = ignored.has(it.path);
     if (it.ignored && it.confidence === 'medium' && (it.category === 'cache' || it.category === 'test-artifact')) it.confidence = 'high';
+    // An ambiguous name (e.g. a folder called coverage that git does not ignore) might be real work: recoverable removal only.
+    if (it.confidence !== 'high') it.mode = 'trash';
   }
   const envUnignored = liveEnv.filter((p) => !ignored.has(p));
   const order = { env: 0, duplicate: 1, backup: 2, temp: 3, junk: 4, cache: 5, 'test-artifact': 6, log: 7 };

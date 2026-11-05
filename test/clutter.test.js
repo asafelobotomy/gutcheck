@@ -190,3 +190,25 @@ test('workspace advice: copies, duplicate clones, projects without git, loose fi
     for (const id of ['ws-loose-files', 'ws-loose-env', 'ws-no-git', 'ws-empty-dirs', 'ws-variant-app-old', 'ws-dup-clone-github.com/me/app']) assert.ok(ids.includes(id), id);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('apply refuses items changed or committed after the preview, and ambiguous dirs go to trash', async () => {
+  const dir = repo();
+  try {
+    put(dir, 'coverage/index.html', 'x');
+    put(dir, 'a.bak', 'v1');
+    put(dir, 'b.bak', 'v1');
+    const r = { path: dir, name: 'p', git: {}, files: {}, deps: {} };
+    const p = await plan(r, { type: 'clean-clutter', paths: ['coverage', 'a.bak', 'b.bak'] });
+    assert.ok(p.ok, p.error);
+    assert.equal(p.steps.find((s) => s.rel === 'coverage').mode, 'trash');
+    const trashed = [];
+    const ctx = { trash: async (f) => { trashed.push(path.basename(f)); } };
+    fs.writeFileSync(path.join(dir, 'a.bak'), 'edited after preview!');
+    sh(dir, 'add', 'b.bak'); // committed/staged after preview
+    const out = await apply(p, ctx);
+    assert.equal(out.ok, false);
+    assert.match(out.results.find((x) => !x.ok).out, /Changed since the preview|Tracked/);
+    assert.ok(!trashed.includes('a.bak'));
+    assert.ok(!trashed.includes('b.bak'));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

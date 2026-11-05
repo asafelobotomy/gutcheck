@@ -58,3 +58,12 @@ test('untrusted PR titles are flattened and flagged as data; workspace report ra
   assert.match(md, /gh pr checkout 7 -R o\/bad/);
   assert.match(md, /No issues found/);
 });
+
+test('shell metacharacters in a default branch name are quoted in suggested commands', () => {
+  const r = { path: '/w/x', name: 'x', score: 50, grade: 'D', scannedAt: 'n', git: { branches: [], remoteBranches: [], mergedBranches: [], branch: 'main' }, files: {}, deps: {}, prs: [{ number: 3, title: 't', headRefName: 'h', mergeable: 'CONFLICTING' }], ci: { failed: [] }, alerts: [],
+    remote: { owner: 'o', name: 'x', url: 'https://github.com/o/x', isPublic: true, defaultBranch: 'main;touch /tmp/pwned' },
+    findings: [{ id: 'pr-conflict-3', category: 'PRs', severity: 'error', title: 'PR #3 has merge conflicts', detail: '' }] };
+  const md = buildReport({ repos: [r] });
+  assert.match(md, /git merge 'origin\/main;touch \/tmp\/pwned'/);
+  assert.ok(!/merge origin\/main;touch/.test(md));
+});

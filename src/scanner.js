@@ -156,7 +156,8 @@ const safeJSON = (p) => {
 
 // Everything that needs no network: git state, files, manifests.
 async function collectLocal(dir, opts) {
-  const originUrl = (await git(['remote', 'get-url', 'origin'], { cwd: dir })).stdout.trim();
+  // Strip any user:token@ from the URL so credentials never reach the UI, logs or reports.
+  const originUrl = (await git(['remote', 'get-url', 'origin'], { cwd: dir })).stdout.trim().replace(/^([a-z+]+:\/\/)[^/@]*@/i, '$1');
   const ref = parseGithubRemote(originUrl);
   const files = collectFiles(dir);
   const wfDir = path.join(dir, '.github', 'workflows');

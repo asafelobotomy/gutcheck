@@ -283,7 +283,7 @@ const ACTIONS = {
       const chosen = new Set(want);
       for (const it of picked) if (it.keep && chosen.has(it.keep)) fail(`"${it.path}" and the file it duplicates, "${it.keep}", are both selected. Keep one.`);
       const steps = picked.map((it) => ({
-        kind: 'remove', root: r.path, path: path.join(r.path, ...it.path.split('/')), mode: it.mode,
+        kind: 'remove', root: r.path, rel: it.path, path: path.join(r.path, ...it.path.split('/')), mode: it.mode, fileStat: it.kind === 'file' ? { size: it.size, mtime: it.mtime } : null,
         display: it.mode === 'trash' ? `move to trash: ${it.path}${it.kind === 'dir' ? '/' : ''}` : `delete (regenerable): ${it.path}${it.kind === 'dir' ? '/' : ''}`,
         note: it.reason,
       }));
@@ -386,6 +386,11 @@ async function apply(p, ctx = {}) {
         const rootReal = fs.realpathSync(s.root);
         const parentReal = fs.realpathSync(path.dirname(s.path));
         if (parentReal !== rootReal && !parentReal.startsWith(rootReal + path.sep)) throw new Error('Path is outside the repository.');
+        const st = fs.lstatSync(s.path); // throws ENOENT when it is already gone
+        if (s.fileStat && (st.size !== s.fileStat.size || st.mtimeMs !== s.fileStat.mtime)) throw new Error('Changed since the preview. Rescan and review it again.');
+        // Might have been committed since the preview: never remove anything git tracks.
+        const tr = await ctx.run('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', 'ls-files', '-z', '--', s.rel], { cwd: s.root });
+        if (!tr.ok || tr.stdout) throw new Error('Tracked by git (or could not be checked): not removed.');
         if (s.mode === 'trash') await ctx.trash(s.path);
         else fs.rmSync(s.path, { recursive: true, force: true });
         results.push({ text: s.display, ok: true, out: '' });
