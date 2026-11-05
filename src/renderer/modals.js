@@ -99,3 +99,24 @@ function showResults(outs) {
       h('div', { class: 'mbtns' }, h('button', { class: 'primary', onclick: () => close() }, 'Close')));
   });
 }
+
+/* ---------------------------------------------------------------- startup & tray */
+
+const BACKGROUND_SPEC = {
+  title: 'Startup & tray',
+  fields: [
+    { name: 'launchOnStartup', label: 'Launch GutCheck when I log in (starts in the tray)', type: 'checkbox' },
+    { name: 'minimizeToTray', label: 'Minimise to the system tray', type: 'checkbox' },
+    { name: 'closeToTray', label: 'Closing the window keeps GutCheck running in the tray (quit from the tray menu)', type: 'checkbox' },
+  ],
+};
+
+async function openBackgroundSettings() {
+  const cur = await window.api.background();
+  const out = await askInputs(BACKGROUND_SPEC, cur);
+  if (!out) return;
+  const saved = await window.api.setBackground(out);
+  toast(!saved.trayAvailable && (saved.minimizeToTray || saved.closeToTray || saved.launchOnStartup)
+    ? 'Saved, but no system tray was found, so the window will stay visible.' : 'Startup and tray options saved.');
+}
+$('background').addEventListener('click', openBackgroundSettings);

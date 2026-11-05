@@ -55,6 +55,8 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
     qualityScan: async (d) => { calls.push(['qualityScan', d]); return quality; },
     qualitySettings: async () => quality.settings,
     setQualitySettings: async (p) => { calls.push(['qualitySet', p]); return { ...quality.settings, ...p }; },
+    background: async () => ({ launchOnStartup: false, minimizeToTray: true, closeToTray: false, trayAvailable: true }),
+    setBackground: async (p) => { calls.push(['background', p]); return { launchOnStartup: !!p.launchOnStartup, minimizeToTray: true, closeToTray: false, trayAvailable: true }; },
     onBegin: () => {}, onRepo: (cb) => { onRepo = cb; },
   };
   const ctx = dom.getInternalVMContext();

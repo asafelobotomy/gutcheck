@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, session, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, session, clipboard, Tray, Menu, nativeImage } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { discover, scanRepo, scanAll } = require('./scanner');
@@ -6,6 +6,8 @@ const github = require('./github');
 const { createService } = require('./service');
 const { appendAudit, readAudit } = require('./audit');
 const { run } = require('./exec');
+const { createTrayController } = require('./tray');
+const { setAutostart, isAutostart, HIDDEN_FLAG } = require('./autostart');
 
 let win;
 let scanning = false;
@@ -32,13 +34,21 @@ const loadSettings = () => {
 };
 const saveSettings = (s) => fs.writeFileSync(settingsFile(), JSON.stringify(s, null, 2));
 
+const trayCtl = createTrayController({ app, Tray, Menu, nativeImage, getWindow: () => win, getSettings: () => loadSettings() });
+const autostartDir = () => path.join(app.getPath('appData'), 'autostart');
+const BACKGROUND_KEYS = ['minimizeToTray', 'closeToTray'];
+
 function createWindow() {
+  // Started by the login item (--hidden) and a tray icon exists: stay in the tray until clicked.
+  const startHidden = process.argv.includes(HIDDEN_FLAG) && trayCtl.hasTray();
   win = new BrowserWindow({
-    width: 1280, height: 820, minWidth: 900, minHeight: 600,
+    width: 1280, height: 820, minWidth: 900, minHeight: 600, show: false,
     backgroundColor: '#0f1115', title: 'GutCheck',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   win.removeMenu();
+  trayCtl.attach(win);
+  win.once('ready-to-show', () => { if (!startHidden) win.show(); });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => { openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -118,6 +128,20 @@ handle('settings:set', (_e, patch) => {
   return s;
 });
 
+// Startup and tray options. Only booleans are accepted; launch-on-start-up is stored by the OS/desktop.
+handle('background:get', () => {
+  const s = loadSettings();
+  return { launchOnStartup: isAutostart(app, { dir: autostartDir() }), minimizeToTray: !!s.minimizeToTray, closeToTray: !!s.closeToTray, trayAvailable: trayCtl.hasTray() };
+});
+handle('background:set', (_e, patch) => {
+  const p = patch && typeof patch === 'object' ? patch : {};
+  const s = loadSettings();
+  for (const k of BACKGROUND_KEYS) if (typeof p[k] === 'boolean') s[k] = p[k];
+  saveSettings(s);
+  if (typeof p.launchOnStartup === 'boolean') setAutostart(app, p.launchOnStartup, { dir: autostartDir() });
+  return { launchOnStartup: isAutostart(app, { dir: autostartDir() }), minimizeToTray: !!s.minimizeToTray, closeToTray: !!s.closeToTray, trayAvailable: trayCtl.hasTray() };
+});
+
 handle('open:url', (_e, url) => openExternal(url));
 handle('open:folder', (_e, dir) => { if (known.has(dir)) shell.openPath(dir); });
 
@@ -130,6 +154,8 @@ app.on('web-contents-created', (_e, contents) => {
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
+  trayCtl.create();
   createWindow();
 });
+if (!trayCtl.singleInstance()) process.exitCode = 0;
 app.on('window-all-closed', () => app.quit());

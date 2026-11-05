@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('api', {
   setQualitySettings: (patch) => ipcRenderer.invoke('quality:set', patch),
   audit: () => ipcRenderer.invoke('audit:list'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
+  background: () => ipcRenderer.invoke('background:get'),
+  setBackground: (patch) => ipcRenderer.invoke('background:set', patch),
   openUrl: (u) => ipcRenderer.invoke('open:url', u),
   openFolder: (d) => ipcRenderer.invoke('open:folder', d),
   onBegin: (cb) => ipcRenderer.on('scan:begin', (_e, d) => cb(d)),

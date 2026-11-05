@@ -6,6 +6,20 @@ const press = (w, el, key) => el.dispatchEvent(new w.KeyboardEvent('keydown', { 
 const click = (el) => el.click();
 const scan = async (t) => { click(t.$('#scan')); await tick(80); };
 
+test('Startup & tray dialog loads the current options and saves the changed ones', async () => {
+  const t = await boot();
+  click(t.$('#background'));
+  await tick();
+  const boxes = t.$$('.modal input[type=checkbox]');
+  assert.equal(boxes.length, 3);
+  assert.deepEqual(boxes.map((b) => b.checked), [false, true, false]);
+  boxes[0].checked = true;
+  click(t.$$('.modal button').find((b) => b.textContent === 'Continue'));
+  await tick();
+  assert.deepEqual(t.calls.find((c) => c[0] === 'background')[1], { launchOnStartup: true, minimizeToTray: true, closeToTray: false });
+  assert.match(t.$('#toast').textContent, /saved/i);
+});
+
 test('dashboard shows KPI cards, panels and a heatmap after a scan', async () => {
   const t = await boot();
   await scan(t);

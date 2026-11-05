@@ -63,6 +63,16 @@ The **Clutter & tidy-up** view scans every repo (read-only) for things nothing n
 
 Files tracked by git are never offered for removal. Removal shows every item first; env files need you to type the repo name, and anything that is not a regenerable cache goes to your trash rather than being deleted. Only high-confidence items are pre-selected.
 
+## Startup & tray
+
+The **Startup & tray** button (top bar) has three options, all off by default:
+
+- **Launch when I log in**: starts GutCheck at login, straight into the tray with no window. On Linux this writes `~/.config/autostart/gutcheck.desktop` (pointing at the AppImage you ran, so keep it in a stable place); on Windows and macOS it uses the system login items. Turning it off removes the entry.
+- **Minimise to the system tray**: minimising hides the window; click the tray icon to bring it back.
+- **Closing the window keeps GutCheck running in the tray**: use **Quit** in the tray menu to exit.
+
+The tray icon toggles the window on click and has Show and Quit. Only one copy runs: launching GutCheck again shows the existing window. If your desktop has no system tray (some GNOME setups need a tray extension), GutCheck never hides its window, so it can't get lost.
+
 ## Install
 
 Download the AppImage from the [latest release](../../releases/latest), then:
@@ -81,7 +91,7 @@ Requires `gh` and `git` on your `PATH`, and `gh auth login` completed.
 - The only network access is through your own `gh` CLI. There is no telemetry, no updater and no other server. The UI is sandboxed with a strict Content Security Policy.
 - Scans run read-only `git` commands with hooks and `core.fsmonitor` disabled, so opening an untrusted repo does not run its code.
 - Actions are planned by the app, previewed, and then run exactly as previewed. They only target branches, PRs and runs found in the last scan, or (for clutter) items found by a fresh scan at plan time. Right before removing anything GutCheck checks it is still unchanged and not tracked by git.
-- Files GutCheck keeps on your machine, in its app data folder: `settings.json` (workspace folder, read-only switch), `audit.log` (every change it made; trimmed to the latest 500 entries once it passes 1 MB) and `trend.json` (scores and totals per scan). Nothing is uploaded.
+- Files GutCheck keeps on your machine, in its app data folder: `settings.json` (workspace folder, read-only switch, tray options), `audit.log` (every change it made; trimmed to the latest 500 entries once it passes 1 MB) and `trend.json` (scores and totals per scan). Nothing is uploaded.
 
 ## Develop
 

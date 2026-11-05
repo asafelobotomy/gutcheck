@@ -13,7 +13,7 @@ function load() {
   const opened = [];
   const noop = () => {};
   const electron = {
-    app: { getPath: () => userData, whenReady: () => ({ then: noop }), on: noop },
+    app: { getPath: () => userData, whenReady: () => ({ then: noop }), on: noop, requestSingleInstanceLock: () => true, isPackaged: true, getAppPath: () => '/app', getLoginItemSettings: () => ({ openAtLogin: false }), setLoginItemSettings: noop },
     BrowserWindow: function () {}, session: {}, dialog: {}, clipboard: { writeText: noop },
     ipcMain: { handle: (c, fn) => handlers.set(c, fn) },
     shell: { openExternal: (u) => opened.push(['url', u]), openPath: (p) => opened.push(['path', p]), trashItem: async () => {} },
@@ -30,7 +30,7 @@ function load() {
 
 test('every IPC channel is registered', () => {
   const { handlers } = load();
-  for (const c of ['settings:get', 'settings:set', 'auth:status', 'rate:get', 'dir:pick', 'scan:start', 'scan:one', 'action:plan', 'action:apply', 'clutter:scan', 'report:copy', 'trend:get', 'quality:scan', 'quality:settings', 'quality:set', 'audit:list', 'open:url', 'open:folder']) assert.ok(handlers.has(c), c);
+  for (const c of ['settings:get', 'settings:set', 'auth:status', 'rate:get', 'dir:pick', 'scan:start', 'scan:one', 'action:plan', 'action:apply', 'clutter:scan', 'report:copy', 'trend:get', 'quality:scan', 'quality:settings', 'quality:set', 'audit:list', 'background:get', 'background:set', 'open:url', 'open:folder']) assert.ok(handlers.has(c), c);
 });
 
 test('quality settings round-trip through IPC with validation', async () => {
@@ -59,6 +59,23 @@ test('settings:set only accepts a boolean readOnly and persists it', async () =>
   await call('settings:set', { readOnly: true });
   assert.equal((await call('settings:get')).readOnly, true);
   assert.ok(fs.existsSync(path.join(userData, 'settings.json')));
+});
+
+test('startup and tray options accept only booleans and write the autostart entry', async () => {
+  const { call, userData } = load();
+  const entry = path.join(userData, 'autostart', 'gutcheck.desktop');
+  const first = await call('background:get');
+  assert.deepEqual([first.launchOnStartup, first.minimizeToTray, first.closeToTray], [false, false, false]);
+  await call('background:set', { minimizeToTray: 'yes', closeToTray: 1, launchOnStartup: 'true', evil: true });
+  assert.deepEqual(await call('settings:get'), {});
+  assert.equal(fs.existsSync(entry), false);
+  const on = await call('background:set', { minimizeToTray: true, closeToTray: true, launchOnStartup: true });
+  assert.deepEqual([on.launchOnStartup, on.minimizeToTray, on.closeToTray], [true, true, true]);
+  if (process.platform === 'linux') assert.match(fs.readFileSync(entry, 'utf8'), /--hidden/);
+  const off = await call('background:set', { launchOnStartup: false });
+  assert.equal(off.launchOnStartup, false);
+  assert.equal(off.closeToTray, true, 'untouched options are kept');
+  assert.equal((await call('background:set', 'junk')).closeToTray, true);
 });
 
 test('open:url allows only github.com https links; open:folder only scanned repos', async () => {
