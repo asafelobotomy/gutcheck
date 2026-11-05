@@ -1,7 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { run, json } = require('./exec');
+const { run, git } = require('./exec');
 const { evaluate } = require('./checks');
+const gh = require('./github');
 
 const SKIP = new Set(['node_modules', 'target', 'dist', 'build', 'vendor', '.cache', '.local', '.npm']);
 
@@ -30,12 +31,12 @@ function discover(root, maxDepth = 2) {
 }
 
 function parseGithubRemote(url) {
-  const m = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/.exec(url || '');
+  const m = /github\.com[:/]([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(url || '');
   return m ? { owner: m[1], name: m[2] } : null;
 }
 
 async function collectGit(dir) {
-  const st = await run('git', ['status', '--porcelain=v2', '--branch'], { cwd: dir });
+  const st = await git(['status', '--porcelain=v2', '--branch'], { cwd: dir });
   const g = { branch: null, detached: false, upstream: null, ahead: 0, behind: 0, dirty: 0, branches: [], mergedBranches: [] };
   for (const line of st.stdout.split('\n')) {
     if (line.startsWith('# branch.head ')) {
@@ -50,7 +51,7 @@ async function collectGit(dir) {
       }
     } else if (line && !line.startsWith('#')) g.dirty++;
   }
-  const refs = await run('git', ['for-each-ref', '--format=%(refname:short)\t%(committerdate:iso-strict)', 'refs/heads'], { cwd: dir });
+  const refs = await git(['for-each-ref', '--format=%(refname:short)\t%(committerdate:iso-strict)', 'refs/heads'], { cwd: dir });
   g.branches = refs.stdout
     .split('\n')
     .filter(Boolean)
@@ -63,7 +64,7 @@ async function collectGit(dir) {
 
 async function mergedInto(dir, base, g) {
   if (!base || !g.branches.some((b) => b.name === base)) return [];
-  const r = await run('git', ['branch', '--merged', base, '--format=%(refname:short)'], { cwd: dir });
+  const r = await git(['branch', '--merged', base, '--format=%(refname:short)'], { cwd: dir });
   return r.stdout
     .split('\n')
     .filter(Boolean)
@@ -76,10 +77,10 @@ function collectFiles(dir) {
     names = fs.readdirSync(dir);
   } catch {}
   const has = (re) => names.some((n) => re.test(n));
-  const gh = path.join(dir, '.github');
+  const gh_ = path.join(dir, '.github');
   let ghNames = [];
   try {
-    ghNames = fs.readdirSync(gh);
+    ghNames = fs.readdirSync(gh_);
   } catch {}
   const any = (re) => has(re) || ghNames.some((n) => re.test(n));
   return {
@@ -143,91 +144,77 @@ const safeJSON = (p) => {
   }
 };
 
-function rollup(checks) {
-  if (!Array.isArray(checks) || !checks.length) return 'NONE';
-  const bad = checks.some((c) => ['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED'].includes(c.conclusion) || c.state === 'FAILURE' || c.state === 'ERROR');
-  if (bad) return 'FAILURE';
-  const pending = checks.some((c) => c.status && c.status !== 'COMPLETED');
-  return pending ? 'PENDING' : 'SUCCESS';
-}
-
-async function collectGitHub(dir, ref, hasWorkflows, g) {
-  const snap = { remote: null, prs: [], ci: { failed: [], error: null }, protection: null, alerts: [] };
-  const view = await json('gh', ['repo', 'view', `${ref.owner}/${ref.name}`, '--json', 'description,isPrivate,isArchived,defaultBranchRef,pushedAt,url,issues,licenseInfo'], { cwd: dir });
-  if (!view.ok) {
-    snap.ci.error = view.error;
-    snap.remote = { owner: ref.owner, name: ref.name, url: `https://github.com/${ref.owner}/${ref.name}`, isPublic: false, unreachable: true, description: 'unknown', defaultBranch: null };
-    return snap;
-  }
-  const v = view.data;
-  snap.remote = {
-    owner: ref.owner,
-    name: ref.name,
-    url: v.url,
-    description: v.description,
-    isPublic: !v.isPrivate,
-    archived: v.isArchived,
-    defaultBranch: v.defaultBranchRef && v.defaultBranchRef.name,
-    pushedAt: v.pushedAt,
-    openIssues: v.issues ? v.issues.totalCount : 0,
-    licenseOnGitHub: v.licenseInfo && v.licenseInfo.key,
-  };
-  const slug = `${ref.owner}/${ref.name}`;
-  const [prs, runs, prot, alerts] = await Promise.all([
-    json('gh', ['pr', 'list', '-R', slug, '--state', 'open', '--limit', '50', '--json', 'number,title,url,isDraft,updatedAt,mergeable,reviewDecision,statusCheckRollup,headRefName,author'], { cwd: dir }),
-    hasWorkflows ? json('gh', ['run', 'list', '-R', slug, '--limit', '40', '--json', 'databaseId,workflowName,conclusion,status,headBranch,displayTitle,createdAt,url'], { cwd: dir }) : Promise.resolve({ ok: true, data: [] }),
-    snap.remote.defaultBranch && !v.isArchived ? run('gh', ['api', `repos/${slug}/branches/${snap.remote.defaultBranch}/protection`], { cwd: dir }) : Promise.resolve({ ok: true }),
-    json('gh', ['api', `repos/${slug}/dependabot/alerts?state=open&per_page=50`], { cwd: dir }),
-  ]);
-  if (prs.ok) snap.prs = prs.data.map((p) => ({ ...p, statusCheckRollup: rollup(p.statusCheckRollup) }));
-  if (runs.ok) {
-    // Latest completed run per workflow+branch; only report ones that are currently failing.
-    const seen = new Set();
-    for (const r of runs.data) {
-      const key = r.workflowName + '|' + r.headBranch;
-      // Only the default branch: failures on tags/dependabot/feature branches are noise here (PR checks are reported separately).
-      if (r.status !== 'completed' || seen.has(key) || r.headBranch !== snap.remote.defaultBranch) continue;
-      seen.add(key);
-      if (r.conclusion === 'failure' || r.conclusion === 'timed_out') snap.ci.failed.push(r);
-    }
-  } else snap.ci.error = runs.error;
-  snap.protection = prot.ok ? true : /Not Found|not protected/i.test(prot.stderr || '') ? false : null;
-  if (alerts.ok && Array.isArray(alerts.data)) snap.alerts = alerts.data.map((a) => ({ severity: a.security_vulnerability && a.security_vulnerability.severity, pkg: a.dependency && a.dependency.package && a.dependency.package.name }));
-  return snap;
-}
-
-async function scanRepo(dir, opts = {}) {
-  const originUrl = (await run('git', ['remote', 'get-url', 'origin'], { cwd: dir })).stdout.trim();
+// Everything that needs no network: git state, files, manifests.
+async function collectLocal(dir, opts) {
+  const originUrl = (await git(['remote', 'get-url', 'origin'], { cwd: dir })).stdout.trim();
   const ref = parseGithubRemote(originUrl);
   const files = collectFiles(dir);
-  const hasWorkflows = fs.existsSync(path.join(dir, '.github', 'workflows')) && fs.readdirSync(path.join(dir, '.github', 'workflows')).length > 0;
-  const git = await collectGit(dir);
-  const [deps, gh] = await Promise.all([collectDeps(dir, files.names, opts.deep), ref ? collectGitHub(dir, ref, hasWorkflows, git) : Promise.resolve({ remote: null, prs: [], ci: { failed: [], error: null }, protection: null, alerts: [] })]);
-  const base = (gh.remote && gh.remote.defaultBranch) || (git.branches.some((b) => b.name === 'main') ? 'main' : git.branches.some((b) => b.name === 'master') ? 'master' : null);
-  git.mergedBranches = await mergedInto(dir, base, git);
+  const wfDir = path.join(dir, '.github', 'workflows');
+  const hasWorkflows = fs.existsSync(wfDir) && fs.readdirSync(wfDir).length > 0;
+  const [g, deps] = await Promise.all([collectGit(dir), collectDeps(dir, files.names, opts.deep)]);
   delete files.names;
-  const snapshot = { path: dir, name: path.basename(dir), originUrl, git, files, deps, hasWorkflows, scannedAt: new Date().toISOString(), ...gh };
+  return { dir, ref, originUrl, files, hasWorkflows, git: g, deps };
+}
+
+const EMPTY_GH = () => ({ remote: null, prs: [], ci: { failed: [], error: null }, protection: null, alerts: [] });
+
+// Join local data with the GitHub result (if any) and score it.
+async function finish(local, ghRes, opts) {
+  const { dir, ref } = local;
+  let remote = EMPTY_GH();
+  if (ref) {
+    if (ghRes && ghRes.ok) {
+      remote = { ...ghRes.snap, ci: { failed: [], error: null } };
+      if (local.hasWorkflows && !remote.remote.archived) remote.ci = await gh.fetchFailedRuns(ref, remote.remote.defaultBranch, dir, { force: opts.force });
+    } else {
+      remote.remote = { owner: ref.owner, name: ref.name, url: `https://github.com/${ref.owner}/${ref.name}`, isPublic: false, unreachable: true, description: 'unknown', defaultBranch: null };
+      remote.ci.error = ghRes ? ghRes.error : 'GitHub data unavailable';
+    }
+  }
+  const g = local.git;
+  const base = (remote.remote && remote.remote.defaultBranch) || (g.branches.some((b) => b.name === 'main') ? 'main' : g.branches.some((b) => b.name === 'master') ? 'master' : null);
+  g.mergedBranches = await mergedInto(dir, base, g);
+  const snapshot = { path: dir, name: path.basename(dir), originUrl: local.originUrl, git: g, files: local.files, deps: local.deps, hasWorkflows: local.hasWorkflows, scannedAt: new Date().toISOString(), ...remote };
   return { ...snapshot, ...evaluate(snapshot) };
 }
 
-// Scan many repos with bounded concurrency; onResult is called as each finishes.
+const failed = (dir, e) => ({ path: dir, name: path.basename(dir), error: String(e && e.message ? e.message : e), findings: [], score: 0, grade: '?' });
+
+// Bounded-concurrency map.
+async function pool(items, limit, fn) {
+  const queue = [...items];
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (queue.length) await fn(queue.shift());
+  }));
+}
+
+// Scan one repo, bypassing the GitHub cache (used after an action or an explicit rescan).
+async function scanRepo(dir, opts = {}) {
+  const local = await collectLocal(dir, opts);
+  const res = local.ref ? (await gh.fetchRepos([local.ref], { force: true })).get(`${local.ref.owner}/${local.ref.name}`) : null;
+  return finish(local, res, { ...opts, force: true });
+}
+
+// Scan many repos: local data first, then ONE batched GitHub query for all of them, then per-repo CI.
 async function scanAll(dirs, opts = {}, onResult = () => {}) {
-  const queue = [...dirs];
+  await gh.refreshRate();
+  const locals = [];
+  await pool(dirs, 4, async (d) => {
+    try { locals.push(await collectLocal(d, opts)); } catch (e) { locals.push({ dir: d, error: e }); }
+  });
+  const ok = locals.filter((l) => !l.error);
+  const ghMap = await gh.fetchRepos(ok.filter((l) => l.ref).map((l) => l.ref));
   const results = [];
-  const worker = async () => {
-    while (queue.length) {
-      const d = queue.shift();
-      let res;
-      try {
-        res = await scanRepo(d, opts);
-      } catch (e) {
-        res = { path: d, name: path.basename(d), error: String(e && e.message ? e.message : e), findings: [], score: 0, grade: '?' };
-      }
-      results.push(res);
-      onResult(res, results.length, dirs.length);
+  let done = 0;
+  const emit = (res) => { results.push(res); onResult(res, ++done, dirs.length); };
+  for (const l of locals.filter((l) => l.error)) emit(failed(l.dir, l.error));
+  await pool(ok, 3, async (l) => {
+    try {
+      emit(await finish(l, l.ref ? ghMap.get(`${l.ref.owner}/${l.ref.name}`) : null, opts));
+    } catch (e) {
+      emit(failed(l.dir, e));
     }
-  };
-  await Promise.all(Array.from({ length: Math.min(opts.concurrency || 4, dirs.length) }, worker));
+  });
   return results;
 }
 

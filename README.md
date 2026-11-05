@@ -28,6 +28,14 @@ chmod +x GutCheck-*.AppImage
 
 Requires `gh` and `git` on your `PATH`, and `gh auth login` completed.
 
+## API usage and privacy
+
+- GitHub data for all repos in a scan is fetched with batched GraphQL queries (10 repos per query), plus one REST call per repo that has workflows. Results are cached in memory for 2 minutes and never written to disk.
+- Remaining quota is shown in the header. When it runs low, GutCheck stops making calls instead of hitting the limit.
+- The only network access is through your own `gh` CLI. There is no telemetry, no updater and no other server. The UI is sandboxed with a strict Content Security Policy.
+- Scans run read-only `git` commands with hooks and `core.fsmonitor` disabled, so opening an untrusted repo does not run its code.
+- Actions only act on branches, PRs and runs found in the last scan, and destructive ones ask first.
+
 ## Develop
 
 ```bash

@@ -44,3 +44,20 @@ test('parseGithubRemote handles ssh and https', () => {
   assert.deepEqual(parseGithubRemote('https://github.com/a/b'), { owner: 'a', name: 'b' });
   assert.equal(parseGithubRemote('https://gitlab.com/a/b'), null);
 });
+
+const { execute } = require('../src/actions');
+
+test('parseGithubRemote rejects unexpected characters', () => {
+  assert.equal(parseGithubRemote('https://github.com/a/b;rm -rf'), null);
+  assert.equal(parseGithubRemote('https://github.com/a/b$(x)'), null);
+});
+
+test('actions only operate on state that was actually scanned', async () => {
+  const repo = { remote: { owner: 'o', name: 'r' }, ci: { failed: [{ databaseId: 1 }] }, prs: [{ number: 5 }], git: { mergedBranches: ['old'] } };
+  assert.equal((await execute('/nope', repo, { type: 'rerun-failed', runId: 2 })).ok, false);
+  assert.equal((await execute('/nope', repo, { type: 'merge-pr', number: 6 })).ok, false);
+  assert.equal((await execute('/nope', repo, { type: 'delete-merged', branches: ['main'] })).ok, false);
+  assert.equal((await execute('/nope', repo, { type: 'delete-merged', branches: ['--force'] })).ok, false);
+  assert.equal((await execute('/nope', repo, { type: 'create-file', file: '../../etc/passwd', template: 'mit' })).ok, false);
+  assert.equal((await execute('/nope', repo, { type: 'bogus' })).ok, false);
+});

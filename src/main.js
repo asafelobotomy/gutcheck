@@ -1,11 +1,29 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, session } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { discover, scanRepo, scanAll } = require('./scanner');
+const github = require('./github');
 const { execute, describe, NEEDS_CONFIRM } = require('./actions');
 const { run } = require('./exec');
 
 let win;
+let scanning = false;
+const RENDERER_FILE = path.join(__dirname, 'renderer', 'index.html');
+// Only our own bundled page may call privileged IPC.
+const trusted = (e) => {
+  try {
+    const u = new URL(e.senderFrame.url);
+    return u.protocol === 'file:' && path.normalize(decodeURIComponent(u.pathname)) === RENDERER_FILE;
+  } catch {
+    return false;
+  }
+};
+function handle(channel, fn) {
+  ipcMain.handle(channel, (e, ...args) => {
+    if (!trusted(e)) throw new Error('Untrusted sender');
+    return fn(e, ...args);
+  });
+}
 const known = new Map(); // path -> latest scan result (only these paths may be acted on)
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 const loadSettings = () => {
@@ -29,39 +47,47 @@ function openExternal(url) {
   if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url);
 }
 
-ipcMain.handle('settings:get', () => loadSettings());
+handle('settings:get', () => loadSettings());
 
-ipcMain.handle('auth:status', async () => {
+handle('auth:status', async () => {
   const r = await run('gh', ['auth', 'status']);
-  return { ok: r.ok, text: (r.stdout + r.stderr).trim() };
+  return { ok: r.ok }; // never forward gh's output (account, scopes) to the renderer
 });
 
-ipcMain.handle('dir:pick', async () => {
+handle('rate:get', () => github.refreshRate());
+
+handle('dir:pick', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
   return r.canceled ? null : r.filePaths[0];
 });
 
-ipcMain.handle('scan:start', async (_e, { root, deep }) => {
+handle('scan:start', async (_e, { root, deep }) => {
   if (typeof root !== 'string' || !fs.existsSync(root)) return { ok: false, error: 'Folder does not exist' };
-  saveSettings({ ...loadSettings(), root, deep: !!deep });
-  const dirs = discover(root);
-  known.clear();
-  win.webContents.send('scan:begin', { total: dirs.length });
-  const results = await scanAll(dirs, { deep }, (res, done, total) => {
-    known.set(res.path, res);
-    win.webContents.send('scan:repo', { res, done, total });
-  });
-  return { ok: true, count: results.length };
+  if (scanning) return { ok: false, error: 'A scan is already running' };
+  scanning = true;
+  try {
+    saveSettings({ ...loadSettings(), root, deep: !!deep });
+    const dirs = discover(root);
+    known.clear();
+    win.webContents.send('scan:begin', { total: dirs.length });
+    const results = await scanAll(dirs, { deep: !!deep }, (res, done, total) => {
+      known.set(res.path, res);
+      win.webContents.send('scan:repo', { res, done, total });
+    });
+    return { ok: true, count: results.length, rate: github.getRate() };
+  } finally {
+    scanning = false;
+  }
 });
 
-ipcMain.handle('scan:one', async (_e, { dir, deep }) => {
+handle('scan:one', async (_e, { dir, deep }) => {
   if (!known.has(dir)) return { ok: false, error: 'Unknown repo' };
-  const res = await scanRepo(dir, { deep });
+  const res = await scanRepo(dir, { deep: !!deep });
   known.set(dir, res);
-  return { ok: true, res };
+  return { ok: true, res, rate: github.getRate() };
 });
 
-ipcMain.handle('action:run', async (_e, { dir, action }) => {
+handle('action:run', async (_e, { dir, action }) => {
   const repo = known.get(dir);
   if (!repo) return { ok: false, stderr: 'Unknown repo' };
   if (!action || typeof action.type !== 'string') return { ok: false, stderr: 'Bad action' };
@@ -72,8 +98,18 @@ ipcMain.handle('action:run', async (_e, { dir, action }) => {
   return execute(dir, repo, action);
 });
 
-ipcMain.handle('open:url', (_e, url) => openExternal(url));
-ipcMain.handle('open:folder', (_e, dir) => { if (known.has(dir)) shell.openPath(dir); });
+handle('open:url', (_e, url) => openExternal(url));
+handle('open:folder', (_e, dir) => { if (known.has(dir)) shell.openPath(dir); });
 
-app.whenReady().then(createWindow);
+// Defence in depth: the app loads only its own bundled page, so deny every permission request,
+// all webviews and all new windows.
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('will-attach-webview', (ev) => ev.preventDefault());
+});
+
+app.whenReady().then(() => {
+  session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+  session.defaultSession.setPermissionCheckHandler(() => false);
+  createWindow();
+});
 app.on('window-all-closed', () => app.quit());

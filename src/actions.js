@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { run } = require('./exec');
+const { run, gitWrite } = require('./exec');
 
 const BRANCH_RE = /^[A-Za-z0-9._/-]+$/;
 
@@ -36,11 +36,11 @@ const NEEDS_CONFIRM = new Set(['merge-pr', 'delete-merged', 'push', 'create-file
 
 function describe(a, repoName) {
   switch (a.type) {
-    case 'merge-pr': return `Squash-merge PR #${a.number} in ${repoName}?`;
+    case 'merge-pr': return `Squash-merge PR #${a.number} in ${repoName} and delete its branch on GitHub?`;
     case 'delete-merged': return `Delete ${a.branches.length} merged local branch(es) in ${repoName}?\n\n${a.branches.join('\n')}`;
     case 'push': return `Push the current branch of ${repoName} to its upstream?`;
     case 'create-file': return `Create ${a.file} in ${repoName}? (Nothing is committed.)`;
-    case 'npm-install': return `Run npm install in ${repoName}?`;
+    case 'npm-install': return `Run npm install in ${repoName}?\n\nThis executes the project's package install scripts.`;
     default: return `Run ${a.type} on ${repoName}?`;
   }
 }
@@ -50,25 +50,25 @@ async function execute(dir, repo, a) {
   const slug = repo && repo.remote ? `${repo.remote.owner}/${repo.remote.name}` : null;
   switch (a.type) {
     case 'fetch':
-      return run('git', ['fetch', '--all', '--prune'], { cwd: dir, timeout: 60000 });
+      return gitWrite(['fetch', '--all', '--prune'], { cwd: dir, timeout: 60000 });
     case 'pull':
-      return run('git', ['pull', '--ff-only'], { cwd: dir, timeout: 60000 });
+      return gitWrite(['pull', '--ff-only'], { cwd: dir, timeout: 60000 });
     case 'push':
-      return run('git', ['push'], { cwd: dir, timeout: 60000 });
+      return gitWrite(['push'], { cwd: dir, timeout: 60000 });
     case 'rerun-failed': {
-      if (!slug || !Number.isInteger(a.runId)) return bad('invalid run');
+      if (!slug || !(repo.ci?.failed || []).some((r) => r.databaseId === a.runId)) return bad('run is not a known failed run');
       return run('gh', ['run', 'rerun', String(a.runId), '--failed', '-R', slug], { cwd: dir });
     }
     case 'merge-pr': {
-      if (!slug || !Number.isInteger(a.number)) return bad('invalid PR');
+      if (!slug || !(repo.prs || []).some((p) => p.number === a.number)) return bad('PR is not a known open PR');
       return run('gh', ['pr', 'merge', String(a.number), '--squash', '--delete-branch', '-R', slug], { cwd: dir, timeout: 60000 });
     }
     case 'delete-merged': {
       const names = Array.isArray(a.branches) ? a.branches : [];
-      if (!names.length || !names.every((b) => BRANCH_RE.test(b) && !b.startsWith('-'))) return bad('invalid branch list');
+      const merged = repo.git?.mergedBranches || [];
+      if (!names.length || !names.every((b) => BRANCH_RE.test(b) && !b.startsWith('-') && merged.includes(b))) return bad('branch list does not match the scanned merged branches');
       // -d (not -D): git itself refuses to delete anything not fully merged.
-      const r = await run('git', ['branch', '-d', ...names], { cwd: dir });
-      return r;
+      return gitWrite(['branch', '-d', '--', ...names], { cwd: dir });
     }
     case 'npm-install':
       return run('npm', ['install'], { cwd: dir, timeout: 300000 });

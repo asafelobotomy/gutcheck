@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   settings: () => ipcRenderer.invoke('settings:get'),
+  rate: () => ipcRenderer.invoke('rate:get'),
   authStatus: () => ipcRenderer.invoke('auth:status'),
   pickDir: () => ipcRenderer.invoke('dir:pick'),
   scan: (root, deep) => ipcRenderer.invoke('scan:start', { root, deep }),

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'none'; img-src 'none'; form-action 'none'; base-uri 'none'" />
   <title>GutCheck</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -13,6 +13,7 @@
     <button id="browse">Browse…</button>
     <label class="deep" title="Also runs npm outdated per repo (slower)"><input id="deep" type="checkbox" /> Deep scan</label>
     <button id="scan" class="primary">Scan</button>
+    <span id="rate" class="pill" title="Remaining GitHub API quota"></span>
     <span id="auth" class="pill"></span>
   </header>
   <div id="progress" hidden><div id="bar"></div><span id="ptext"></span></div>

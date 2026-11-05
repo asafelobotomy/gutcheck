@@ -76,7 +76,7 @@ async function doAction(r, fix, btn) {
 
 async function refreshOne(dir) {
   const out = await window.api.rescan(dir, $('deep').checked);
-  if (out.ok) state.repos.set(dir, out.res);
+  if (out.ok) { state.repos.set(dir, out.res); showRate(out.rate); }
   renderStats(); renderList(); renderDetail();
 }
 
@@ -115,8 +115,9 @@ function renderOverview() {
   state.selected = null;
   const groups = new Map();
   for (const r of state.repos.values()) for (const f of r.findings || []) {
-    const kind = f.id.replace(/-\d+$/, '').replace(/^(ci-failed|pr-\w+)-.*/, '$1');
-    const g = groups.get(kind) || { title: f.title.replace(/#?\d+/g, 'N'), sev: f.severity, cat: f.category, repos: [] };
+    const title = f.title.replace(/#?\d+/g, 'N');
+    const kind = f.category + '|' + title;
+    const g = groups.get(kind) || { title, sev: f.severity, cat: f.category, repos: [] };
     g.repos.push(r.name); groups.set(kind, g);
   }
   const order = { error: 0, warn: 1, info: 2 };
@@ -133,9 +134,10 @@ function select(dir) { state.selected = dir; renderList(); renderDetail(); }
 async function startScan() {
   const root = $('root').value.trim();
   if (!root || state.scanning) return;
-  state.scanning = true; state.repos.clear(); state.selected = null;
+  state.scanning = true; state.repos.clear(); state.selected = null; $('ptext').textContent = 'Scanning…'; $('progress').hidden = false;
   $('scan').disabled = true; renderStats(); renderList(); renderOverview();
   const out = await window.api.scan(root, $('deep').checked);
+  showRate(out.rate);
   state.scanning = false; $('scan').disabled = false; $('progress').hidden = true;
   if (!out.ok) toast(out.error, 'bad');
   else if (!out.count) toast('No git repositories found under that folder.', 'bad');
@@ -143,11 +145,28 @@ async function startScan() {
 }
 
 window.api.onBegin(({ total }) => { $('progress').hidden = false; $('bar').style.width = '0'; $('ptext').textContent = `Found ${total} repositories…`; });
+// Repo results can arrive faster than we can usefully paint; coalesce to one render per frame.
+let paintQueued = false;
+function schedulePaint() {
+  if (paintQueued) return;
+  paintQueued = true;
+  requestAnimationFrame(() => { paintQueued = false; renderStats(); renderList(); });
+}
+
+function showRate(rate) {
+  const pill = $('rate');
+  if (!rate || !rate.core) { pill.textContent = ''; return; }
+  const n = (x) => x.remaining.toLocaleString();
+  pill.textContent = `API left: ${n(rate.core)} REST · ${n(rate.graphql)} GraphQL`;
+  pill.classList.toggle('bad', !!rate.limited);
+  pill.title = `Resets ${new Date(rate.core.reset).toLocaleTimeString()} (REST) / ${new Date(rate.graphql.reset).toLocaleTimeString()} (GraphQL)`;
+}
+
 window.api.onRepo(({ res, done, total }) => {
   state.repos.set(res.path, res);
   $('bar').style.width = (done / total) * 100 + '%';
   $('ptext').textContent = `Scanned ${done}/${total}`;
-  renderStats(); renderList();
+  schedulePaint();
 });
 
 $('scan').addEventListener('click', startScan);
@@ -166,4 +185,5 @@ $('overview').addEventListener('click', () => { state.selected = null; renderLis
   pill.textContent = a.ok ? 'gh: signed in' : 'gh: not signed in (run gh auth login)';
   pill.classList.add(a.ok ? 'ok' : 'bad');
   renderStats();
+  showRate(await window.api.rate());
 })();
