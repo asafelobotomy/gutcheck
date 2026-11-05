@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { repos: new Map(), selected: null, view: 'dashboard', scanning: false, readOnly: false, clutter: null, picked: new Set(), trend: [] };
+const state = { repos: new Map(), selected: null, view: 'dashboard', scanning: false, readOnly: false, clutter: null, quality: null, picked: new Set(), trend: [] };
 
 // DOM helper: all text goes through textContent, so repo/PR titles from GitHub can never inject markup.
 function h(tag, attrs = {}, ...kids) {
@@ -70,105 +70,6 @@ function renderList() {
           r.prs?.length ? h('span', {}, `${r.prs.length} PR`) : null,
           !r.remote && !r.error ? h('span', {}, 'local only') : null)));
   }));
-}
-
-/* ---------------------------------------------------------------- modals */
-
-function modal(build) {
-  return new Promise((resolve) => {
-    const close = (v) => { overlay.remove(); resolve(v); };
-    const box = h('div', { class: 'modal' });
-    const overlay = h('div', { class: 'overlay' }, box);
-    build(box, close);
-    document.body.append(overlay);
-    const first = box.querySelector('input,select,button.primary');
-    if (first) first.focus();
-  });
-}
-
-// Fields the user fills in before an action is planned. The main process validates everything again.
-const INPUTS = {
-  'create-branch': { title: 'New branch', fields: [{ name: 'name', label: 'Branch name', type: 'text', required: true, placeholder: 'feature/my-change' }] },
-  'commit-all': { title: 'Commit all changes', fields: [{ name: 'message', label: 'Commit message', type: 'text', required: true }] },
-  'repo-edit': { title: 'Edit repository settings', fields: [{ name: 'description', label: 'Description', type: 'text' }, { name: 'deleteBranchOnMerge', label: 'Automatically delete branches after they are merged', type: 'checkbox' }] },
-  'pr-merge': { title: 'Merge pull request', fields: [{ name: 'method', label: 'Method', type: 'select', options: [['squash', 'Squash and merge'], ['merge', 'Merge commit'], ['rebase', 'Rebase and merge']] }, { name: 'deleteBranch', label: 'Delete the branch afterwards', type: 'checkbox' }] },
-  'pr-create': { title: 'Open pull request', fields: [{ name: 'title', label: 'Title (leave empty to use the commit messages)', type: 'text' }] },
-  'protect-branch': { title: 'Protect default branch', fields: [{ name: 'preset', label: 'Preset', type: 'select', options: [['basic', 'Basic: PR required, no force-push or deletion'], ['strict', 'Strict: also 1 approval, admins included']] }] },
-  'merge-branch': { title: 'Merge into current branch', fields: [{ name: 'mode', label: 'Mode', type: 'select', options: [['ff', 'Fast-forward only'], ['no-ff', 'Always create a merge commit']] }] },
-  'add-file': { title: 'Add file', fields: [{ name: 'commit', label: 'Also commit the new file', type: 'checkbox' }] },
-};
-
-function askInputs(spec, values) {
-  return modal((box, close) => {
-    const inputs = {};
-    const rows = spec.fields.map((f) => {
-      let el;
-      if (f.type === 'select') el = h('select', {}, f.options.map(([v, l]) => h('option', { value: v }, l)));
-      else if (f.type === 'checkbox') el = h('input', { type: 'checkbox' });
-      else el = h('input', { type: 'text', placeholder: f.placeholder || '', spellcheck: 'false' });
-      const v = values[f.name];
-      if (f.type === 'checkbox') el.checked = !!v;
-      else if (v != null) el.value = v;
-      inputs[f.name] = el;
-      return f.type === 'checkbox' ? h('label', { class: 'frow chk' }, el, ' ', f.label) : h('label', { class: 'frow' }, h('span', {}, f.label), el);
-    });
-    const submit = () => {
-      const out = {};
-      for (const f of spec.fields) {
-        const el = inputs[f.name];
-        out[f.name] = f.type === 'checkbox' ? el.checked : el.value.trim();
-        if (f.required && !out[f.name]) { el.focus(); return; }
-      }
-      close(out);
-    };
-    box.addEventListener('keydown', (e) => e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type === 'text' && submit());
-    box.append(h('h3', { class: 'mh' }, spec.title), ...rows,
-      h('div', { class: 'mbtns' }, h('button', { onclick: () => close(null) }, 'Cancel'), h('button', { class: 'primary', onclick: submit }, 'Continue')));
-  });
-}
-
-const RISK_LABEL = { safe: 'Safe', caution: 'Changes things', danger: 'Dangerous' };
-
-// Show the exact plan. Resolves to true if the user confirms.
-function confirmPlans(plans) {
-  const danger = plans.some((p) => p.risk === 'danger');
-  const nameNeeded = plans.length === 1 ? plans[0].confirmName : danger ? 'CONFIRM' : null;
-  return modal((box, close) => {
-    const ok = h('button', { class: danger ? 'danger' : 'primary' }, plans.length > 1 ? `Apply to ${plans.length} repos` : 'Apply');
-    let typed;
-    if (nameNeeded) {
-      typed = h('input', { type: 'text', placeholder: nameNeeded, spellcheck: 'false' });
-      ok.disabled = true;
-      typed.addEventListener('input', () => (ok.disabled = typed.value !== nameNeeded));
-    }
-    ok.addEventListener('click', () => close(true));
-    box.classList.add('wide');
-    box.append(
-      h('h3', { class: 'mh' }, plans.length > 1 ? `Review ${plans.length} changes` : 'Review change'),
-      h('p', { class: 'sub' }, 'These exact commands will run, and nothing else.'),
-      h('div', { class: 'plans' }, plans.map((p) => h('div', { class: 'plan ' + p.risk },
-        h('div', { class: 'phead' }, h('b', {}, p.repoName), h('span', { class: 'risk r-' + p.risk }, RISK_LABEL[p.risk])),
-        h('div', {}, p.title),
-        p.note ? h('div', { class: 'muted' }, p.note) : null,
-        ...p.warnings.map((w) => h('pre', { class: 'warnbox' }, w)),
-        ...p.display.map((d) => h('div', {}, h('code', {}, d.text), d.preview ? h('pre', { class: 'prev' }, d.preview) : null)),
-        p.body ? h('details', {}, h('summary', {}, 'Request body'), h('pre', { class: 'prev' }, p.body)) : null,
-        p.undo ? h('div', { class: 'muted' }, 'To undo: ', h('code', {}, p.undo)) : null))),
-      ...(nameNeeded ? [h('label', { class: 'frow' }, h('span', {}, `Type "${nameNeeded}" to confirm`), typed)] : []),
-      h('div', { class: 'mbtns' }, h('button', { onclick: () => close(false) }, 'Cancel'), ok));
-  });
-}
-
-function showResults(outs) {
-  return modal((box, close) => {
-    box.classList.add('wide');
-    box.append(h('h3', { class: 'mh' }, outs.every((o) => o.ok) ? 'Done' : 'Finished with errors'),
-      h('div', { class: 'plans' }, outs.map((o) => h('div', { class: 'plan ' + (o.ok ? 'safe' : 'danger') },
-        h('b', {}, `${o.repoName || ''}  ${o.ok ? '✓' : '✗'}`),
-        o.error ? h('div', { class: 'b-err' }, o.error) : null,
-        ...(o.results || []).map((r) => h('div', {}, h('code', {}, (r.ok ? '✓ ' : '✗ ') + r.text), r.out ? h('pre', { class: 'prev' }, r.out) : null))))),
-      h('div', { class: 'mbtns' }, h('button', { class: 'primary', onclick: () => close() }, 'Close')));
-  });
 }
 
 /* ---------------------------------------------------------------- running actions */
@@ -368,6 +269,7 @@ async function renderHistory() {
 
 function renderMain() {
   if (state.view === 'clutter') renderClutterView();
+  else if (state.view === 'quality') renderQualityView();
   else if (state.view === 'repo' && state.repos.has(state.selected)) renderRepo();
   else if (state.view === 'history') renderHistory();
   else if (state.view === 'overview') renderOverview();
@@ -381,7 +283,7 @@ function select(dir) { state.selected = dir; state.view = 'repo'; renderList(); 
 async function startScan() {
   const root = $('root').value.trim();
   if (!root || state.scanning) return;
-  state.scanning = true; state.clutter = null; state.picked.clear(); state.repos.clear(); state.selected = null; state.view = 'dashboard';
+  state.scanning = true; state.clutter = null; state.quality = null; state.picked.clear(); state.repos.clear(); state.selected = null; state.view = 'dashboard';
   $('ptext').textContent = 'Scanning…'; $('progress').hidden = false;
   $('scan').disabled = true; renderStats(); renderList(); renderMain();
   const out = await window.api.scan(root, $('deep').checked);

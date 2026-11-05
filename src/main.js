@@ -97,12 +97,16 @@ const trendStore = {
   read: () => JSON.parse(fs.readFileSync(trendFile(), 'utf8')),
   write: (a) => { const f = trendFile(); fs.writeFileSync(f + '.tmp', JSON.stringify(a)); fs.renameSync(f + '.tmp', f); },
 };
-const service = createService({ known, settings: loadSettings, audit, trash: (f) => shell.trashItem(f), clipboard, trendStore });
+const updateSettings = (patch) => { const s = { ...loadSettings(), ...patch }; saveSettings(s); return s; };
+const service = createService({ known, settings: loadSettings, audit, trash: (f) => shell.trashItem(f), clipboard, trendStore, updateSettings });
 
 handle('action:plan', (_e, { items }) => service.planActions(items));
 handle('action:apply', (_e, { tokens }) => service.applyActions(tokens));
 handle('clutter:scan', (_e, { dirs } = {}) => service.clutterScan(dirs));
 handle('trend:get', () => service.trend());
+handle('quality:scan', (_e, { dirs } = {}) => service.qualityScan(dirs));
+handle('quality:settings', () => service.qualitySettings());
+handle('quality:set', (_e, patch) => service.setQualitySettings(patch));
 handle('report:copy', (_e, { dir } = {}) => service.copyReport(dir));
 
 handle('audit:list', () => readAudit(auditFile()));

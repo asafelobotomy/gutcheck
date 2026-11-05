@@ -30,7 +30,17 @@ function load() {
 
 test('every IPC channel is registered', () => {
   const { handlers } = load();
-  for (const c of ['settings:get', 'settings:set', 'auth:status', 'rate:get', 'dir:pick', 'scan:start', 'scan:one', 'action:plan', 'action:apply', 'clutter:scan', 'report:copy', 'trend:get', 'audit:list', 'open:url', 'open:folder']) assert.ok(handlers.has(c), c);
+  for (const c of ['settings:get', 'settings:set', 'auth:status', 'rate:get', 'dir:pick', 'scan:start', 'scan:one', 'action:plan', 'action:apply', 'clutter:scan', 'report:copy', 'trend:get', 'quality:scan', 'quality:settings', 'quality:set', 'audit:list', 'open:url', 'open:folder']) assert.ok(handlers.has(c), c);
+});
+
+test('quality settings round-trip through IPC with validation', async () => {
+  const { call } = load();
+  assert.deepEqual(await call('quality:settings'), { maxLines: 400, locMode: 'total', ignore: [] });
+  assert.equal((await call('quality:set', { maxLines: 650, locMode: 'code', ignore: ['legacy/'] })).maxLines, 650);
+  assert.deepEqual(await call('quality:settings'), { maxLines: 650, locMode: 'code', ignore: ['legacy/'] });
+  assert.equal((await call('quality:set', { maxLines: -4 })).maxLines, 400);
+  assert.equal((await call('quality:set', 'junk')).maxLines, 400);
+  assert.equal((await call('quality:scan', {})).ok, false); // nothing scanned yet
 });
 
 test('only the bundled page may call privileged IPC', async () => {

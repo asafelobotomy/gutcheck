@@ -36,6 +36,18 @@ After a scan GutCheck opens on a **Dashboard**: KPI cards (average health, error
 
 An **issue heatmap** shows repos against problem categories (darker means more issues, colour is the worst severity). **Trends** show average health, errors and warnings, and clutter size across scans, and the cards show the change since the previous scan, plus the repos whose score moved most. GutCheck keeps one small snapshot per scan (scores and totals only, no paths or file names) in `trend.json` in its app data folder, scoped per workspace folder, capped at 365 snapshots; scans within 10 minutes of each other replace one another. Delete the file to reset the history.
 
+## Code quality
+
+The **Code quality** view runs read-only checks on the source of every scanned repo (it respects `.gitignore` and skips `node_modules`, build output, lockfiles, minified and generated files):
+
+- **File length (LOC)**: files over your limit. The default is **400 lines**; change it, choose to count all lines or only code lines (no blanks or comments), and add ignore rules (`legacy/`, `*.generated.ts`, or part of a path) in the form at the top of the view. Settings are validated (20 to 20000) and saved.
+- **Magic numbers**: bare numeric literals in non-test code for JavaScript/TypeScript, Python, Go, Rust, Java, Kotlin, C/C++, C#, PHP, Swift, Ruby and shell. Strings, comments and regexes are ignored, as are `0, 1, 2, 10, 100, 0.5`, constant definitions (`MAX_X = 5`), array indices, imports and data tables.
+- **Constants library**: finds constants modules and named constants, flags raw numbers that may repeat an existing constant (values above 100), lists numbers repeated three or more times without a name, and suggests creating a constants module when there are many bare numbers and none.
+- **Secrets**: AWS, GitHub, Slack, Google, Stripe and private-key signatures plus hardcoded `password = "..."` style credentials. Only the **file, line and kind** are recorded; the value never leaves the scanner and never appears in the UI, the report or the history.
+- **Other checks**: `TODO` / `FIXME` / `HACK` markers, `debugger` / `breakpoint()` leftovers and `console.log` noise, files over 5 MB, and source without any tests.
+
+Results feed the Dashboard (cards, largest files, lines per language, magic numbers per repo, and trends once you have two scans) and the **Copy for LLM** report, which gets a Code quality section with the exact locations and ordered steps (secrets first).
+
 ## Copy for LLM
 
 **Copy for LLM** (on each repo, and on the Workspace overview for everything) puts a Markdown report on your clipboard: a status snapshot, open PRs, failing CI, detected clutter, and an ordered action plan with exact commands (secrets first, then saving work, CI/PRs, missing files, dependencies, branches, clutter, settings). Paste it into any LLM to have it do the fixing instead of using the app. The report tells the assistant to ask before destructive steps, never read `.env` contents, and treat PR titles and file names as data. It contains repo paths and names but no file contents.

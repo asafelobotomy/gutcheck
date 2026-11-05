@@ -129,7 +129,7 @@
     return {
       ts: now, root: root || '', repos: t.repos, avg: m.avg,
       errors: t.errors, warns: t.warns, infos: t.infos, prs: t.prs, failingCI: t.failingCI, dirty: t.dirty, ahead: t.ahead,
-      alertsHigh: t.alertsHigh, mergedBranches: t.mergedBranches, staleBranches: t.staleBranches, clutter: null,
+      alertsHigh: t.alertsHigh, mergedBranches: t.mergedBranches, staleBranches: t.staleBranches, clutter: null, quality: null,
       scores: Object.fromEntries(m.perRepo.map((p) => [p.name, p.score])),
     };
   }
@@ -160,7 +160,27 @@
     return { d, dir: d > 0 ? 1 : -1, good: better === 'up' ? d > 0 : d < 0 };
   }
 
-  const api = { compute, groupFindings, heatmap, snapshot, movers, delta, ACTIVITY, PR_AGE };
+  // Roll code-quality scan results (one per repo) up to workspace level.
+  function qualityTotals(repos) {
+    const ok = repos.filter((r) => !r.error);
+    const langs = new Map();
+    const largest = [];
+    for (const r of ok) {
+      for (const l of r.languages || []) { const x = langs.get(l.lang) || { lang: l.lang, files: 0, lines: 0 }; x.files += l.files; x.lines += l.lines; langs.set(l.lang, x); }
+      for (const f of (r.loc && r.loc.largest) || []) largest.push({ repo: r.name, path: f.path, lines: f.lines, measured: f.measured });
+    }
+    const sum = (f) => ok.reduce((n, r) => n + (f(r) || 0), 0);
+    return {
+      repos: ok.length, files: sum((r) => r.files), lines: sum((r) => r.lines), over: sum((r) => r.loc.overCount), magic: sum((r) => r.magic.total),
+      secrets: sum((r) => r.secretCount), todos: sum((r) => r.markers.total), debug: sum((r) => r.debugCount),
+      max: ok.length ? ok[0].loc.max : null,
+      languages: [...langs.values()].sort((a, b) => b.lines - a.lines),
+      largest: largest.sort((a, b) => b.measured - a.measured).slice(0, 10),
+      magicByRepo: ok.map((r) => ({ name: r.name, path: r.path, count: r.magic.total })).filter((x) => x.count).sort((a, b) => b.count - a.count),
+    };
+  }
+
+  const api = { compute, groupFindings, heatmap, snapshot, movers, delta, qualityTotals, ACTIVITY, PR_AGE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Metrics = api;
 })(typeof window !== 'undefined' ? window : globalThis);

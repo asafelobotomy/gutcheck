@@ -28,7 +28,16 @@ const CLUTTER = { ok: true, workspace: [{ id: 'ws', category: 'Workspace', sever
     { path: 'coverage', name: 'coverage', kind: 'dir', category: 'test-artifact', reason: 'Test coverage report', confidence: 'medium', size: 2028, ageDays: 1, keep: null, ignored: false, mode: 'trash' }],
   advice: [{ id: 'env-not-ignored', category: 'Organisation', severity: 'error', title: '1 env file is not git-ignored', detail: '.env', fix: { type: 'gitignore-append', label: 'Add env rules to .gitignore', entries: ['.env'] } }] }] };
 
-async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clutter = CLUTTER } = {}) {
+const QUALITY = { ok: true, settings: { maxLines: 400, locMode: 'total', ignore: [] }, repos: [
+  { path: '/w/gamma', name: 'gamma', files: 12, lines: 2400, sourceFiles: 10, testFiles: 2, languages: [{ lang: 'JavaScript', files: 10, lines: 2000 }, { lang: 'Python', files: 2, lines: 400 }],
+    loc: { max: 400, mode: 'total', overCount: 1, over: [{ path: 'src/big.js', lines: 950, code: 800, measured: 950, lang: 'JavaScript', test: false }], largest: [{ path: 'src/big.js', lines: 950, measured: 950 }, { path: 'src/small.js', lines: 120, measured: 120 }] },
+    magic: { total: 30, denseFiles: 1, files: [{ path: 'src/big.js', count: 30, examples: [{ line: 12, value: '5000', text: 'setTimeout(f, 5000);' }] }], repeated: [{ value: 5000, count: 4, files: 2, uses: [{ path: 'src/big.js', line: 12 }] }], reuse: [{ value: 86400000, constant: 'DAY_MS', definedIn: 'src/c.js:1', count: 2, uses: [{ path: 'src/big.js', line: 40 }] }], constants: { files: [], definitions: 1 } },
+    markers: { TODO: 2, FIXME: 1, HACK: 0, XXX: 0, total: 3, items: [{ path: 'src/big.js', line: 7, kind: 'TODO', text: 'tidy' }] },
+    debug: [], debugCount: 0, secrets: [{ path: 'src/cfg.js', line: 3, kind: 'AWS access key' }], secretCount: 1, largeFiles: [], skipped: {}, truncated: false,
+    advice: [{ id: 'q-secrets', category: 'Code quality', severity: 'error', title: '1 possible hardcoded secret', detail: 'src/cfg.js:3 (AWS access key)' }, { id: 'q-loc', category: 'Code quality', severity: 'warn', title: '1 file over 400 lines', detail: 'src/big.js (950)' }] },
+] };
+
+async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clutter = CLUTTER, quality = QUALITY } = {}) {
   const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8').replace(/<script[^>]*><\/script>/g, '');
   const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true, url: 'file:///app/index.html' });
   const w = dom.window;
@@ -43,10 +52,13 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
     copyReport: async (d) => { calls.push(['copy', d]); return { ok: true, chars: 5000, repos: 1 }; },
     clutterScan: async (d) => { calls.push(['clutterScan', d]); return clutter; },
     trend: async () => trend,
+    qualityScan: async (d) => { calls.push(['qualityScan', d]); return quality; },
+    qualitySettings: async () => quality.settings,
+    setQualitySettings: async (p) => { calls.push(['qualitySet', p]); return { ...quality.settings, ...p }; },
     onBegin: () => {}, onRepo: (cb) => { onRepo = cb; },
   };
   const ctx = dom.getInternalVMContext();
-  for (const f of ['metrics.js', 'app.js', 'clutter-view.js', 'dashboard.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
+  for (const f of ['metrics.js', 'app.js', 'modals.js', 'clutter-view.js', 'quality-view.js', 'dashboard.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
   await tick();
   return { dom, w, doc: w.document, calls, $: (s) => w.document.querySelector(s), $$: (s) => [...w.document.querySelectorAll(s)], run: (code) => new vm.Script(code).runInContext(ctx) };
 }

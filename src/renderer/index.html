@@ -32,6 +32,7 @@
       </div>
       <button id="dashboard" class="nav">Dashboard</button>
       <button id="overview" class="nav">Workspace overview</button>
+      <button id="quality" class="nav" title="File length limits, magic numbers, secrets and TODOs">Code quality</button>
       <button id="clutter" class="nav" title="Find stale env files, caches, duplicates and get tidy-up advice">Clutter &amp; tidy-up</button>
       <ul id="repos"></ul>
     </aside>
@@ -40,7 +41,9 @@
   <div id="toast" hidden></div>
   <script src="metrics.js"></script>
   <script src="app.js"></script>
+  <script src="modals.js"></script>
   <script src="clutter-view.js"></script>
+  <script src="quality-view.js"></script>
   <script src="dashboard.js"></script>
 </body>
 </html>

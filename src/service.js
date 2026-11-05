@@ -10,6 +10,7 @@ const { scanRepo } = require('./scanner');
 const { scanClutter, workspaceAdvice } = require('./clutter');
 const { buildReport } = require('./report');
 const Metrics = require('./renderer/metrics');
+const { scanQuality, normalizeSettings } = require('./quality');
 
 const PLAN_TTL = 5 * 60 * 1000;
 const TREND_MAX = 365; // snapshots kept on disk
@@ -19,11 +20,12 @@ const publicPlan = (token, p) => ({ ok: true, token, type: p.type, repoPath: p.r
 
 // deps: { known: Map(path -> scan result), settings: () => obj, audit: (entry) => void,
 //         trash: (path) => Promise, clipboard: { writeText }, rescan?: (dir) => Promise<result>,
-//         trendStore?: { read(): array, write(array) } }
-function createService({ known, settings, audit, trash, clipboard, rescan = (d) => scanRepo(d, { deep: false }), trendStore = null }) {
+//         trendStore?: { read(): array, write(array) }, updateSettings?: (patch) => settings }
+function createService({ known, settings, audit, trash, clipboard, rescan = (d) => scanRepo(d, { deep: false }), trendStore = null, updateSettings = () => ({}) }) {
   const plans = new Map(); // token -> { plan, expires } (only these stored plans can ever run)
   const busy = new Set(); // repo paths with an action in flight
   let clutterScanning = false;
+  let qualityScanning = false;
 
   // ---- Trend history: a small snapshot per scan (scores and totals only), local to this machine ----
   const rootKey = (r) => (r ? path.resolve(r) : ''); // '/w' and '/w/' are the same workspace
@@ -45,9 +47,10 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
     saveTrend(all);
   }
 
-  function recordClutter(root, bytes) {
+  // Attach a measurement from an on-demand scan (clutter, code quality) to the newest snapshot of this workspace.
+  function stampTrend(root, field, value) {
     const all = loadTrend();
-    for (let i = all.length - 1; i >= 0; i--) if (all[i].root === rootKey(root)) { all[i].clutter = bytes; saveTrend(all); return; }
+    for (let i = all.length - 1; i >= 0; i--) if (all[i].root === rootKey(root)) { all[i][field] = value; saveTrend(all); return; }
   }
 
   const trend = () => loadTrend().filter((e) => e.root === rootKey(settings().root)).slice(-90);
@@ -114,10 +117,39 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
         }
       }
       const full = !(Array.isArray(dirs) && dirs.length);
-      if (full) recordClutter(settings().root, repos.reduce((n, r) => n + (r.totalSize || 0), 0));
+      if (full) stampTrend(settings().root, 'clutter', repos.reduce((n, r) => n + (r.totalSize || 0), 0));
       return { ok: true, repos, workspace: full ? await wsAdvice(settings().root) : null };
     } finally {
       clutterScanning = false;
+    }
+  }
+
+  const qualitySettings = () => normalizeSettings(settings().quality);
+  function setQualitySettings(patch) {
+    const next = normalizeSettings({ ...qualitySettings(), ...(patch && typeof patch === 'object' ? patch : {}) });
+    updateSettings({ quality: next });
+    return next;
+  }
+
+  // Read-only code-quality scan (file length, magic numbers, secrets, markers...). `dirs` limits it to those repos.
+  async function qualityScan(dirs) {
+    if (qualityScanning) return { ok: false, error: 'A code-quality scan is already running' };
+    const targets = (Array.isArray(dirs) && dirs.length ? dirs : [...known.keys()]).filter((d) => known.has(d) && !known.get(d).error);
+    if (!targets.length) return { ok: false, error: 'Scan a workspace first.' };
+    qualityScanning = true;
+    try {
+      const cfg = qualitySettings();
+      const repos = [];
+      for (const d of targets) {
+        try { repos.push({ path: d, name: path.basename(d), ...(await scanQuality(d, cfg)) }); } catch (e) { repos.push({ path: d, name: path.basename(d), error: String(e.message || e), advice: [], files: 0, lines: 0, loc: { max: cfg.maxLines, overCount: 0, over: [], largest: [] }, magic: { total: 0, files: [], repeated: [], reuse: [], constants: { files: [], definitions: 0 } }, markers: { total: 0, items: [] }, secretCount: 0, debugCount: 0, languages: [] }); }
+      }
+      if (!(Array.isArray(dirs) && dirs.length)) {
+        const sum = (f) => repos.reduce((n, r) => n + f(r), 0);
+        stampTrend(settings().root, 'quality', { over: sum((r) => r.loc.overCount), magic: sum((r) => r.magic.total), secrets: sum((r) => r.secretCount), todos: sum((r) => r.markers.total) });
+      }
+      return { ok: true, repos, settings: cfg };
+    } finally {
+      qualityScanning = false;
     }
   }
 
@@ -130,13 +162,19 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
       if (r.error) continue;
       try { clutter.set(r.path, await scanClutter(r.path)); } catch {}
     }
+    const quality = new Map();
+    const qcfg = qualitySettings();
+    for (const r of repos) {
+      if (r.error) continue;
+      try { quality.set(r.path, await scanQuality(r.path, qcfg)); } catch {}
+    }
     const root = settings().root;
-    const text = buildReport({ repos, clutter, workspace: dir ? [] : (await wsAdvice(root)) || [], root: dir ? null : root });
+    const text = buildReport({ repos, clutter, quality, workspace: dir ? [] : (await wsAdvice(root)) || [], root: dir ? null : root });
     clipboard.writeText(text);
     return { ok: true, chars: text.length, repos: repos.length };
   }
 
-  return { planActions, applyActions, clutterScan, copyReport, recordScan, trend };
+  return { planActions, applyActions, clutterScan, qualityScan, qualitySettings, setQualitySettings, copyReport, recordScan, trend };
 }
 
 module.exports = { createService };

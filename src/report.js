@@ -21,6 +21,7 @@ const PHASES = [
   'Clean up branches',
   'Remove clutter',
   'Repository settings and housekeeping',
+  'Code quality',
 ];
 
 const FILE_HELP = {
@@ -45,6 +46,7 @@ function fixFor(f, r) {
   const run = num && ((r.ci && r.ci.failed) || []).find((x) => String(x.databaseId) === num);
   const id = f.id;
 
+  if (id.startsWith('q-')) return qualityFix(id);
   if (id === 'env-tracked') return { phase: 0, rank: 0, why: 'Committed secrets are readable by anyone with repo access and stay in history.', cmds: ['# for each file listed above:', 'git rm --cached <file>', 'git commit -m "Stop tracking env files"'], note: 'Tell the owner to rotate every secret those files held. Removing them from history needs a history rewrite: do NOT do that without explicit approval.' };
   if (id === 'env-not-ignored') return { phase: 0, rank: 1, why: 'One careless "git add ." would commit your secrets.', cmds: ["printf '.env\\n.env.*\\n!.env.example\\n' >> .gitignore"], note: 'Check .gitignore does not already contain these lines first.' };
   if (id === 'env-no-template') return { phase: 3, rank: 5, why: 'Others cannot tell which variables to set.', cmds: [], note: 'Create .env.example with the variable NAMES from the real .env and empty or fake values. Never copy real values.' };
@@ -96,6 +98,26 @@ function fixFor(f, r) {
   return { phase: 7, rank: 9, why: t(f.detail, 300), cmds: [] };
 }
 
+// Code-quality advice -> step. Details (file names, lines) are in the Code quality section above the plan.
+function qualityFix(id) {
+  const Q = 8;
+  const steps = {
+    'q-secrets': { phase: 0, rank: 2, why: 'Credentials in source are readable by anyone with access and stay in git history.', cmds: [], note: 'For each location listed under Code quality: rotate the credential at its provider first, then move it to an environment variable or secret store and delete it from the code. Check history with git log -S. NEVER print, copy or repeat the value anywhere.' },
+    'q-loc': { phase: Q, rank: 1, why: 'Very long files are hard to read, review and test.', cmds: [], note: 'Split the listed files by responsibility into smaller modules, one file at a time, keeping behaviour identical and running the tests after each split. Ask before changing public interfaces.' },
+    'q-constants-reuse': { phase: Q, rank: 2, why: 'A raw number duplicates a constant that already exists.', cmds: [], note: 'For each entry, confirm it is the same quantity (a coincidence of value is not a duplicate), then import and use the constant.' },
+    'q-constants-candidates': { phase: Q, rank: 3, why: 'The same unexplained number is repeated.', cmds: [], note: 'Create a named constant (in the project constants module) for each number that represents one idea, and use it at each listed place.' },
+    'q-no-constants': { phase: Q, rank: 4, why: 'There is no single place for shared numbers.', cmds: [], note: 'Create a constants module following the repo conventions and move the repeated numbers there.' },
+    'q-magic-dense': { phase: Q, rank: 5, why: 'Files full of bare numbers are hard to understand.', cmds: [], note: 'Name the numbers in the listed files; skip tables of data and obvious values.' },
+    'q-debug': { phase: Q, rank: 0, why: 'Debugger statements stop execution or leak internals.', cmds: [], note: 'Delete each listed statement.' },
+    'q-console': { phase: Q, rank: 6, why: 'Leftover logging is noise.', cmds: [], note: 'Remove debugging output, or replace it with the project logger.' },
+    'q-markers': { phase: Q, rank: 7, why: 'Unfinished work is marked in comments.', cmds: [], note: 'Do not resolve these automatically. List them for the owner, who decides which to fix, ticket or delete.' },
+    'q-large-files': { phase: Q, rank: 8, why: 'Large files make every clone slow.', cmds: [], note: 'Ask the owner: move them out of the repo or to Git LFS (git lfs migrate rewrites history, so do not run it without approval).' },
+    'q-no-tests': { phase: Q, rank: 9, why: 'Changes cannot be verified.', cmds: [], note: 'Add a basic test setup and a first test for the most important module.' },
+    'q-truncated': { phase: Q, rank: 10, why: 'The scan was capped.', cmds: [] },
+  };
+  return steps[id] || { phase: Q, rank: 11, why: 'Code quality finding.', cmds: [] };
+}
+
 function snapshot(r) {
   const g = r.git || {};
   const rm = r.remote;
@@ -144,9 +166,9 @@ function clutterStep(c) {
   };
 }
 
-function stepsFor(r, c) {
+function stepsFor(r, c, q) {
   const steps = [];
-  for (const f of [...(r.findings || []), ...((c && c.advice) || [])]) {
+  for (const f of [...(r.findings || []), ...((c && c.advice) || []), ...((q && q.advice) || [])]) {
     const fx = fixFor(f, r);
     if (!fx) continue;
     steps.push({ ...fx, sev: f.severity, title: f.title, detail: f.detail });
@@ -178,12 +200,27 @@ function renderSteps(steps, level = 2) {
   return out.join('\n');
 }
 
-function repoSection(r, c, level = 2) {
+// Locations behind the quality advice, so the assistant does not have to rescan. No values, no string contents.
+function qualitySection(q) {
+  if (!q || q.error) return '';
+  const L = [];
+  L.push(`\n**Code quality** (${q.files} files, ${q.lines} lines; limit ${q.loc.max} ${q.loc.mode === 'code' ? 'code lines' : 'lines'} per file)`);
+  if (q.loc.over.length) L.push('Over the limit:\n' + q.loc.over.slice(0, 15).map((f) => `- \`${t(f.path, 200)}\` ${f.measured} (${f.lang}${f.test ? ', test' : ''})`).join('\n'));
+  if (q.secrets.length) L.push('Possible hardcoded secrets (location and kind only):\n' + q.secrets.slice(0, 15).map((s) => `- \`${t(s.path, 200)}:${s.line}\` ${s.kind}`).join('\n'));
+  if (q.magic.total) L.push(`Magic numbers: ${q.magic.total} in ${q.magic.files.length ? q.magic.files.length + '+' : 0} files. Worst files:\n` + q.magic.files.slice(0, 8).map((f) => `- \`${t(f.path, 200)}\` ${f.count}` + (f.examples[0] ? ` (e.g. line ${f.examples[0].line}: \`${t(f.examples[0].text, 80)}\`)` : '')).join('\n'));
+  if (q.magic.reuse.length) L.push('Existing constants used as raw numbers:\n' + q.magic.reuse.slice(0, 8).map((r) => `- ${r.value} is \`${r.constant}\` (${t(r.definedIn, 120)}); raw at ${r.uses.slice(0, 3).map((u) => `${t(u.path, 80)}:${u.line}`).join(', ')}`).join('\n'));
+  if (q.magic.repeated.length) L.push('Repeated unnamed numbers:\n' + q.magic.repeated.slice(0, 8).map((r) => `- ${r.value} x${r.count} (${r.uses.slice(0, 3).map((u) => `${t(u.path, 80)}:${u.line}`).join(', ')})`).join('\n'));
+  if (q.debug.length) L.push('Debug leftovers:\n' + q.debug.slice(0, 10).map((d) => `- \`${t(d.path, 200)}:${d.line}\` ${d.kind}`).join('\n'));
+  if (q.markers.items.length) L.push(`Markers (TODO ${q.markers.TODO}, FIXME ${q.markers.FIXME}, HACK ${q.markers.HACK}):\n` + q.markers.items.slice(0, 10).map((m) => `- \`${t(m.path, 200)}:${m.line}\` ${m.kind}: ${t(m.text, 80)}`).join('\n'));
+  return L.length > 1 ? L.join('\n') + '\n' : '';
+}
+
+function repoSection(r, c, level = 2, q = null) {
   const h = '#'.repeat(level);
   if (r.error) return `${h} ${t(r.name)}\n\nGutCheck could not scan this repo: ${t(r.error, 300)}\n`;
-  const steps = stepsFor(r, c);
+  const steps = stepsFor(r, c, q);
   const body = steps.length ? `\n${h}# Action plan (do in this order)\n\n${renderSteps(steps, level)}` : '\nNo issues found. Nothing to do.\n';
-  return `${h} ${t(r.name)}\n\n${snapshot(r)}\n${prTable(r)}${clutterSection(c)}${body}`;
+  return `${h} ${t(r.name)}\n\n${snapshot(r)}\n${prTable(r)}${clutterSection(c)}${qualitySection(q)}${body}`;
 }
 
 const PREAMBLE = `You are helping tidy and fix the health of a git workspace. Below is a status report produced by GutCheck, followed by an ordered action plan with exact commands.
@@ -198,7 +235,7 @@ Rules:
 `;
 
 // repos: scan results; clutter: Map(path -> clutter result); workspace: advice[] (optional)
-function buildReport({ repos, clutter = new Map(), workspace = [], root = null }) {
+function buildReport({ repos, clutter = new Map(), quality = new Map(), workspace = [], root = null }) {
   const ok = repos.filter((r) => !r.error);
   const single = repos.length === 1;
   const out = [];
@@ -214,9 +251,9 @@ function buildReport({ repos, clutter = new Map(), workspace = [], root = null }
       out.push(`## Workspace-level tidy-up\n\n${renderSteps(ws.map((s) => ({ ...s, detail: '' })), 1)}`);
     }
     out.push('## Repositories\n\nHandle repos in the order listed above.\n');
-    for (const r of sorted) out.push(repoSection(r, clutter.get(r.path), 3));
+    for (const r of sorted) out.push(repoSection(r, clutter.get(r.path), 3, quality.get(r.path)));
   } else {
-    out.push(repoSection(repos[0], clutter.get(repos[0].path), 2));
+    out.push(repoSection(repos[0], clutter.get(repos[0].path), 2, quality.get(repos[0].path)));
   }
   out.push('## Verification\n\nAfter the steps above, each repo should show: `git status` clean, no unpushed commits, no failing `gh run list --status failure` on the default branch, and no leftover clutter. Report anything you could not finish and why.\n');
   return out.join('\n');
