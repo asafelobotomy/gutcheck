@@ -31,6 +31,8 @@ jobs:
   appimage:
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,6 +41,18 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Read version
+        id: ver
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Tag must match package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $VERSION"
+            exit 1
+          fi
       - run: npm ci
       - run: npx electron-builder --linux AppImage --publish never
       - name: Checksum
@@ -51,18 +65,39 @@ jobs:
             dist/SHA256SUMS.txt
           if-no-files-found: error
 
+  # Releases happen two ways: pushing a v* tag, or bumping "version" in package.json on main (the
+  # tag v<version> is then created for you). Either way the tests and the AppImage build must pass first.
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
     needs: appimage
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: GutCheck-AppImage
           path: dist
-      - name: Create GitHub release
+      - name: Create tag and release if this version is new
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.AppImage dist/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --title "GutCheck $GITHUB_REF_NAME" --generate-notes
+          VERSION: ${{ needs.appimage.outputs.version }}
+        run: |
+          TAG="v$VERSION"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists: nothing to do."
+            exit 0
+          fi
+          if [ "$GITHUB_REF_TYPE" = "branch" ] && gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists on another commit: bump the version to release again."
+            exit 0
+          fi
+          FLAGS=""
+          case "$VERSION" in *-*) FLAGS="--prerelease" ;; esac
+          # On a tag push the tag already exists; on main this creates it at the tested commit.
+          gh release create "$TAG" dist/*.AppImage dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "GutCheck $TAG" --generate-notes $FLAGS

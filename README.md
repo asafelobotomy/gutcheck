@@ -94,7 +94,11 @@ npm run dist   # build the AppImage into dist/
 
 `package.json` has an `overrides` entry that pins a patched `minimatch` inside `electron-builder`'s dependencies (the advisory is for glob-pattern DoS in build tooling; upstream still ships the vulnerable range). Remove it once `electron-builder` updates; `npm audit` should stay at 0.
 
-Releases are built by GitHub Actions: pushing a tag like `v0.7.0` builds the AppImage and attaches it to a GitHub release.
+### Releasing
+
+Bump `version` in `package.json` and `package-lock.json` (both; a test checks they agree) and push to `main`. CI then runs the tests, builds the AppImage with a `SHA256SUMS.txt`, creates the tag `v<version>` at that commit and publishes a GitHub release with generated notes. Nothing is released if the tests or the build fail, if that version already has a release or tag, or on pull requests. Versions with a suffix (such as `1.0.0-beta.1`) are published as pre-releases.
+
+You can still release by pushing a tag yourself (`git tag v0.9.0 && git push origin v0.9.0`); the build fails if the tag does not match `package.json`.
 
 ## Licence
 
