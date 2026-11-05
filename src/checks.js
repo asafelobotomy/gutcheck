@@ -10,7 +10,7 @@ function checkCI(s) {
   if (!s.remote) return out;
   if (s.ci.error) return [{ id: 'ci-unavailable', category: 'CI', severity: 'info', title: 'CI status unavailable', detail: s.ci.error }];
   if (!s.hasWorkflows) {
-    out.push({ id: 'ci-none', category: 'CI', severity: 'info', title: 'No GitHub Actions workflows', detail: 'Add a workflow in .github/workflows to run tests on every push.' });
+    out.push({ id: 'ci-none', category: 'CI', severity: 'info', title: 'No GitHub Actions workflows', detail: 'Add a workflow in .github/workflows to run tests on every push.', fix: s.deps && s.deps.manifests && s.deps.manifests.includes('package.json') ? { type: 'add-file', label: 'Add Node CI workflow', template: 'ci-node' } : undefined });
     return out;
   }
   for (const r of s.ci.failed) {
@@ -21,7 +21,7 @@ function checkCI(s) {
       title: `Failed: ${r.workflowName} on ${r.headBranch}`,
       detail: `${r.displayTitle} (${daysAgo(r.createdAt)}d ago)`,
       url: r.url,
-      fix: { type: 'rerun-failed', label: 'Re-run failed jobs', runId: r.databaseId },
+      fix: { type: 'run-rerun', label: 'Re-run failed jobs', runId: r.databaseId, failedOnly: true },
     });
   }
   return out;
@@ -38,7 +38,7 @@ function checkPRs(s) {
     if (age >= 30 && !pr.isDraft)
       out.push({ id: 'pr-stale-' + pr.number, category: 'PRs', severity: 'warn', title: `PR #${pr.number} stale for ${age} days`, detail: pr.title, url: pr.url });
     if (pr.reviewDecision === 'APPROVED' && pr.mergeable === 'MERGEABLE' && pr.statusCheckRollup !== 'FAILURE')
-      out.push({ id: 'pr-ready-' + pr.number, category: 'PRs', severity: 'info', title: `PR #${pr.number} approved and mergeable`, detail: pr.title, url: pr.url, fix: { type: 'merge-pr', label: 'Squash & merge', number: pr.number } });
+      out.push({ id: 'pr-ready-' + pr.number, category: 'PRs', severity: 'info', title: `PR #${pr.number} approved and mergeable`, detail: pr.title, url: pr.url, fix: { type: 'pr-merge', label: 'Merge…', number: pr.number, method: 'squash', deleteBranch: true } });
   }
   return out;
 }
@@ -47,13 +47,13 @@ function checkBranches(s) {
   const out = [];
   const g = s.git;
   if (g.dirty > 0)
-    out.push({ id: 'git-dirty', category: 'Branches', severity: 'warn', title: `${g.dirty} uncommitted change${g.dirty > 1 ? 's' : ''}`, detail: `On branch ${g.branch}` });
+    out.push({ id: 'git-dirty', category: 'Branches', severity: 'warn', title: `${g.dirty} uncommitted change${g.dirty > 1 ? 's' : ''}`, detail: `On branch ${g.branch}`, fix: { type: 'commit-all', label: 'Commit all…' } });
   if (g.ahead > 0)
     out.push({ id: 'git-ahead', category: 'Branches', severity: 'warn', title: `${g.ahead} unpushed commit${g.ahead > 1 ? 's' : ''} on ${g.branch}`, detail: 'Push to back up your work.', fix: { type: 'push', label: 'Push' } });
   if (g.behind > 0)
     out.push({ id: 'git-behind', category: 'Branches', severity: 'info', title: `${g.behind} commit${g.behind > 1 ? 's' : ''} behind upstream`, detail: `${g.branch} can be fast-forwarded.`, fix: { type: 'pull', label: 'Pull (ff-only)' } });
   if (g.branch && !g.upstream && s.remote)
-    out.push({ id: 'git-no-upstream', category: 'Branches', severity: 'info', title: `Branch ${g.branch} has no upstream`, detail: 'Not tracking a remote branch.' });
+    out.push({ id: 'git-no-upstream', category: 'Branches', severity: 'info', title: `Branch ${g.branch} has no upstream`, detail: 'Not tracking a remote branch.', fix: { type: 'push', label: 'Push & set upstream' } });
   if (g.mergedBranches.length)
     out.push({ id: 'git-merged', category: 'Branches', severity: 'info', title: `${g.mergedBranches.length} local branch${g.mergedBranches.length > 1 ? 'es' : ''} already merged`, detail: g.mergedBranches.join(', '), fix: { type: 'delete-merged', label: 'Delete merged', branches: g.mergedBranches } });
   const stale = g.branches.filter((b) => !b.current && daysAgo(b.date) >= 60 && !g.mergedBranches.includes(b.name));
@@ -67,16 +67,16 @@ function checkFiles(s) {
   const out = [];
   const f = s.files;
   const add = (id, sev, title, detail, fix) => out.push({ id, category: 'Docs & Licence', severity: sev, title, detail, fix });
-  if (!f.license) add('no-license', 'error', 'Missing LICENSE', 'Without a licence, others have no right to use or contribute to the code.', { type: 'create-file', label: 'Add MIT licence', file: 'LICENSE', template: 'mit' });
-  if (!f.readme) add('no-readme', 'error', 'Missing README', 'Describe what the project is and how to run it.', { type: 'create-file', label: 'Create README', file: 'README.md', template: 'readme' });
-  if (!f.gitignore) add('no-gitignore', 'warn', 'Missing .gitignore', 'Build output and secrets may get committed.', { type: 'create-file', label: 'Create .gitignore', file: '.gitignore', template: 'gitignore' });
+  if (!f.license) add('no-license', 'error', 'Missing LICENSE', 'Without a licence, others have no right to use or contribute to the code.', { type: 'add-file', label: 'Add MIT licence', template: 'license' });
+  if (!f.readme) add('no-readme', 'error', 'Missing README', 'Describe what the project is and how to run it.', { type: 'add-file', label: 'Create README', template: 'readme' });
+  if (!f.gitignore) add('no-gitignore', 'warn', 'Missing .gitignore', 'Build output and secrets may get committed.', { type: 'add-file', label: 'Create .gitignore', template: 'gitignore' });
   if (s.remote && s.remote.isPublic) {
-    if (!f.security) add('no-security', 'info', 'Missing SECURITY.md', 'Tell people how to report vulnerabilities.');
-    if (!f.contributing) add('no-contributing', 'info', 'Missing CONTRIBUTING.md', 'Explain how to contribute.');
-    if (!f.codeOfConduct) add('no-coc', 'info', 'Missing CODE_OF_CONDUCT.md', 'Set community expectations.');
+    if (!f.security) add('no-security', 'info', 'Missing SECURITY.md', 'Tell people how to report vulnerabilities.', { type: 'add-file', label: 'Add SECURITY.md', template: 'security' });
+    if (!f.contributing) add('no-contributing', 'info', 'Missing CONTRIBUTING.md', 'Explain how to contribute.', { type: 'add-file', label: 'Add CONTRIBUTING.md', template: 'contributing' });
+    if (!f.codeOfConduct) add('no-coc', 'info', 'Missing CODE_OF_CONDUCT.md', 'Set community expectations.', { type: 'add-file', label: 'Add code of conduct', template: 'conduct' });
   }
-  if (s.remote && !f.prTemplate && s.remote.isPublic) add('no-pr-template', 'info', 'No pull request template', 'Add .github/pull_request_template.md.');
-  if (s.remote && !s.remote.description) add('no-description', 'info', 'Repo has no GitHub description', 'Helps discovery and sets context.');
+  if (s.remote && !f.prTemplate && s.remote.isPublic) add('no-pr-template', 'info', 'No pull request template', 'Add .github/pull_request_template.md.', { type: 'add-file', label: 'Add PR template', template: 'pr-template' });
+  if (s.remote && !s.remote.description) add('no-description', 'info', 'Repo has no GitHub description', 'Helps discovery and sets context.', { type: 'repo-edit', label: 'Set description…' });
   return out;
 }
 
@@ -89,6 +89,10 @@ function checkDeps(s) {
     out.push({ id: 'deps-not-installed', category: 'Dependencies', severity: 'warn', title: 'Dependencies not installed', detail: 'node_modules is missing.', fix: { type: 'npm-install', label: 'npm install' } });
   if (d.outdated != null && d.outdated > 0)
     out.push({ id: 'deps-outdated', category: 'Dependencies', severity: 'warn', title: `${d.outdated} outdated npm package${d.outdated > 1 ? 's' : ''}`, detail: d.outdatedNames.slice(0, 8).join(', ') });
+  if (s.remote && s.remote.alertsEnabled === false)
+    out.push({ id: 'alerts-off', category: 'Dependencies', severity: 'warn', title: 'Dependabot alerts are disabled', detail: 'You will not be told about vulnerable dependencies.', fix: { type: 'security-enable', label: 'Enable alerts', feature: 'alerts' } });
+  if (d.manifests && d.manifests.length && !s.files.dependabotConfig)
+    out.push({ id: 'no-dependabot-config', category: 'Dependencies', severity: 'info', title: 'No Dependabot update config', detail: 'Automatic dependency update PRs are not set up.', fix: { type: 'add-file', label: 'Add dependabot.yml', template: 'dependabot' } });
   if (s.alerts && s.alerts.length) {
     const crit = s.alerts.filter((a) => ['critical', 'high'].includes(a.severity)).length;
     out.push({ id: 'dependabot', category: 'Dependencies', severity: crit ? 'error' : 'warn', title: `${s.alerts.length} open Dependabot alert${s.alerts.length > 1 ? 's' : ''}`, detail: `${crit} high/critical`, url: s.remote.url + '/security/dependabot' });
@@ -104,7 +108,7 @@ function checkRepoSettings(s) {
   }
   if (s.remote.archived) out.push({ id: 'archived', category: 'Repo', severity: 'info', title: 'Repository is archived', detail: 'Read-only on GitHub.' });
   if (s.protection === false && !s.remote.archived)
-    out.push({ id: 'no-protection', category: 'Repo', severity: 'info', title: `Default branch ${s.remote.defaultBranch} is unprotected`, detail: 'Consider requiring PR review and status checks.' });
+    out.push({ id: 'no-protection', category: 'Repo', severity: 'info', title: `Default branch ${s.remote.defaultBranch} is unprotected`, detail: 'Consider requiring PR review and status checks.', fix: { type: 'protect-branch', label: 'Protect…', preset: 'basic' } });
   if (s.remote.openIssues > 25) out.push({ id: 'many-issues', category: 'Repo', severity: 'info', title: `${s.remote.openIssues} open issues/PRs`, detail: 'Consider triaging.' });
   const pushed = daysAgo(s.remote.pushedAt);
   if (pushed != null && pushed > 365 && !s.remote.archived) out.push({ id: 'inactive', category: 'Repo', severity: 'info', title: `No pushes in ${pushed} days`, detail: 'Archive it if it is finished.' });

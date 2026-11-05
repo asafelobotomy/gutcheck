@@ -19,7 +19,7 @@ const NAME_RE = /^[A-Za-z0-9._-]+$/;
 
 const FRAGMENT = `
 fragment F on Repository {
-  url description isPrivate isArchived pushedAt viewerPermission
+  url description isPrivate isArchived pushedAt viewerPermission hasVulnerabilityAlertsEnabled deleteBranchOnMerge
   issues(states: OPEN) { totalCount }
   licenseInfo { key }
   defaultBranchRef { name branchProtectionRule { id } }
@@ -75,6 +75,9 @@ function toSnapshot(ref, n) {
       pushedAt: n.pushedAt,
       openIssues: n.issues ? n.issues.totalCount : 0,
       licenseOnGitHub: n.licenseInfo && n.licenseInfo.key,
+      viewerPermission: n.viewerPermission,
+      alertsEnabled: n.hasVulnerabilityAlertsEnabled,
+      deleteBranchOnMerge: n.deleteBranchOnMerge,
     },
     prs: ((n.pullRequests && n.pullRequests.nodes) || []).map((p) => ({
       number: p.number, title: p.title, url: p.url, isDraft: p.isDraft, updatedAt: p.updatedAt,

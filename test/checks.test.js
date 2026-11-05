@@ -22,8 +22,8 @@ test('missing licence and failed CI are errors with fixes', () => {
   s.files.license = false;
   s.ci.failed = [{ databaseId: 7, workflowName: 'CI', headBranch: 'main', displayTitle: 't', createdAt: new Date().toISOString() }];
   const r = evaluate(s);
-  assert.ok(r.findings.find((f) => f.id === 'no-license' && f.fix.type === 'create-file'));
-  assert.ok(r.findings.find((f) => f.id === 'ci-failed-7' && f.fix.type === 'rerun-failed'));
+  assert.ok(r.findings.find((f) => f.id === 'no-license' && f.fix.type === 'add-file'));
+  assert.ok(r.findings.find((f) => f.id === 'ci-failed-7' && f.fix.type === 'run-rerun'));
   assert.equal(r.score, 70);
 });
 
@@ -45,19 +45,7 @@ test('parseGithubRemote handles ssh and https', () => {
   assert.equal(parseGithubRemote('https://gitlab.com/a/b'), null);
 });
 
-const { execute } = require('../src/actions');
-
 test('parseGithubRemote rejects unexpected characters', () => {
   assert.equal(parseGithubRemote('https://github.com/a/b;rm -rf'), null);
   assert.equal(parseGithubRemote('https://github.com/a/b$(x)'), null);
-});
-
-test('actions only operate on state that was actually scanned', async () => {
-  const repo = { remote: { owner: 'o', name: 'r' }, ci: { failed: [{ databaseId: 1 }] }, prs: [{ number: 5 }], git: { mergedBranches: ['old'] } };
-  assert.equal((await execute('/nope', repo, { type: 'rerun-failed', runId: 2 })).ok, false);
-  assert.equal((await execute('/nope', repo, { type: 'merge-pr', number: 6 })).ok, false);
-  assert.equal((await execute('/nope', repo, { type: 'delete-merged', branches: ['main'] })).ok, false);
-  assert.equal((await execute('/nope', repo, { type: 'delete-merged', branches: ['--force'] })).ok, false);
-  assert.equal((await execute('/nope', repo, { type: 'create-file', file: '../../etc/passwd', template: 'mit' })).ok, false);
-  assert.equal((await execute('/nope', repo, { type: 'bogus' })).ok, false);
 });

@@ -37,7 +37,7 @@ function parseGithubRemote(url) {
 
 async function collectGit(dir) {
   const st = await git(['status', '--porcelain=v2', '--branch'], { cwd: dir });
-  const g = { branch: null, detached: false, upstream: null, ahead: 0, behind: 0, dirty: 0, branches: [], mergedBranches: [] };
+  const g = { branch: null, detached: false, upstream: null, ahead: 0, behind: 0, dirty: 0, branches: [], remoteBranches: [], mergedBranches: [] };
   for (const line of st.stdout.split('\n')) {
     if (line.startsWith('# branch.head ')) {
       g.branch = line.slice(14);
@@ -59,6 +59,15 @@ async function collectGit(dir) {
       const [name, date] = l.split('\t');
       return { name, date, current: name === g.branch };
     });
+  const rrefs = await git(['for-each-ref', '--format=%(refname:short)\t%(committerdate:iso-strict)', 'refs/remotes/origin'], { cwd: dir });
+  g.remoteBranches = rrefs.stdout
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => {
+      const [full, date] = l.split('\t');
+      return { name: full.replace(/^origin\//, ''), date };
+    })
+    .filter((b) => b.name !== 'HEAD' && b.name !== 'origin');
   return g;
 }
 
@@ -90,6 +99,7 @@ function collectFiles(dir) {
     security: any(/^security(\.[a-z]+)?$/i),
     contributing: any(/^contributing(\.[a-z]+)?$/i),
     codeOfConduct: any(/^code_of_conduct(\.[a-z]+)?$/i),
+    dependabotConfig: ghNames.some((n) => /^dependabot\.ya?ml$/i.test(n)),
     prTemplate: ghNames.some((n) => /^pull_request_template/i.test(n)) || has(/^pull_request_template/i),
     names,
   };

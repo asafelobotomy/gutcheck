@@ -3,7 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { discover, scanRepo, scanAll } = require('./scanner');
 const github = require('./github');
-const { execute, describe, NEEDS_CONFIRM } = require('./actions');
+const actions = require('./actions');
+const crypto = require('node:crypto');
 const { run } = require('./exec');
 
 let win;
@@ -87,15 +88,71 @@ handle('scan:one', async (_e, { dir, deep }) => {
   return { ok: true, res, rate: github.getRate() };
 });
 
-handle('action:run', async (_e, { dir, action }) => {
-  const repo = known.get(dir);
-  if (!repo) return { ok: false, stderr: 'Unknown repo' };
-  if (!action || typeof action.type !== 'string') return { ok: false, stderr: 'Bad action' };
-  if (NEEDS_CONFIRM.has(action.type)) {
-    const r = await dialog.showMessageBox(win, { type: 'question', buttons: ['Cancel', 'Proceed'], defaultId: 0, cancelId: 0, message: describe(action, repo.name) });
-    if (r.response !== 1) return { ok: false, stderr: 'Cancelled', cancelled: true };
+// ---- Actions: plan -> user confirms -> apply the stored plan (never renderer-supplied steps) ----
+const plans = new Map(); // token -> { plan, expires }
+const busy = new Set(); // repo paths with an action in flight
+const PLAN_TTL = 5 * 60 * 1000;
+const auditFile = () => path.join(app.getPath('userData'), 'audit.log');
+
+function audit(entry) {
+  try { fs.appendFileSync(auditFile(), JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n'); } catch {}
+}
+
+const publicPlan = (token, p) => ({ ok: true, token, type: p.type, repoPath: p.repoPath, repoName: p.repoName, title: p.title, risk: p.risk, display: p.display, warnings: p.warnings, undo: p.undo, body: p.body, note: p.note, confirmName: p.confirmName });
+
+handle('action:plan', async (_e, { items }) => {
+  if (!Array.isArray(items) || items.length === 0 || items.length > 200) return [{ ok: false, error: 'Bad request' }];
+  const readOnly = !!loadSettings().readOnly;
+  const out = [];
+  for (const it of items) {
+    const repo = it && known.get(it.dir);
+    const p = await actions.plan(repo, it && it.action, { readOnly });
+    if (!p.ok) { out.push({ ...p, repoName: repo && repo.name }); continue; }
+    const token = crypto.randomBytes(16).toString('hex');
+    plans.set(token, { plan: p, expires: Date.now() + PLAN_TTL });
+    out.push(publicPlan(token, p));
   }
-  return execute(dir, repo, action);
+  for (const [t, v] of plans) if (v.expires < Date.now()) plans.delete(t);
+  return out;
+});
+
+handle('action:apply', async (_e, { tokens }) => {
+  if (!Array.isArray(tokens)) return [];
+  const out = [];
+  for (const token of tokens) {
+    const entry = plans.get(token);
+    plans.delete(token); // single use
+    if (!entry || entry.expires < Date.now()) { out.push({ ok: false, error: 'Plan expired. Please review it again.' }); continue; }
+    const p = entry.plan;
+    if (loadSettings().readOnly) { out.push({ ok: false, repoName: p.repoName, error: 'Read-only mode is on.' }); continue; }
+    if (busy.has(p.repoPath)) { out.push({ ok: false, repoName: p.repoName, error: 'Another action is running on this repo.' }); continue; }
+    busy.add(p.repoPath);
+    try {
+      const r = await actions.apply(p);
+      audit({ repo: p.repoName, path: p.repoPath, action: p.type, risk: p.risk, title: p.title, ok: r.ok, steps: r.results.map((x) => ({ cmd: x.text, ok: x.ok })) });
+      let res = null;
+      try { res = await scanRepo(p.repoPath, { deep: false }); known.set(p.repoPath, res); } catch {}
+      out.push({ ok: r.ok, repoName: p.repoName, title: p.title, results: r.results, res, rate: github.getRate() });
+    } finally {
+      busy.delete(p.repoPath);
+    }
+  }
+  return out;
+});
+
+handle('audit:list', () => {
+  try {
+    return fs.readFileSync(auditFile(), 'utf8').trim().split('\n').filter(Boolean).slice(-200).reverse().map((l) => JSON.parse(l));
+  } catch {
+    return [];
+  }
+});
+
+handle('settings:set', (_e, patch) => {
+  const s = loadSettings();
+  if (patch && typeof patch.readOnly === 'boolean') s.readOnly = patch.readOnly;
+  saveSettings(s);
+  return s;
 });
 
 handle('open:url', (_e, url) => openExternal(url));
