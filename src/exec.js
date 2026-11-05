@@ -32,7 +32,5 @@ async function json(cmd, args, opts) {
 // index lock (so a scan cannot interfere with the user's own git commands).
 const READONLY_GIT = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
 const git = (args, opts) => run('git', [...READONLY_GIT, ...args], opts);
-// For user-initiated writes (push/pull): hooks are the user's own, but still no fsmonitor.
-const gitWrite = (args, opts) => run('git', ['-c', 'core.fsmonitor=false', ...args], opts);
 
-module.exports = { run, json, git, gitWrite };
+module.exports = { run, json, git };

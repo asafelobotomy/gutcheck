@@ -67,7 +67,7 @@ function fixFor(f, r) {
   if (id.startsWith('pr-stale-')) return { phase: 2, rank: 5, why: 'No activity for 30+ days.', cmds: [`gh pr view ${num}${R} --comments`], note: `Decide with the owner: merge, update, or close (gh pr close ${num}${R} --comment "Closing as stale").` };
   if (id === 'ci-none') return { phase: 2, rank: 6, why: 'Nothing runs tests automatically.', cmds: [], note: `Add .github/workflows/ci.yml that installs dependencies and runs the test script${r.deps && r.deps.manifests && r.deps.manifests.includes('package.json') ? ' (Node project: use actions/setup-node and npm ci / npm test)' : ''}.` };
 
-  if (FILE_HELP[id]) return { phase: 3, rank: id === 'no-license' || id === 'no-readme' ? 0 : 1, why: 'Missing project file.', cmds: [], note: FILE_HELP[id][1], file: FILE_HELP[id][0] };
+  if (FILE_HELP[id]) return { phase: 3, rank: id === 'no-license' || id === 'no-readme' ? 0 : 1, why: 'Missing project file.', cmds: [], note: FILE_HELP[id][1] };
   if (id === 'no-description') return { phase: 3, rank: 6, why: 'Helps discovery and context.', cmds: slug ? [`gh repo edit ${slug} --description "<one sentence>"`] : [] };
 
   if (id.startsWith('no-lock-')) {
@@ -222,4 +222,4 @@ function buildReport({ repos, clutter = new Map(), workspace = [], root = null }
   return out.join('\n');
 }
 
-module.exports = { buildReport, stepsFor, fixFor };
+module.exports = { buildReport };

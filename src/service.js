@@ -26,6 +26,7 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
   let clutterScanning = false;
 
   // ---- Trend history: a small snapshot per scan (scores and totals only), local to this machine ----
+  const rootKey = (r) => (r ? path.resolve(r) : ''); // '/w' and '/w/' are the same workspace
   const loadTrend = () => {
     try { const a = trendStore && trendStore.read(); return Array.isArray(a) ? a.filter((e) => e && typeof e.ts === 'number') : []; } catch { return []; }
   };
@@ -33,7 +34,7 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
 
   function recordScan(root, results) {
     if (!trendStore || !results || !results.length) return;
-    const snap = Metrics.snapshot(results, root);
+    const snap = Metrics.snapshot(results, rootKey(root));
     const all = loadTrend();
     const last = all[all.length - 1];
     if (last && last.root === snap.root && snap.ts - last.ts < TREND_MERGE_MS) {
@@ -46,10 +47,10 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
 
   function recordClutter(root, bytes) {
     const all = loadTrend();
-    for (let i = all.length - 1; i >= 0; i--) if (all[i].root === (root || '')) { all[i].clutter = bytes; saveTrend(all); return; }
+    for (let i = all.length - 1; i >= 0; i--) if (all[i].root === rootKey(root)) { all[i].clutter = bytes; saveTrend(all); return; }
   }
 
-  const trend = () => loadTrend().filter((e) => e.root === (settings().root || '')).slice(-90);
+  const trend = () => loadTrend().filter((e) => e.root === rootKey(settings().root)).slice(-90);
 
   async function planActions(items) {
     if (!Array.isArray(items) || items.length === 0 || items.length > 200) return [{ ok: false, error: 'Bad request' }];
@@ -135,7 +136,7 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
     return { ok: true, chars: text.length, repos: repos.length };
   }
 
-  return { planActions, applyActions, clutterScan, copyReport, recordScan, trend, _plans: plans };
+  return { planActions, applyActions, clutterScan, copyReport, recordScan, trend };
 }
 
 module.exports = { createService };

@@ -4,6 +4,7 @@ const path = require('node:path');
 const { discover, scanRepo, scanAll } = require('./scanner');
 const github = require('./github');
 const { createService } = require('./service');
+const { appendAudit, readAudit } = require('./audit');
 const { run } = require('./exec');
 
 let win;
@@ -90,9 +91,7 @@ handle('scan:one', async (_e, { dir, deep }) => {
 
 // ---- Actions, clutter and report logic lives in service.js (testable without Electron) ----
 const auditFile = () => path.join(app.getPath('userData'), 'audit.log');
-function audit(entry) {
-  try { fs.appendFileSync(auditFile(), JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n'); } catch {}
-}
+const audit = (entry) => appendAudit(auditFile(), entry);
 const trendFile = () => path.join(app.getPath('userData'), 'trend.json');
 const trendStore = {
   read: () => JSON.parse(fs.readFileSync(trendFile(), 'utf8')),
@@ -106,13 +105,7 @@ handle('clutter:scan', (_e, { dirs } = {}) => service.clutterScan(dirs));
 handle('trend:get', () => service.trend());
 handle('report:copy', (_e, { dir } = {}) => service.copyReport(dir));
 
-handle('audit:list', () => {
-  try {
-    return fs.readFileSync(auditFile(), 'utf8').trim().split('\n').filter(Boolean).slice(-200).reverse().map((l) => JSON.parse(l));
-  } catch {
-    return [];
-  }
-});
+handle('audit:list', () => readAudit(auditFile()));
 
 handle('settings:set', (_e, patch) => {
   const s = loadSettings();

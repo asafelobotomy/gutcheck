@@ -25,6 +25,7 @@ Everything is done from the repo view, or in bulk from the workspace overview ("
 | CI | re-run failed jobs |
 | Protection and security | protect the default branch (Basic or Strict preset), remove protection, enable Dependabot alerts, security updates, secret scanning |
 | Repo settings | edit description, auto-delete merged branches, archive |
+| Clutter | move detected clutter to the trash (regenerable caches are deleted), append known-safe rules to `.gitignore` |
 | Files | add LICENSE, README, .gitignore, SECURITY, CONTRIBUTING, CODE_OF_CONDUCT, PR template, dependabot.yml, a Node CI workflow (optionally committed) |
 
 Safety rails: a **Read-only** switch in the header disables every action, every change is recorded in **History**, many actions show an undo command, and GutCheck never deletes repos, changes visibility, force-pushes or rewrites history.
@@ -67,7 +68,8 @@ Requires `gh` and `git` on your `PATH`, and `gh auth login` completed.
 - Remaining quota is shown in the header. When it runs low, GutCheck stops making calls instead of hitting the limit.
 - The only network access is through your own `gh` CLI. There is no telemetry, no updater and no other server. The UI is sandboxed with a strict Content Security Policy.
 - Scans run read-only `git` commands with hooks and `core.fsmonitor` disabled, so opening an untrusted repo does not run its code.
-- Actions are planned by the app, previewed, and then run exactly as previewed. They only target branches, PRs and runs found in the last scan.
+- Actions are planned by the app, previewed, and then run exactly as previewed. They only target branches, PRs and runs found in the last scan, or (for clutter) items found by a fresh scan at plan time. Right before removing anything GutCheck checks it is still unchanged and not tracked by git.
+- Files GutCheck keeps on your machine, in its app data folder: `settings.json` (workspace folder, read-only switch), `audit.log` (every change it made; trimmed to the latest 500 entries once it passes 1 MB) and `trend.json` (scores and totals per scan). Nothing is uploaded.
 
 ## Develop
 
@@ -78,7 +80,9 @@ npm test       # unit tests
 npm run dist   # build the AppImage into dist/
 ```
 
-Releases are built by GitHub Actions: pushing a tag like `v0.2.0` builds the AppImage and attaches it to a GitHub release.
+`package.json` has an `overrides` entry that pins a patched `minimatch` inside `electron-builder`'s dependencies (the advisory is for glob-pattern DoS in build tooling; upstream still ships the vulnerable range). Remove it once `electron-builder` updates; `npm audit` should stay at 0.
+
+Releases are built by GitHub Actions: pushing a tag like `v0.7.0` builds the AppImage and attaches it to a GitHub release.
 
 ## Licence
 

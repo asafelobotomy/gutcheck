@@ -49,3 +49,35 @@ test('parseGithubRemote rejects unexpected characters', () => {
   assert.equal(parseGithubRemote('https://github.com/a/b;rm -rf'), null);
   assert.equal(parseGithubRemote('https://github.com/a/b$(x)'), null);
 });
+
+const { checkPRs, checkDeps, checkFiles, checkRepoSettings } = require('../src/checks');
+const iso = (d) => new Date(Date.now() - d * 86400000).toISOString();
+
+test('PR checks: conflicts, failing checks, stale, and ready-to-merge with a fix', () => {
+  const ids = checkPRs({ prs: [
+    { number: 1, title: 'a', mergeable: 'CONFLICTING', statusCheckRollup: 'SUCCESS', updatedAt: iso(1) },
+    { number: 2, title: 'b', mergeable: 'MERGEABLE', statusCheckRollup: 'FAILURE', updatedAt: iso(1) },
+    { number: 3, title: 'c', mergeable: 'MERGEABLE', statusCheckRollup: 'SUCCESS', updatedAt: iso(45) },
+    { number: 4, title: 'd', mergeable: 'MERGEABLE', statusCheckRollup: 'SUCCESS', reviewDecision: 'APPROVED', updatedAt: iso(1) },
+    { number: 5, title: 'e', isDraft: true, mergeable: 'MERGEABLE', updatedAt: iso(90) },
+  ] });
+  assert.deepEqual(ids.map((f) => f.id).sort(), ['pr-ci-2', 'pr-conflict-1', 'pr-ready-4', 'pr-stale-3']);
+  assert.equal(ids.find((f) => f.id === 'pr-ready-4').fix.type, 'pr-merge');
+});
+
+test('dependency checks: lockfiles, install, outdated, alerts', () => {
+  const out = checkDeps({ deps: { manifests: ['package.json'], manifestsWithoutLock: ['package.json'], needsInstall: true, outdated: 2, outdatedNames: ['a', 'b'] }, files: { dependabotConfig: false }, remote: { alertsEnabled: false, url: 'u' }, alerts: [{ severity: 'high' }] });
+  assert.deepEqual(out.map((f) => f.id).sort(), ['alerts-off', 'dependabot', 'deps-not-installed', 'deps-outdated', 'no-dependabot-config', 'no-lock-package.json']);
+  assert.equal(out.find((f) => f.id === 'dependabot').severity, 'error');
+});
+
+test('public repos get community-file nudges, private ones do not', () => {
+  const base = { files: { license: true, readme: true, gitignore: true }, remote: { isPublic: true, description: 'x' } };
+  assert.ok(checkFiles(base).some((f) => f.id === 'no-security'));
+  assert.ok(!checkFiles({ ...base, remote: { isPublic: false, description: 'x' } }).some((f) => f.id === 'no-security'));
+});
+
+test('repo settings: unprotected default branch and long inactivity', () => {
+  const ids = checkRepoSettings({ remote: { archived: false, defaultBranch: 'main', pushedAt: iso(400), openIssues: 30 }, protection: false }).map((f) => f.id);
+  assert.deepEqual(ids.sort(), ['inactive', 'many-issues', 'no-protection']);
+});

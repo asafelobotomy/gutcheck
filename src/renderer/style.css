@@ -129,3 +129,4 @@ body.dash #stats { display: none; }
 .hm-error-1 { background: color-mix(in srgb, var(--err) 35%, var(--panel2)); } .hm-error-2 { background: color-mix(in srgb, var(--err) 65%, var(--panel2)); } .hm-error-3 { background: var(--err); }
 .hm-warn-1 { background: color-mix(in srgb, var(--warn) 35%, var(--panel2)); } .hm-warn-2 { background: color-mix(in srgb, var(--warn) 65%, var(--panel2)); } .hm-warn-3 { background: var(--warn); }
 .hm-info-1 { background: color-mix(in srgb, var(--info) 35%, var(--panel2)); } .hm-info-2 { background: color-mix(in srgb, var(--info) 65%, var(--panel2)); } .hm-info-3 { background: var(--info); }
+[role=button]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

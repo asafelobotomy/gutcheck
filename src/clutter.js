@@ -364,4 +364,4 @@ async function workspaceAdvice(root, repos) {
   return out;
 }
 
-module.exports = { scanClutter, workspaceAdvice, IGNORE_OK, ENV_IGNORE };
+module.exports = { scanClutter, workspaceAdvice, IGNORE_OK };

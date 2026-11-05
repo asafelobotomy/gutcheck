@@ -1,7 +1,7 @@
 {
   "name": "gutcheck",
   "productName": "GutCheck",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Workspace-wide GitHub health dashboard built on the gh CLI",
   "main": "src/main.js",
   "author": "solon",
@@ -13,7 +13,8 @@
   },
   "devDependencies": {
     "electron": "^45.2.3",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.1",
+    "jsdom": "^31.0.0"
   },
   "build": {
     "appId": "dev.solon.gutcheck",
@@ -35,5 +36,13 @@
   },
   "allowScripts": {
     "electron@45.2.3": true
+  },
+  "overrides": {
+    "app-builder-lib": {
+      "minimatch": "^11.0.4"
+    },
+    "@electron/universal": {
+      "minimatch": "^11.0.4"
+    }
   }
 }

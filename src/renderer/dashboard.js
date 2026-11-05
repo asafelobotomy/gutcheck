@@ -19,9 +19,18 @@ function dlt(now, then, better = 'down') {
   return { text: `${d.dir > 0 ? '▲' : '▼'} ${Math.abs(d.d)} since last scan`, cls: d.good ? 'good' : 'bad' };
 }
 
+// Make any element keyboard-operable like a button (Tab to focus, Enter or Space to activate).
+function activate(el, fn) {
+  el.tabIndex = 0;
+  el.setAttribute('role', 'button');
+  el.addEventListener('click', fn);
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); } });
+  return el;
+}
+
 function card(label, value, { cls = '', sub = '', go = null, delta = null } = {}) {
   const el = h('div', { class: 'kpi ' + cls + (go ? ' link' : '') }, h('b', {}, value), h('span', {}, label), sub ? h('i', {}, sub) : null, delta ? h('i', { class: 'd ' + delta.cls }, delta.text) : null);
-  if (go) { el.tabIndex = 0; el.addEventListener('click', go); el.addEventListener('keydown', (e) => e.key === 'Enter' && go()); }
+  if (go) activate(el, go);
   return el;
 }
 
@@ -55,7 +64,7 @@ function hbars(rows, { max = Math.max(1, ...rows.map((r) => r.value)), fmt = Str
     const fill = h('div', { class: 'fill ' + (r.cls || '') });
     fill.style.width = Math.max(r.value > 0 ? 2 : 0, (r.value / max) * 100) + '%';
     const row = h('div', { class: 'hb' + (r.go ? ' link' : ''), title: r.title || r.label }, h('span', { class: 'lbl' }, r.label), h('div', { class: 'track' }, fill), h('span', { class: 'val' }, fmt(r.value)));
-    if (r.go) row.addEventListener('click', r.go);
+    if (r.go) activate(row, r.go);
     return row;
   }));
 }
@@ -113,11 +122,11 @@ function heatmapEl(hm, open) {
   grid.append(h('div', { class: 'hh' }), ...hm.cols.map((c) => h('div', { class: 'hh', title: c }, c)));
   for (const r of hm.rows) {
     const name = h('div', { class: 'hn link', title: r.name }, r.name);
-    name.addEventListener('click', open(r.path));
+    activate(name, open(r.path));
     grid.append(name, ...r.cells.map((c, i) => {
       const n = c.error + c.warn + c.info;
       const cell = h('div', { class: 'hm' + (c.worst ? ` hm-${c.worst}-${c.level}` : ''), title: `${r.name} / ${hm.cols[i]}: ` + (n ? [c.error && `${c.error} error`, c.warn && `${c.warn} warning`, c.info && `${c.info} note`].filter(Boolean).join(', ') : 'clean') }, n || '');
-      cell.addEventListener('click', open(r.path));
+      activate(cell, open(r.path));
       return cell;
     }));
   }
@@ -132,8 +141,8 @@ async function loadTrend() {
 
 function moversEl(mv, open) {
   if (!mv) return h('p', { class: 'muted' }, 'Nothing to compare yet.');
-  const row = (m, good) => h('div', { class: 'row link', onclick: open([...state.repos.values()].find((r) => r.name === m.name)?.path) },
-    h('div', { class: 'grow' }, m.name), h('span', { class: 'muted' }, `${m.from} → ${m.to}`), h('span', { class: good ? 'b-ok' : 'b-err' }, `${m.delta > 0 ? '+' : ''}${m.delta}`));
+  const row = (m, good) => activate(h('div', { class: 'row link' },
+    h('div', { class: 'grow' }, m.name), h('span', { class: 'muted' }, `${m.from} → ${m.to}`), h('span', { class: good ? 'b-ok' : 'b-err' }, `${m.delta > 0 ? '+' : ''}${m.delta}`)), open([...state.repos.values()].find((r) => r.name === m.name)?.path));
   const rows = [...mv.down.slice(0, 4).map((m) => row(m, false)), ...mv.up.slice(0, 4).map((m) => row(m, true))];
   const notes = [mv.added.length && `New: ${mv.added.join(', ')}`, mv.removed.length && `No longer scanned: ${mv.removed.join(', ')}`].filter(Boolean);
   return rows.length || notes.length ? h('div', { class: 'attn' }, rows, notes.map((n) => h('p', { class: 'muted' }, n))) : h('p', { class: 'ok-msg' }, 'No repo changed score.');
@@ -184,10 +193,10 @@ function renderDashboard() {
   ];
 
   const attention = m.attention.length
-    ? h('div', { class: 'attn' }, m.attention.map((a) => h('div', { class: 'row link', onclick: open(a.path) },
+    ? h('div', { class: 'attn' }, m.attention.map((a) => activate(h('div', { class: 'row link' },
       h('div', { class: 'grade g' + a.grade }, a.grade),
       h('div', { class: 'grow' }, h('b', {}, a.name), h('div', { class: 'muted' }, a.top ? a.top.title : ''), ),
-      h('span', { class: 'muted' }, [a.errors && `${a.errors} err`, a.warns && `${a.warns} warn`].filter(Boolean).join(' · ')))))
+      h('span', { class: 'muted' }, [a.errors && `${a.errors} err`, a.warns && `${a.warns} warn`].filter(Boolean).join(' · '))), open(a.path))))
     : h('p', { class: 'ok-msg' }, 'Nothing needs attention.');
 
   const hm = Metrics.heatmap([...state.repos.values()]);
@@ -212,9 +221,9 @@ function renderDashboard() {
       panel('Needs attention', 'Lowest-scoring repos and their worst issue', attention),
       panel('Issues by category', 'Errors, warnings and notes', m.categories.length ? stacked(m.categories) : h('p', { class: 'ok-msg' }, 'No issues.')),
       panel('Top recommendations', 'Same problem across the most repos (click for fixes)', m.recommendations.length
-        ? h('div', { class: 'attn' }, m.recommendations.map((g) => h('div', { class: 'row link', onclick: toOverview },
+        ? h('div', { class: 'attn' }, m.recommendations.map((g) => activate(h('div', { class: 'row link' },
           h('span', { class: 'n b-' + (g.sev === 'error' ? 'err' : g.sev === 'warn' ? 'warn' : '') }, g.repos.length),
-          h('div', { class: 'grow' }, g.title, h('span', { class: 'pill' }, g.cat)))))
+          h('div', { class: 'grow' }, g.title, h('span', { class: 'pill' }, g.cat)), ), toOverview)))
         : h('p', { class: 'ok-msg' }, 'Nothing to recommend.')),
       panel('Repo activity', 'Time since the last push', columns(m.activity, 'info')),
       panel('Open PRs by age', prTotal ? 'Since last update' : 'No open pull requests', prTotal ? columns(m.prAges, 'warn') : null,
