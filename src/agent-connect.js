@@ -16,9 +16,16 @@ const PLAN_TTL = 5 * 60 * 1000;
 
 // How to start GutCheck's MCP server from outside: the AppImage, the installed app, or (from a
 // source checkout) Electron with the app folder. `entry` is the app's own launch info.
-function serverCommand({ env = process.env, execPath = process.execPath, isPackaged = false, appPath = '' } = {}, allowActions = false) {
+function serverCommand({ env = process.env, execPath = process.execPath, isPackaged = false, appPath = '', dataDir = null, version = 'current' } = {}, allowActions = false) {
   const flags = ['--mcp', ...(allowActions ? ['--allow-actions'] : [])];
-  if (env.APPIMAGE) return { command: env.APPIMAGE, args: flags };
+  if (env.APPIMAGE) {
+    // Agents started by Claude Desktop (and other sandboxed hosts) run with NoNewPrivs, which blocks
+    // fusermount, so an AppImage cannot mount there. GutCheck unpacks itself once into its data
+    // folder and agents run that copy, which needs no FUSE.
+    if (!dataDir) return { command: env.APPIMAGE, args: flags };
+    const dir = path.join(dataDir, 'mcp-app', String(version));
+    return { command: path.join(dir, 'squashfs-root', path.basename(execPath)), args: flags, unpack: { appimage: env.APPIMAGE, dir } };
+  }
   if (isPackaged) return { command: execPath, args: flags };
   return { command: execPath, args: [appPath, ...flags] };
 }
@@ -67,6 +74,21 @@ function readJson(file) {
   if (!text.trim()) return { data: {} };
   try { const d = JSON.parse(text); return isObj(d) ? { data: d } : { error: `${file} is not a JSON object.` }; } catch { return { error: `${file} is not plain JSON (it may contain comments), so GutCheck will not rewrite it. Paste the snippet instead.` }; }
 }
+// The server entry a client has for GutCheck now ({ command, args }), or null.
+function registered(c, home, env) {
+  if (c.id === 'claude-code') { const r = readJson(path.join(home, '.claude.json')); return (r.data && isObj(r.data.mcpServers) && r.data.mcpServers[NAME]) || null; }
+  if (c.id === 'codex') {
+    let t = '';
+    try { t = fs.readFileSync(path.join(env.CODEX_HOME || path.join(home, '.codex'), 'config.toml'), 'utf8'); } catch { return null; }
+    const m = /^\s*\[mcp_servers\.gutcheck\]\s*$([\s\S]*?)(?=^\s*\[|$(?![\s\S]))/m.exec(t);
+    if (!m) return null;
+    const cmd = /^\s*command\s*=\s*"([^"]*)"/m.exec(m[1]);
+    return { command: cmd ? cmd[1] : null };
+  }
+  const r = readJson(c.file);
+  return (r.data && isObj(r.data[c.key]) && r.data[c.key][NAME]) || null;
+}
+
 function hasKey(file, key) { const r = readJson(file); return !!(r.data && isObj(r.data[key]) && r.data[key][NAME]); }
 
 const executable = (f) => { try { fs.accessSync(f, fs.constants.X_OK); return fs.statSync(f).isFile(); } catch { return false; } };
@@ -110,6 +132,8 @@ function createAgentConnect(opts = {}) {
 
   function status(allowActions = false) {
     const cmd = cmdFor(allowActions);
+    // Until the unpacked copy exists, a copied command uses the AppImage (fine in an ordinary terminal).
+    const copyCmd = cmd.unpack && !fs.existsSync(cmd.command) ? { command: cmd.unpack.appimage, args: cmd.args } : cmd;
     const claudeSettings = fs.existsSync(path.join(home, '.claude')) ? (readJson(path.join(home, '.claude', 'settings.json')).data || {}) : null;
     return {
       // null when not set (the default, 30), undefined when Claude Code is not set up here.
@@ -117,9 +141,11 @@ function createAgentConnect(opts = {}) {
       command: show([cmd.command, ...cmd.args]),
       clients: list().map((c) => {
         const installed = c.kind === 'cli' ? !!findBin(c, env, appData) : fs.existsSync(c.present);
-        let configured = false;
-        try { configured = c.kind === 'cli' ? !!c.configured() : hasKey(c.file, c.key); } catch {}
-        return { id: c.id, name: c.name, kind: c.kind, installed, configured, file: c.file || null, docs: c.docs, snippet: snippet(c, cmd) };
+        let entry = null;
+        try { entry = registered(c, home, env); } catch {}
+        // Connected, but to another copy of GutCheck (an older version, or the AppImage itself, which agents cannot mount).
+        const outdated = !!(entry && entry.command && entry.command !== cmd.command);
+        return { id: c.id, name: c.name, kind: c.kind, installed, configured: !!entry, outdated, file: c.file || null, docs: c.docs, snippet: snippet(c, copyCmd) };
       }),
     };
   }
@@ -129,6 +155,10 @@ function createAgentConnect(opts = {}) {
     const c = list().find((x) => x.id === id);
     if (!c) return { ok: false, error: 'Unknown agent.' };
     const cmd = cmdFor(allowActions);
+    const unpack = !remove && cmd.unpack && !fs.existsSync(cmd.command) ? [
+      { kind: 'mkdir', dir: cmd.unpack.dir },
+      { kind: 'cmd', argv: [cmd.unpack.appimage, '--appimage-extract'], cwd: cmd.unpack.dir, label: `unpack GutCheck once into ${cmd.unpack.dir} (agents cannot mount AppImages: NoNewPrivs blocks FUSE)` },
+    ] : [];
     let p;
     if (c.kind === 'cli') {
       const bin = findBin(c, env, appData);
@@ -136,8 +166,8 @@ function createAgentConnect(opts = {}) {
       const withBin = (argv) => [bin, ...argv.slice(1)];
       const argv = withBin(remove ? c.remove() : c.add(cmd));
       // Re-adding replaces the old entry: remove first (a missing entry is fine).
-      const steps = remove ? [{ kind: 'cmd', argv }] : [{ kind: 'cmd', argv: withBin(c.remove()), optional: true }, { kind: 'cmd', argv }];
-      p = { title: `${remove ? 'Disconnect GutCheck from' : 'Connect GutCheck to'} ${c.name}`, steps, display: steps.map((s) => show(s.argv) + (s.optional ? '   # only if already added' : '')) };
+      const steps = remove ? [{ kind: 'cmd', argv }] : [...unpack, { kind: 'cmd', argv: withBin(c.remove()), optional: true }, { kind: 'cmd', argv }];
+      p = { title: `${remove ? 'Disconnect GutCheck from' : 'Connect GutCheck to'} ${c.name}`, steps, display: steps.filter((s) => s.kind === 'cmd').map((s) => s.label || show(s.argv) + (s.optional ? '   # only if already added' : '')) };
     } else {
       const r = readJson(c.file);
       if (r.error) return { ok: false, error: r.error, snippet: snippet(c, cmd) };
@@ -145,8 +175,8 @@ function createAgentConnect(opts = {}) {
       if (remove) { if (!next[c.key][NAME]) return { ok: false, error: `GutCheck is not in ${c.file}.` }; delete next[c.key][NAME]; }
       else next[c.key][NAME] = c.entry(cmd);
       const content = JSON.stringify(next, null, 2) + '\n';
-      const steps = [{ kind: 'json', file: c.file, content, backup: !r.missing }];
-      p = { title: `${remove ? 'Remove GutCheck from' : 'Add GutCheck to'} ${c.name}`, steps, display: [`${r.missing ? 'create' : 'update'} ${c.file}${r.missing ? '' : ` (backup: ${path.basename(c.file)}.gutcheck.bak)`}`], preview: remove ? null : JSON.stringify({ [c.key]: { [NAME]: c.entry(cmd) } }, null, 2), note: c.restart ? `Restart ${c.name} to pick it up.` : null };
+      const steps = [...unpack, { kind: 'json', file: c.file, content, backup: !r.missing }];
+      p = { title: `${remove ? 'Remove GutCheck from' : 'Add GutCheck to'} ${c.name}`, steps, display: [...unpack.filter((x) => x.label).map((x) => x.label), `${r.missing ? 'create' : 'update'} ${c.file}${r.missing ? '' : ` (backup: ${path.basename(c.file)}.gutcheck.bak)`}`], preview: remove ? null : JSON.stringify({ [c.key]: { [NAME]: c.entry(cmd) } }, null, 2), note: c.restart ? `Restart ${c.name} to pick it up.` : null };
     }
     const token = crypto.randomBytes(16).toString('hex');
     plans.set(token, { ...p, client: c, expires: Date.now() + PLAN_TTL });
@@ -175,9 +205,11 @@ function createAgentConnect(opts = {}) {
     const results = [];
     let ok = true;
     for (const s of p.steps) {
-      if (s.kind === 'cmd') {
-        const r = await runner(s.argv[0], s.argv.slice(1), { cwd: home });
-        results.push({ text: show(s.argv), ok: r.ok || !!s.optional, out: (r.stdout + r.stderr).trim().slice(0, 2000) });
+      if (s.kind === 'mkdir') {
+        try { fs.mkdirSync(s.dir, { recursive: true, mode: 0o700 }); } catch (e) { results.push({ text: `create ${s.dir}`, ok: false, out: String(e.message) }); ok = false; break; }
+      } else if (s.kind === 'cmd') {
+        const r = await runner(s.argv[0], s.argv.slice(1), { cwd: s.cwd || home, timeout: 5 * 60 * 1000 });
+        results.push({ text: s.label || show(s.argv), ok: r.ok || !!s.optional, out: s.label ? '' : (r.stdout + r.stderr).trim().slice(0, 2000) });
         if (!r.ok && !s.optional) { ok = false; break; }
       } else {
         try {

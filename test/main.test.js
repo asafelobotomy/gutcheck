@@ -13,7 +13,7 @@ function load() {
   const opened = [];
   const noop = () => {};
   const electron = {
-    app: { getPath: () => userData, whenReady: () => ({ then: noop }), on: noop, requestSingleInstanceLock: () => true, isPackaged: true, getAppPath: () => '/app', getLoginItemSettings: () => ({ openAtLogin: false }), setLoginItemSettings: noop },
+    app: { getPath: () => userData, whenReady: () => ({ then: noop }), on: noop, requestSingleInstanceLock: () => true, isPackaged: true, getAppPath: () => '/app', getVersion: () => '1.2.3', getLoginItemSettings: () => ({ openAtLogin: false }), setLoginItemSettings: noop },
     BrowserWindow: function () {}, session: {}, dialog: {}, clipboard: { writeText: noop },
     ipcMain: { handle: (c, fn) => handlers.set(c, fn) },
     shell: { openExternal: (u) => opened.push(['url', u]), openPath: (p) => opened.push(['path', p]), trashItem: async () => {} },

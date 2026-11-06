@@ -107,7 +107,9 @@ GutCheck also runs without its window, so any coding agent (Claude Code, Claude 
 
 The exact command or JSON is shown before anything runs, the change is recorded in History, and **Disconnect** removes only GutCheck's entry. A config file that is not plain JSON (VS Code allows comments) is never rewritten; you get the snippet to paste instead. **Copy** puts the command or snippet on the clipboard for any agent, and the switch at the top chooses read-only or `--allow-actions`.
 
-**MCP server.** To set it up by hand, add GutCheck to your agent as a stdio MCP server. It starts **read-only**; add `--allow-actions` to let the agent plan and apply fixes.
+**Why it unpacks itself.** Agents started by Claude Desktop (and other sandboxed hosts) run with `NoNewPrivs`, which blocks `fusermount`, so an AppImage cannot mount there. Its runtime's FUSE-free mode prints file names to standard output, which breaks MCP. So when you connect from the AppImage, GutCheck first unpacks itself once into its data folder (`mcp-app/<version>/`, about 400 MB) and registers that copy. After updating GutCheck, the agent shows **Update needed**: press **Update** to unpack the new version and repoint the agent. Agents need a new session to see a newly added server.
+
+**MCP server.** To set it up by hand, add GutCheck to your agent as a stdio MCP server. It starts **read-only**; add `--allow-actions` to let the agent plan and apply fixes. If your agent runs under `NoNewPrivs` (Claude Desktop does), point it at an unpacked copy (`GutCheck.AppImage --appimage-extract`, then `squashfs-root/gutcheck --mcp`) rather than the AppImage.
 
 ```bash
 claude mcp add --transport stdio --scope user gutcheck -- /path/to/GutCheck.AppImage --mcp                    # Claude Code, read-only

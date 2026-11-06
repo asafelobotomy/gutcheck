@@ -147,7 +147,7 @@ handle('background:set', (_e, patch) => {
 });
 
 // Settings > AI agents: connect GutCheck's MCP server to installed coding agents (plan, review, apply).
-const agents = createAgentConnect({ launch: { env: process.env, execPath: process.execPath, isPackaged: app.isPackaged, appPath: app.getAppPath() }, audit });
+const agents = createAgentConnect({ launch: { env: process.env, execPath: process.execPath, isPackaged: app.isPackaged, appPath: app.getAppPath(), dataDir: app.getPath('userData'), version: app.getVersion() }, audit });
 const agentAllow = (v) => (typeof v === 'boolean' ? v : !!loadSettings().agentAllowActions);
 handle('agents:status', (_e, { allowActions } = {}) => ({ ...agents.status(agentAllow(allowActions)), allowActions: agentAllow(allowActions) }));
 handle('agents:plan', (_e, { id, allowActions, remove } = {}) => {

@@ -119,3 +119,39 @@ test('Claude Code bundled with Claude Desktop is used when claude is not on PATH
   const p = ac.plan('claude-code', {});
   assert.match(p.display[1], new RegExp(`^${path.join(home, '.config', 'Claude', 'claude-code', '2.1.317', 'b1', 'claude').replace(/[.]/g, '\\.')} mcp add `));
 });
+
+test('from an AppImage, agents get an unpacked copy (no FUSE under NoNewPrivs): unpacked once, then registered; an old registration shows as outdated', async () => {
+  const home = tmp();
+  const data = path.join(home, 'data');
+  const launch = { env: { APPIMAGE: '/apps/GutCheck.AppImage' }, execPath: '/tmp/.mount_x/gutcheck', dataDir: data, version: '9.9.9' };
+  const unpacked = path.join(data, 'mcp-app', '9.9.9', 'squashfs-root', 'gutcheck');
+  assert.deepEqual(serverCommand(launch, true), { command: unpacked, args: ['--mcp', '--allow-actions'], unpack: { appimage: '/apps/GutCheck.AppImage', dir: path.join(data, 'mcp-app', '9.9.9') } });
+
+  const ran = [];
+  const runner = async (cmd, args, o) => {
+    ran.push([cmd, ...args]);
+    if (args[0] === '--appimage-extract') put(path.join(o.cwd, 'squashfs-root', 'gutcheck'), '#!/bin/sh\n'); // what the AppImage runtime does
+    return { ok: true, stdout: 'squashfs-root/a\nsquashfs-root/b\n', stderr: '' };
+  };
+  const cursor = path.join(home, '.cursor', 'mcp.json');
+  put(cursor, JSON.stringify({ mcpServers: { gutcheck: { command: '/apps/GutCheck.AppImage', args: ['--mcp'] } } }));
+  const ac = createAgentConnect({ home, platform: 'linux', env: { PATH: '' }, launch, runner });
+  let c = ac.status().clients.find((x) => x.id === 'cursor');
+  assert.deepEqual([c.configured, c.outdated], [true, true], 'registered with the AppImage, which agents cannot mount');
+  assert.match(c.snippet, /"command": "\/apps\/GutCheck\.AppImage"/, 'until unpacked, Copy gives the AppImage (fine in a terminal)');
+
+  const p = ac.plan('cursor', {});
+  assert.match(p.display[0], /^unpack GutCheck once into .*mcp-app\/9\.9\.9 \(agents cannot mount AppImages: NoNewPrivs blocks FUSE\)$/);
+  assert.equal(ran.length, 0, 'planning runs nothing');
+  const r = await ac.apply(p.token);
+  assert.equal(r.ok, true);
+  assert.deepEqual(ran, [['/apps/GutCheck.AppImage', '--appimage-extract']]);
+  assert.deepEqual(read(cursor).mcpServers.gutcheck, { type: 'stdio', command: unpacked, args: ['--mcp'] });
+  c = ac.status().clients.find((x) => x.id === 'cursor');
+  assert.deepEqual([c.configured, c.outdated], [true, false]);
+  assert.ok(!r.results[0].out, 'the long list of unpacked files is not shown');
+
+  const again = ac.plan('cursor', {});
+  assert.ok(!again.display.some((d) => d.startsWith('unpack')), 'already unpacked: not done twice');
+  fs.rmSync(home, { recursive: true, force: true });
+});

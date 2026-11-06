@@ -24,7 +24,7 @@ async function openAgents() {
     const render = () => {
       cmd.textContent = st.command;
       list.replaceChildren(...st.clients.map((c) => {
-        const state = c.configured ? h('span', { class: 'risk r-safe' }, 'Connected') : c.installed ? h('span', { class: 'risk' }, 'Installed') : h('span', { class: 'muted' }, 'Not found');
+        const state = c.outdated ? h('span', { class: 'risk r-caution', title: 'Connected to another copy of GutCheck: press Update' }, 'Update needed') : c.configured ? h('span', { class: 'risk r-safe' }, 'Connected') : c.installed ? h('span', { class: 'risk' }, 'Installed') : h('span', { class: 'muted' }, 'Not found');
         const act = async (remove) => {
           const p = await window.api.planAgent(c.id, allow.checked, remove);
           if (!p.ok) { toast(p.error, 'bad'); return; }
