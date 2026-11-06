@@ -144,7 +144,8 @@ test('agentAdvice: nothing without an agent app; transcripts, indexer, paralleli
     const t = big.find((a) => a.id === 'agent-transcripts');
     assert.ok(t, 'large history is reported');
     assert.match(t.detail, /big \(600 MB\)/);
-    assert.match(t.detail, /cleanupPeriodDays is 7/);
+    assert.match(t.detail, /keeps sessions for 7 days \(cleanupPeriodDays\)\. It is already short/);
+    assert.equal(t.fix, undefined, 'nothing shorter to suggest');
     assert.ok(!big.some((a) => a.id === 'agent-parallel'));
   } finally {
     if (old !== undefined) process.env.XDG_CONFIG_HOME = old;
@@ -157,4 +158,41 @@ test('agent findings reach the LLM report with their steps and sources', () => {
   const text = buildReport({ repos: [r] });
   assert.match(text, /git rm --cached \.claude\/settings\.local\.json/);
   assert.match(text, /code\.claude\.com\/docs\/en\/settings#keep-personal-settings-out-of-a-repository/);
+});
+
+test('session history: sizes by age suggest a cleanupPeriodDays value with a fix; planCleanup merges it and keeps other keys', async () => {
+  const home = tmp('gutcheck-home-');
+  const old = process.env.XDG_CONFIG_HOME;
+  delete process.env.XDG_CONFIG_HOME;
+  try {
+    put(home, '.claude/settings.json', JSON.stringify({ theme: 'dark' }));
+    const proj = path.join(home, '.claude', 'projects', projectKey('/w/app'));
+    fs.mkdirSync(proj, { recursive: true });
+    const now = Date.now();
+    for (const [name, mb, days] of [['old.jsonl', 300, 20], ['mid.jsonl', 200, 10], ['new.jsonl', 100, 1]]) {
+      const f = path.join(proj, name);
+      fs.writeFileSync(f, '');
+      fs.truncateSync(f, mb * 1048576);
+      fs.utimesSync(f, (now - days * 864e5) / 1000, (now - days * 864e5) / 1000);
+    }
+    const a = (await agentAdvice([{ path: '/w/app', name: 'app' }], { home, cpus: 32, memBytes: 64 * 1073741824, env: { CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '3' }, now })).find((x) => x.id === 'agent-transcripts');
+    assert.match(a.detail, /keeps sessions for 30 days \(the default\); 500 MB is older than 7 days, 300 MB is older than 14 days/);
+    assert.match(a.detail, /Setting cleanupPeriodDays to 14 clears about 300 MB/);
+    assert.deepEqual(a.fix, { type: 'claude-cleanup-days', label: 'Keep 14 days', days: 14 });
+
+    const { createAgentConnect } = require('../src/agent-connect');
+    const ac = createAgentConnect({ home, platform: 'linux', env: { PATH: '' }, launch: { env: { APPIMAGE: '/a' } } });
+    assert.equal(ac.status().cleanupPeriodDays, null);
+    assert.equal(ac.planCleanup(0).ok, false);
+    const p = ac.planCleanup(14);
+    assert.match(p.display[0], /"cleanupPeriodDays": 14 \(default was 30\)/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8')), { theme: 'dark' }, 'planning writes nothing');
+    assert.equal((await ac.apply(p.token)).ok, true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8')), { theme: 'dark', cleanupPeriodDays: 14 });
+    assert.ok(fs.existsSync(path.join(home, '.claude', 'settings.json.gutcheck.bak')));
+    assert.equal(ac.status().cleanupPeriodDays, 14);
+  } finally {
+    if (old !== undefined) process.env.XDG_CONFIG_HOME = old;
+    cleanup(home);
+  }
 });

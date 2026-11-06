@@ -6,9 +6,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { git } = require('./exec');
 const { auditWorkflows } = require('./workflows');
+const { analyzeHistory } = require('./history');
 
 const MiB = 1024 * 1024;
 const HISTORY_BLOB_MIN = 50 * MiB;
+const HISTORY_ANALYSE_KIB = 1024 * 1024; // 1 GB, GitHub's recommended ceiling
 const HISTORY_TIMEOUT_MS = 2 * 60 * 1000; // listing every object of a very large repo can take a while // GitHub warns at 50 MiB and rejects pushes over 100 MiB
 const lines = (s) => s.split('\n').filter(Boolean);
 const exists = (dir, ...p) => { try { fs.accessSync(path.join(dir, ...p)); return true; } catch { return false; } };
@@ -84,6 +86,8 @@ async function collectHygiene(dir, { names, rawOrigin, deep, branch }) {
     const sm = await run(['submodule', 'status']);
     h.submodulesUninit = lines(sm.stdout).filter((l) => l.startsWith('-')).length;
   }
+  // Deep scan of a repo over GitHub's 1 GB guidance: where the space is, and whether a rewrite would help.
+  if (deep && !h.noCommits && h.storage.packKiB >= HISTORY_ANALYSE_KIB) h.history = await analyzeHistory(dir);
   if (deep && !h.noCommits) {
     // Every object in the object store, including history: blobs at or over GitHub's 50 MiB warning size.
     const all = await git(['cat-file', '--batch-all-objects', '--batch-check=%(objecttype) %(objectsize) %(objectname)'], { cwd: dir, timeout: HISTORY_TIMEOUT_MS });

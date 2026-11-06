@@ -154,6 +154,7 @@ handle('agents:plan', (_e, { id, allowActions, remove } = {}) => {
   if (loadSettings().readOnly) return { ok: false, error: 'Read-only mode is on.' };
   return agents.plan(String(id || ''), { allowActions: agentAllow(allowActions), remove: remove === true });
 });
+handle('agents:cleanup', (_e, { days } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.planCleanup(Number(days))));
 handle('agents:apply', (_e, { token } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.apply(String(token || ''))));
 handle('agents:copy', (_e, { id, allowActions } = {}) => {
   const c = agents.status(agentAllow(allowActions)).clients.find((x) => x.id === id);

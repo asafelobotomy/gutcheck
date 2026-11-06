@@ -34,7 +34,9 @@ const TRANSCRIPTS_INFO_KIB = 512 * 1024;
 const SMALL_MACHINE = { cpus: 8, memGiB: 16 }; // at or below either, many parallel agents compete for the machine
 const PARALLEL_SUGGESTED = 3;
 const PLUGINS_MANY = 8;
-const SIZE_BUDGET = 200000; // files measured under the transcripts folder before giving up (sizes only)
+const SIZE_BUDGET = 200000;
+const CLEANUP_CHOICES = [7, 14]; // cleanupPeriodDays values worth suggesting (default 30, minimum 1)
+const DAY_MS = 86400000; // files measured under the transcripts folder before giving up (sizes only)
 
 // Instruction files other tools read. Claude Code reads CLAUDE.md, and AGENTS.md when there is no CLAUDE.md.
 const OTHER_RULES = [
@@ -152,8 +154,12 @@ function detectApps(home) {
 }
 
 // Sizes only, with a file budget so a huge folder cannot stall the scan. Returns KiB.
-async function folderKiB(dir, budget) {
-  let total = 0;
+// Sizes only (and file dates, to see what a shorter cleanup period would clear), with a file
+// budget so a huge folder cannot stall the scan. Returns KiB: total and by age.
+async function folderKiB(dir, budget, now = Date.now()) {
+  const out = { kib: 0, older: Object.fromEntries(CLEANUP_CHOICES.map((d) => [d, 0])) };
+  let bytes = 0;
+  const older = Object.fromEntries(CLEANUP_CHOICES.map((d) => [d, 0]));
   const walk = async (d) => {
     let ents;
     try { ents = await fsp.readdir(d, { withFileTypes: true }); } catch { return; }
@@ -161,16 +167,24 @@ async function folderKiB(dir, budget) {
       if (budget.n-- <= 0) return;
       const p = path.join(d, e.name);
       if (e.isDirectory()) await walk(p);
-      else if (e.isFile()) { try { total += (await fsp.stat(p)).size; } catch {} }
+      else if (e.isFile()) {
+        try {
+          const st = await fsp.stat(p);
+          bytes += st.size;
+          for (const days of CLEANUP_CHOICES) if (now - st.mtimeMs > days * DAY_MS) older[days] += st.size;
+        } catch {}
+      }
     }
   };
   await walk(dir);
-  return Math.round(total / 1024);
+  out.kib = Math.round(bytes / 1024);
+  for (const d of CLEANUP_CHOICES) out.older[d] = Math.round(older[d] / 1024);
+  return out;
 }
 
 const gb = (k) => (k >= 1048576 ? `${(k / 1048576).toFixed(1)} GB` : `${Math.round(k / 1024)} MB`);
 // '-home-me-Projects-foo' -> 'foo' when it matches a scanned repo, else the encoded name.
-const projectLabel = (key, repos) => (repos.find((r) => projectKey(r.path) === key) || {}).name || key;
+const projectLabel = (key, repos, home = os.homedir()) => (repos.find((r) => projectKey(r.path) === key) || {}).name || (key.startsWith(projectKey(home) + '-') ? '~/' + key.slice(projectKey(home).length + 1) : key);
 
 // KDE Baloo: does the indexer cover agent folders, and does it read file contents?
 function balooState(home) {
@@ -204,14 +218,18 @@ async function agentAdvice(repos = [], opts = {}) {
     try { ents = (await fsp.readdir(root, { withFileTypes: true })).filter((e) => e.isDirectory()); } catch {}
     const budget = { n: SIZE_BUDGET };
     const sizes = [];
-    for (const e of ents) sizes.push({ key: e.name, kib: await folderKiB(path.join(root, e.name), budget) });
+    for (const e of ents) sizes.push({ key: e.name, ...(await folderKiB(path.join(root, e.name), budget, opts.now)) });
     const total = sizes.reduce((n, s) => n + s.kib, 0);
     if (total >= TRANSCRIPTS_INFO_KIB) {
       sizes.sort((x, y) => y.kib - x.kib);
-      const custom = Number.isFinite(settings.cleanupPeriodDays);
+      const current = Number.isFinite(settings.cleanupPeriodDays) ? settings.cleanupPeriodDays : 30;
+      const older = Object.fromEntries(CLEANUP_CHOICES.map((d) => [d, sizes.reduce((n, s) => n + s.older[d], 0)]));
+      // Suggest the longest period that clears at least a fifth of the history; 7 days otherwise.
+      const days = CLEANUP_CHOICES.slice().reverse().find((d) => d < current && older[d] >= total / 5) || (current > 7 ? 7 : null);
+      const ages = CLEANUP_CHOICES.filter((d) => d < current).map((d) => `${gb(older[d])} is older than ${d} days`).join(', ');
       add('agent-transcripts', total >= TRANSCRIPTS_WARN_KIB ? 'warn' : 'info', `${gb(total)} of local agent session history`,
-        `${list(sizes.slice(0, 4).map((s) => `${projectLabel(s.key, repos)} (${gb(s.kib)})`), 4)}${budget.n <= 0 ? ' (measurement capped, real total is larger)' : ''}. ~/.claude/projects is rewritten constantly while agents run. ${custom ? `cleanupPeriodDays is ${settings.cleanupPeriodDays}` : 'cleanupPeriodDays is not set (default 30 days)'}: a lower value in ~/.claude/settings.json (for example 14; the minimum is 1) keeps it smaller. Claude Desktop sessions use desktopSessionCleanupPeriodDays.`,
-        { ref: REFS.cleanup, note: 'Ask before deleting any transcript: it cannot be undone and resuming those sessions stops working. Prefer the cleanup setting to manual deletion.' });
+        `${list(sizes.slice(0, 4).map((s) => `${projectLabel(s.key, repos)} (${gb(s.kib)})`), 4)}${budget.n <= 0 ? ' (measurement capped, real total is larger)' : ''}. Claude Code keeps sessions for ${current} days${Number.isFinite(settings.cleanupPeriodDays) ? ' (cleanupPeriodDays)' : ' (the default)'}${ages ? `; ${ages}` : ''}.${days ? ` Setting cleanupPeriodDays to ${days} clears about ${gb(older[days])} the next time Claude Code starts, and you can still resume anything newer.` : ' It is already short: the space is recent work.'} Claude Desktop's own sessions use desktopSessionCleanupPeriodDays.`,
+        { ref: REFS.cleanup, note: 'Prefer the setting to deleting transcripts by hand: deletion cannot be undone and those sessions can no longer be resumed. Change ~/.claude/settings.json only with the user\'s approval, keeping its other keys.', fix: days ? { type: 'claude-cleanup-days', label: `Keep ${days} days`, days } : undefined, cmds: days ? [`# in ~/.claude/settings.json: "cleanupPeriodDays": ${days}`] : [] });
     }
   }
 

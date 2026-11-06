@@ -35,7 +35,8 @@ function openClutter() {
 function adviceEl(r, f) {
   return h('div', { class: 'finding ' + f.severity },
     h('div', { class: 't' }, h('b', {}, f.title), h('span', {}, f.detail || '')),
-    f.fix && r ? btn(f.fix.label, async () => { if (await runActions([{ repo: r, action: f.fix }])) await scanClutterNow([r.path]); }) : null);
+    f.fix && r ? btn(f.fix.label, async () => { if (await runActions([{ repo: r, action: f.fix }])) await scanClutterNow([r.path]); }) : null,
+    f.fix && !r && f.fix.type === 'claude-cleanup-days' ? btn(f.fix.label, () => runCleanup(f.fix.days)) : null);
 }
 
 async function removePicked(paths) {

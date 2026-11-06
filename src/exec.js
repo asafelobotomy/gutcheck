@@ -6,7 +6,7 @@ function run(cmd, args, opts = {}) {
     const child = execFile(
       cmd,
       args,
-      { cwd: opts.cwd, timeout: opts.timeout || 30000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GIT_TERMINAL_PROMPT: '0' } },
+      { cwd: opts.cwd, timeout: opts.timeout || 30000, maxBuffer: opts.maxBuffer || 16 * 1024 * 1024, env: { ...process.env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GIT_TERMINAL_PROMPT: '0' } },
       (err, stdout, stderr) => resolve({ ok: !err, stdout: String(stdout || ''), stderr: String(stderr || (err && err.message) || '') })
     );
     // Optional stdin (used to send JSON bodies to `gh api --input -` without touching disk or the shell).

@@ -110,7 +110,10 @@ function createAgentConnect(opts = {}) {
 
   function status(allowActions = false) {
     const cmd = cmdFor(allowActions);
+    const claudeSettings = fs.existsSync(path.join(home, '.claude')) ? (readJson(path.join(home, '.claude', 'settings.json')).data || {}) : null;
     return {
+      // null when not set (the default, 30), undefined when Claude Code is not set up here.
+      cleanupPeriodDays: claudeSettings ? (Number.isInteger(claudeSettings.cleanupPeriodDays) ? claudeSettings.cleanupPeriodDays : null) : undefined,
       command: show([cmd.command, ...cmd.args]),
       clients: list().map((c) => {
         const installed = c.kind === 'cli' ? !!findBin(c, env, appData) : fs.existsSync(c.present);
@@ -151,6 +154,20 @@ function createAgentConnect(opts = {}) {
     return { ok: true, token, title: p.title, display: p.display, preview: p.preview || null, note: p.note || null, allowActions: !!allowActions };
   }
 
+  // Claude Code's cleanupPeriodDays (how long session history is kept), merged into ~/.claude/settings.json.
+  function planCleanup(days) {
+    if (!Number.isInteger(days) || days < 1 || days > 365) return { ok: false, error: 'Choose a number of days from 1 to 365.' };
+    const file = path.join(home, '.claude', 'settings.json');
+    if (!fs.existsSync(path.join(home, '.claude'))) return { ok: false, error: 'Claude Code is not set up for this user.' };
+    const r = readJson(file);
+    if (r.error) return { ok: false, error: r.error };
+    const content = JSON.stringify({ ...r.data, cleanupPeriodDays: days }, null, 2) + '\n';
+    const p = { title: `Keep Claude Code session history for ${days} days`, steps: [{ kind: 'json', file, content, backup: !r.missing }], display: [`${r.missing ? 'create' : 'update'} ${file}: "cleanupPeriodDays": ${days}${r.data.cleanupPeriodDays != null ? ` (was ${r.data.cleanupPeriodDays})` : ' (default was 30)'}`], note: 'Claude Code removes older sessions the next time it starts. Sessions older than this can no longer be resumed.', client: { name: 'Claude Code', file } };
+    const token = crypto.randomBytes(16).toString('hex');
+    plans.set(token, { ...p, expires: Date.now() + PLAN_TTL });
+    return { ok: true, token, title: p.title, display: p.display, preview: null, note: p.note, allowActions: false };
+  }
+
   async function apply(token) {
     const p = plans.get(token);
     plans.delete(token); // single use
@@ -177,7 +194,7 @@ function createAgentConnect(opts = {}) {
     return { ok, title: p.title, results, note: p.note || null };
   }
 
-  return { status, plan, apply };
+  return { status, plan, planCleanup, apply };
 }
 
 module.exports = { createAgentConnect, serverCommand, clients, snippet, NAME };

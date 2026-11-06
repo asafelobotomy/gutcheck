@@ -288,3 +288,26 @@ test('build output: cargo target (tagged or beside Cargo.toml), pytest temp, ele
     assert.ok(!by['.venv'] && !by['docs/target']);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('ignored logs, temp files and backups: stale ones are high confidence, recent ones medium, unignored logs stay low; all go to the trash', async () => {
+  const dir = repo();
+  try {
+    const old = (rel, days) => { const f = path.join(dir, ...rel.split('/')); const t = (Date.now() - days * 864e5) / 1000; fs.utimesSync(f, t, t); };
+    put(dir, '.gitignore', '.tmp/\n*.log\n');
+    put(dir, '.tmp/run-old.log'); old('.tmp/run-old.log', 20);
+    put(dir, '.tmp/run-new.log');
+    put(dir, '.tmp/edit.bak'); old('.tmp/edit.bak', 10);
+    put(dir, 'notes.bak'); old('notes.bak', 40); // not ignored: unchanged rule
+    put(dir, 'server.log'); old('server.log', 40);
+    fs.writeFileSync(path.join(dir, '.gitignore'), '.tmp/\n');
+    const r = await scanClutter(dir);
+    const by = Object.fromEntries(r.items.map((i) => [i.path, i]));
+    assert.deepEqual([by['.tmp/run-old.log'].confidence, by['.tmp/run-old.log'].mode], ['high', 'trash']);
+    assert.match(by['.tmp/run-old.log'].reason, /git-ignored scratch folder, untouched for 20 days/);
+    assert.equal(by['.tmp/run-new.log'].confidence, 'medium');
+    assert.match(by['.tmp/run-new.log'].reason, /may still be in use/);
+    assert.equal(by['.tmp/edit.bak'].confidence, 'medium', 'backups need 30 days');
+    assert.equal(by['server.log'].confidence, 'low', 'a log git does not ignore may be kept on purpose');
+    assert.equal(by['notes.bak'].confidence, 'medium');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

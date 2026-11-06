@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { git, run } = require('./exec');
+const { git } = require('./exec');
 const { DAY, COMMAND_TIMEOUT_MS, NODE_LOCKFILES, plural, list, HEAVY_DIRS } = require('./util');
 
 const MAX_FILES = 40000;
@@ -21,70 +21,7 @@ const MAX_HASH_BYTES = 5 * 1024 * 1024;
 // Never descend into these: huge, owned by a tool, or not part of the source tree.
 const NO_DESCEND = new Set([...HEAVY_DIRS, '.git', '.venv', 'venv', '.next', '.nuxt', '.svelte-kit', '.cxx', '.gradle']);
 
-// Regenerable folders. `sure`: the name alone is unambiguous, so high confidence even when not ignored.
-const CACHE_DIRS = {
-  __pycache__: { category: 'cache', reason: 'Python bytecode cache', ignoreAs: '__pycache__/', sure: true },
-  '.pytest_cache': { category: 'cache', reason: 'pytest cache', ignoreAs: '.pytest_cache/', sure: true },
-  '.mypy_cache': { category: 'cache', reason: 'mypy cache', ignoreAs: '.mypy_cache/', sure: true },
-  '.ruff_cache': { category: 'cache', reason: 'ruff cache', ignoreAs: '.ruff_cache/', sure: true },
-  '.tox': { category: 'cache', reason: 'tox environments', ignoreAs: '.tox/', sure: true },
-  '.parcel-cache': { category: 'cache', reason: 'Parcel cache', ignoreAs: '.parcel-cache/', sure: true },
-  '.turbo': { category: 'cache', reason: 'Turborepo cache', ignoreAs: '.turbo/', sure: true },
-  '.sass-cache': { category: 'cache', reason: 'Sass cache', ignoreAs: '.sass-cache/', sure: true },
-  '.nyc_output': { category: 'test-artifact', reason: 'nyc coverage data', ignoreAs: '.nyc_output/', sure: true },
-  htmlcov: { category: 'test-artifact', reason: 'Python coverage HTML report', ignoreAs: 'htmlcov/', sure: false },
-  coverage: { category: 'test-artifact', reason: 'Test coverage report', ignoreAs: 'coverage/', sure: false },
-  'test-results': { category: 'test-artifact', reason: 'Test runner output', ignoreAs: 'test-results/', sure: false },
-  'playwright-report': { category: 'test-artifact', reason: 'Playwright report', ignoreAs: 'playwright-report/', sure: false },
-};
-
-// First match wins. `base` derives the name of the file this one is a leftover copy of.
-// `ignoreAs` must match every name `re` matches (gitignore is case-sensitive), otherwise adding the
-// suggested rule would never clear the "not in .gitignore" advice.
-const FILE_RULES = [
-  { re: /^\.DS_Store$/, category: 'junk', reason: 'macOS folder metadata', confidence: 'high', ignoreAs: '.DS_Store' },
-  { re: /^Thumbs\.db$/, category: 'junk', reason: 'Windows thumbnail cache', confidence: 'high', ignoreAs: 'Thumbs.db' },
-  { re: /^desktop\.ini$/, category: 'junk', reason: 'Windows folder metadata', confidence: 'high', ignoreAs: 'desktop.ini' },
-  { re: /^\._./, category: 'junk', reason: 'macOS resource-fork file', confidence: 'medium', ignoreAs: '._*', base: (n) => n.slice(2), highWithBase: true },
-  { re: /\.sw[a-p]$/, category: 'junk', reason: 'Editor swap file (may hold unsaved edits)', confidence: 'medium', ignoreAs: '*.sw[a-p]' },
-  { re: /~$/, category: 'backup', reason: 'Editor backup file', confidence: 'medium', ignoreAs: '*~', base: (n) => n.slice(0, -1) },
-  { re: /^\.#./, category: 'junk', reason: 'Emacs lock file', confidence: 'medium', ignoreAs: '.#*' },
-  { re: /^#.+#$/, category: 'junk', reason: 'Emacs autosave file', confidence: 'medium', ignoreAs: '#*#' },
-  { re: /^~\$./, category: 'junk', reason: 'Office lock file', confidence: 'medium', ignoreAs: null },
-  { re: /\.tmp$/, category: 'temp', reason: 'Temporary file', confidence: 'medium', ignoreAs: '*.tmp' },
-  { re: /\.temp$/, category: 'temp', reason: 'Temporary file', confidence: 'medium', ignoreAs: '*.temp' },
-  { re: /\.orig$/, category: 'backup', reason: 'Leftover from a merge or patch', confidence: 'medium', ignoreAs: '*.orig', base: (n) => n.replace(/\.orig$/, '') },
-  { re: /\.rej$/, category: 'backup', reason: 'Rejected patch hunk', confidence: 'medium', ignoreAs: '*.rej', base: (n) => n.replace(/\.rej$/, '') },
-  { re: /\.bak$/, category: 'backup', reason: 'Backup copy', confidence: 'medium', ignoreAs: '*.bak', base: (n) => n.replace(/\.bak$/, '') },
-  { re: /\.(old|backup)$/i, category: 'backup', reason: 'Backup copy', confidence: 'medium', ignoreAs: null, base: (n) => n.replace(/\.(old|backup)$/i, '') },
-  ...['npm-debug', 'yarn-debug', 'yarn-error', 'pnpm-debug', 'lerna-debug'].map((n) => ({ re: new RegExp(`^${n}\\.log`), category: 'log', reason: 'Package manager crash log', confidence: 'high', ignoreAs: `${n}.log*` })),
-  { re: /\.log$/i, category: 'log', reason: 'Log file', confidence: 'low', ignoreAs: '*.log' },
-  { re: /^\.(eslint|stylelint)cache$/, category: 'cache', reason: 'Linter cache', confidence: 'high', regenerable: true, ignoreAs: null },
-  { re: /^\.coverage$/, category: 'test-artifact', reason: 'Python coverage data', confidence: 'high', regenerable: true, ignoreAs: '.coverage' },
-  { re: /\.pyc$/, category: 'cache', reason: 'Stray Python bytecode', confidence: 'high', regenerable: true, ignoreAs: '*.pyc' },
-];
-// Build output and test temp folders: regenerable, often gigabytes, and slow to rebuild, so they are
-// listed (with their real size) but never pre-selected. CACHEDIR.TAG is the Cache Directory Tagging
-// spec's marker for "this folder is a cache, safe to delete" (cargo writes it into target/).
-const VENV_NAMES = new Set(['.venv', 'venv', 'env', '.env']);
-const CACHEDIR_SIG = 'Signature: 8a477f597d28d172789f06886806bc55';
-const BUILDER_MARKERS = ['builder-debug.yml', 'builder-effective-config.yaml', 'linux-unpacked', 'win-unpacked', 'mac'];
-async function buildOutput(abs, name, parentFiles, parentName) {
-  const has = async (f) => { try { await fsp.access(path.join(abs, f)); return true; } catch { return false; } };
-  let tag = '';
-  try { tag = (await fsp.readFile(path.join(abs, 'CACHEDIR.TAG'), 'utf8')).slice(0, 60); } catch {}
-  const rust = name === 'target' && parentFiles.has('Cargo.toml');
-  if (tag.startsWith(CACHEDIR_SIG)) return { reason: rust ? 'Rust build output (cargo, tagged as a cache)' : 'Cache folder (tagged CACHEDIR.TAG)', sure: true, ignoreAs: rust ? 'target/' : null, rebuild: rust ? 'cargo build' : 'the tool that made it' };
-  if (rust) return { reason: 'Rust build output (cargo)', sure: true, ignoreAs: 'target/', rebuild: 'cargo build' };
-  if ((name === 'pytest' || /^pytest-of-/.test(name)) && /^\.?te?mp$/i.test(parentName)) return { reason: 'pytest temporary folders', sure: false, ignoreAs: null, rebuild: 'the next test run' };
-  if ((name === 'dist' || name === 'build') && (await Promise.all(BUILDER_MARKERS.map(has))).some(Boolean)) return { reason: 'electron-builder output (packaged app builds)', sure: false, ignoreAs: null, rebuild: 'the next package build' };
-  return null;
-}
-// Real size of a big folder: du is far faster than walking it, and a capped walk would under-count.
-async function bigDirSize(p) {
-  const r = await run('du', ['-sk', '--', p], { timeout: COMMAND_TIMEOUT_MS });
-  return r.ok ? (Number(r.stdout.split('\t')[0]) || 0) * 1024 : dirSize(p);
-}
+const { CACHE_DIRS, FILE_RULES, VENV_NAMES, buildOutput, bigDirSize, dirSize, STALE_LOG_DAYS, STALE_BACKUP_DAYS, SCRATCH_DIR_RE } = require('./clutter-rules');
 
 const COPY_RE = /^(.+?)(?: \(\d+\)| copy(?: \d+)?| - Copy(?: \(\d+\))?|[_-]copy\d*|\.copy)(\.[^.]+)?$/i;
 
@@ -112,19 +49,6 @@ const sha = async (p, size) => {
   try { return crypto.createHash('sha256').update(await fsp.readFile(p)).digest('hex'); } catch { return null; }
 };
 
-async function dirSize(p, budget = { n: 20000 }) {
-  let total = 0;
-  let ents;
-  try { ents = await fsp.readdir(p, { withFileTypes: true }); } catch { return 0; }
-  for (const e of ents) {
-    if (budget.n-- <= 0) return total;
-    if (e.isSymbolicLink()) continue;
-    const c = path.join(p, e.name);
-    if (e.isDirectory()) total += await dirSize(c, budget);
-    else { try { total += (await fsp.lstat(c)).size; } catch {} }
-  }
-  return total;
-}
 
 async function trackedSet(dir) {
   const r = await git(['ls-files', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
@@ -295,6 +219,13 @@ async function scanClutter(dir) {
   for (const it of items) {
     it.ignored = ignored.has(it.path);
     if (it.ignored && it.confidence === 'medium' && (it.category === 'cache' || it.category === 'test-artifact' || it.category === 'build')) it.confidence = 'high';
+    // Logs, temp files and backups git ignores are scratch output: old ones are stale, recent ones may still be in use.
+    if (it.ignored && it.kind === 'file' && ['log', 'temp', 'backup'].includes(it.category) && it.confidence !== 'high') {
+      const scratch = SCRATCH_DIR_RE.test(it.path);
+      const stale = it.ageDays >= (it.category === 'backup' ? STALE_BACKUP_DAYS : STALE_LOG_DAYS);
+      it.confidence = stale ? 'high' : 'medium';
+      it.reason += `; git-ignored${scratch ? ' scratch folder' : ''}, ${stale ? `untouched for ${it.ageDays} days` : 'changed recently, may still be in use'}`;
+    }
     // An ambiguous name (e.g. a folder called coverage that git does not ignore) might be real work: recoverable removal only.
     if (it.confidence !== 'high') it.mode = 'trash';
   }

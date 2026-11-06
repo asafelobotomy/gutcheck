@@ -1,6 +1,7 @@
 // Hygiene checks added from GitHub's docs, the OpenSSF Scorecard and community conventions.
 // Each finding cites its source in report.js (REFS), so the advice can be checked by a human.
 
+const { historyVerdict } = require('./history');
 const { plural, list } = require('./util');
 
 const MiB = 1024;           // storage figures are in KiB
@@ -45,8 +46,9 @@ function checkGitHygiene(s) {
   if (h.prunableWorktrees) add('git-worktrees', 'info', `${plural(h.prunableWorktrees, 'stale worktree')}`, 'Their folders are gone but git still tracks them.', { fix: { type: 'worktree-prune', label: 'Prune worktrees' } });
   if (h.submodulesUninit) add('git-submodules', 'info', `${plural(h.submodulesUninit, 'submodule')} not initialised`, 'The code they point to is missing from this checkout.');
   const st = h.storage;
-  if (st.packKiB >= REPO_ERR_KIB) add('repo-size', 'error', `Repository is ${(st.packKiB / GiB).toFixed(1)} GB`, 'GitHub strongly recommends staying under 5 GB. Move large files to Git LFS or release assets.');
-  else if (st.packKiB >= REPO_WARN_KIB) add('repo-size', 'warn', `Repository is ${(st.packKiB / GiB).toFixed(1)} GB`, 'GitHub recommends keeping repositories under 1 GB.');
+  const where = h.history ? ' ' + historyVerdict(h.history) : ' Run a Deep scan to see whether the space is current files or old history.';
+  if (st.packKiB >= REPO_ERR_KIB) add('repo-size', 'error', `Repository is ${(st.packKiB / GiB).toFixed(1)} GB`, 'GitHub strongly recommends staying under 5 GB.' + where);
+  else if (st.packKiB >= REPO_WARN_KIB) add('repo-size', 'warn', `Repository is ${(st.packKiB / GiB).toFixed(1)} GB`, 'GitHub recommends keeping repositories under 1 GB.' + where);
   if (st.loose > LOOSE_MAX) add('git-loose', 'info', `${st.loose.toLocaleString()} loose git objects`, 'More than git\'s own auto-gc threshold. Packing them saves space and speeds git up.');
   if (st.garbage) add('git-garbage', 'warn', `${plural(st.garbage, 'stray file')} in the object store`, 'Run git count-objects -vH to see them; usually left by an interrupted git command.');
   if (h.historyBlobs && h.historyBlobs.length) {
