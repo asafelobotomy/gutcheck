@@ -68,6 +68,7 @@ The **Clutter & tidy-up** view scans every repo (read-only) for things nothing n
 
 - **Env files**: backups and copies (`.env.bak`, `.env (1)`, `.env.2024-01-02`), env files identical to another in the same folder, empty ones, and `.env.test` in repos with no tests. Templates such as `.env.example` are never flagged. Env files are only compared by checksum; their contents are never kept.
 - **Caches and test output**: `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `coverage/`, `htmlcov/`, `test-results/` and similar.
+- **Build output** (listed with its real size, never pre-selected because it takes time to rebuild): folders tagged with `CACHEDIR.TAG` (the [Cache Directory Tagging](https://bford.info/cachedir/) marker that cargo writes into `target/`), Rust `target/` beside a `Cargo.toml`, pytest temp folders under `.tmp/`, and electron-builder `dist/`/`build/` output. Virtualenvs are left to the disk-space advice.
 - **Temp, backup and junk files**: `*.tmp`, `*.bak`, `*.orig`, swap files, `.DS_Store`, `Thumbs.db`, package-manager crash logs, and `name (1).ext` / `name copy.ext` copies (exact copies rate higher than diverged ones).
 - **Organisation advice**: committed or un-ignored `.env` files, missing `.env.example`, clutter missing from `.gitignore` (one-click append), several lockfiles, split `test`/`tests` or `doc`/`docs` folders, loose files and media in the repo root, plus workspace-level hints (projects without git, `foo-old` next to `foo`, the same remote cloned twice, inconsistent naming).
 

@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { git } = require('./exec');
+const { git, run } = require('./exec');
 const { DAY, COMMAND_TIMEOUT_MS, NODE_LOCKFILES, plural, list, HEAVY_DIRS } = require('./util');
 
 const MAX_FILES = 40000;
@@ -63,6 +63,29 @@ const FILE_RULES = [
   { re: /^\.coverage$/, category: 'test-artifact', reason: 'Python coverage data', confidence: 'high', regenerable: true, ignoreAs: '.coverage' },
   { re: /\.pyc$/, category: 'cache', reason: 'Stray Python bytecode', confidence: 'high', regenerable: true, ignoreAs: '*.pyc' },
 ];
+// Build output and test temp folders: regenerable, often gigabytes, and slow to rebuild, so they are
+// listed (with their real size) but never pre-selected. CACHEDIR.TAG is the Cache Directory Tagging
+// spec's marker for "this folder is a cache, safe to delete" (cargo writes it into target/).
+const VENV_NAMES = new Set(['.venv', 'venv', 'env', '.env']);
+const CACHEDIR_SIG = 'Signature: 8a477f597d28d172789f06886806bc55';
+const BUILDER_MARKERS = ['builder-debug.yml', 'builder-effective-config.yaml', 'linux-unpacked', 'win-unpacked', 'mac'];
+async function buildOutput(abs, name, parentFiles, parentName) {
+  const has = async (f) => { try { await fsp.access(path.join(abs, f)); return true; } catch { return false; } };
+  let tag = '';
+  try { tag = (await fsp.readFile(path.join(abs, 'CACHEDIR.TAG'), 'utf8')).slice(0, 60); } catch {}
+  const rust = name === 'target' && parentFiles.has('Cargo.toml');
+  if (tag.startsWith(CACHEDIR_SIG)) return { reason: rust ? 'Rust build output (cargo, tagged as a cache)' : 'Cache folder (tagged CACHEDIR.TAG)', sure: true, ignoreAs: rust ? 'target/' : null, rebuild: rust ? 'cargo build' : 'the tool that made it' };
+  if (rust) return { reason: 'Rust build output (cargo)', sure: true, ignoreAs: 'target/', rebuild: 'cargo build' };
+  if ((name === 'pytest' || /^pytest-of-/.test(name)) && /^\.?te?mp$/i.test(parentName)) return { reason: 'pytest temporary folders', sure: false, ignoreAs: null, rebuild: 'the next test run' };
+  if ((name === 'dist' || name === 'build') && (await Promise.all(BUILDER_MARKERS.map(has))).some(Boolean)) return { reason: 'electron-builder output (packaged app builds)', sure: false, ignoreAs: null, rebuild: 'the next package build' };
+  return null;
+}
+// Real size of a big folder: du is far faster than walking it, and a capped walk would under-count.
+async function bigDirSize(p) {
+  const r = await run('du', ['-sk', '--', p], { timeout: COMMAND_TIMEOUT_MS });
+  return r.ok ? (Number(r.stdout.split('\t')[0]) || 0) * 1024 : dirSize(p);
+}
+
 const COPY_RE = /^(.+?)(?: \(\d+\)| copy(?: \d+)?| - Copy(?: \(\d+\))?|[_-]copy\d*|\.copy)(\.[^.]+)?$/i;
 
 const ENV_RE = /^\.env(?:[._\- (~].*)?$|^[\w-]+\.env(?:\.[\w-]+)?$/i;
@@ -75,6 +98,7 @@ const ENV_IGNORE = ['.env', '.env.*', '!.env.example'];
 const IGNORE_OK = new Set([
   ...ENV_IGNORE,
   ...Object.values(CACHE_DIRS).map((c) => c.ignoreAs),
+  'target/',
   ...FILE_RULES.map((r) => r.ignoreAs).filter(Boolean),
 ]);
 
@@ -211,6 +235,15 @@ async function scanClutter(dir) {
       if (e.isSymbolicLink()) continue;
       const r = rel ? rel + '/' + e.name : e.name;
       if (e.isDirectory()) {
+        // Known caches keep their own label; virtualenvs (uv tags them too) are environments, not build output.
+        const build = !CACHE_DIRS[e.name] && !VENV_NAMES.has(e.name) && !tracked.dirs.has(r) && await buildOutput(path.join(abs, e.name), e.name, fileNames, path.basename(abs));
+        if (build) {
+          const p = path.join(abs, e.name);
+          let mtime = Date.now();
+          try { mtime = (await fsp.lstat(p)).mtimeMs; } catch {}
+          await addItem({ path: r, name: e.name, kind: 'dir', category: 'build', reason: `${build.reason}; rebuilt by ${build.rebuild}`, confidence: build.sure ? 'high' : 'medium', size: await bigDirSize(p), mtime, regenerable: true, costly: true, ignoreAs: build.ignoreAs });
+          continue;
+        }
         const rule = CACHE_DIRS[e.name];
         if (rule) {
           if (tracked.dirs.has(r)) { trackedClutter.push(r + '/'); continue; }
@@ -261,12 +294,12 @@ async function scanClutter(dir) {
   const ignored = await ignoredSet(dir, [...items.map((i) => i.path), ...liveEnv]);
   for (const it of items) {
     it.ignored = ignored.has(it.path);
-    if (it.ignored && it.confidence === 'medium' && (it.category === 'cache' || it.category === 'test-artifact')) it.confidence = 'high';
+    if (it.ignored && it.confidence === 'medium' && (it.category === 'cache' || it.category === 'test-artifact' || it.category === 'build')) it.confidence = 'high';
     // An ambiguous name (e.g. a folder called coverage that git does not ignore) might be real work: recoverable removal only.
     if (it.confidence !== 'high') it.mode = 'trash';
   }
   const envUnignored = liveEnv.filter((p) => !ignored.has(p));
-  const order = { env: 0, duplicate: 1, backup: 2, temp: 3, junk: 4, cache: 5, 'test-artifact': 6, log: 7 };
+  const order = { env: 0, duplicate: 1, backup: 2, temp: 3, junk: 4, cache: 5, 'test-artifact': 6, log: 7, build: 8 };
   items.sort((a, b) => (order[a.category] ?? 9) - (order[b.category] ?? 9) || a.path.localeCompare(b.path));
 
   let gitmodules = '';

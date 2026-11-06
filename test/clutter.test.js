@@ -259,3 +259,32 @@ test('a git repo nested inside another is flagged, a declared submodule is not',
     assert.ok(!/\bwt\b/.test(adv.detail), 'linked worktree');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('build output: cargo target (tagged or beside Cargo.toml), pytest temp, electron-builder dist; never pre-selected; venvs and known caches keep their place', async () => {
+  const dir = repo();
+  try {
+    put(dir, 'Cargo.toml', '[package]');
+    put(dir, 'target/CACHEDIR.TAG', 'Signature: 8a477f597d28d172789f06886806bc55\n# cargo');
+    put(dir, 'target/debug/big.rlib', 'x'.repeat(4096));
+    put(dir, 'sub/Cargo.toml', '[package]');
+    put(dir, 'sub/target/debug/a', 'x');
+    put(dir, '.tmp/pytest/popen-gw0/f', 'x');
+    put(dir, 'packaging/dist/builder-debug.yml', 'x');
+    put(dir, 'packaging/dist/linux-unpacked/app', 'x');
+    put(dir, 'docs/target/page.md', 'x'); // a folder called target with no Cargo.toml and no tag is left alone
+    put(dir, '.venv/CACHEDIR.TAG', 'Signature: 8a477f597d28d172789f06886806bc55');
+    put(dir, '.venv/pyvenv.cfg', 'x');
+    put(dir, '.pytest_cache/CACHEDIR.TAG', 'Signature: 8a477f597d28d172789f06886806bc55');
+    put(dir, '.gitignore', 'target/\n.tmp/\n');
+    const r = await scanClutter(dir);
+    const by = Object.fromEntries(r.items.map((i) => [i.path, i]));
+    assert.deepEqual(r.items.filter((i) => i.category === 'build').map((i) => i.path).sort(), ['.tmp/pytest', 'packaging/dist', 'sub/target', 'target']);
+    assert.match(by.target.reason, /tagged as a cache.*cargo build/);
+    assert.ok(by.target.size >= 4096, 'measured with du, not a capped walk');
+    assert.deepEqual([by.target.confidence, by.target.mode, by.target.costly], ['high', 'delete', true]);
+    assert.deepEqual([by['.tmp/pytest'].confidence, by['.tmp/pytest'].mode], ['high', 'delete'], 'ignored pytest temp is safe');
+    assert.deepEqual([by['packaging/dist'].confidence, by['packaging/dist'].mode], ['medium', 'trash'], 'unignored builder output only goes to the trash');
+    assert.equal(by['.pytest_cache'].category, 'cache');
+    assert.ok(!by['.venv'] && !by['docs/target']);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

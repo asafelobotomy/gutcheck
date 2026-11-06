@@ -4,7 +4,7 @@
 /* ---------------------------------------------------------------- clutter + tidy-up */
 
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : n < 1073741824 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1073741824).toFixed(2)} GB`);
-const CAT_LABEL = { env: 'env file', duplicate: 'duplicate', backup: 'backup', temp: 'temp', junk: 'junk', cache: 'cache', 'test-artifact': 'test output', log: 'log' };
+const CAT_LABEL = { env: 'env file', duplicate: 'duplicate', backup: 'backup', temp: 'temp', junk: 'junk', cache: 'cache', 'test-artifact': 'test output', log: 'log', build: 'build output' };
 const CONF_TIP = { high: 'Safe to remove: regenerable or an exact copy', medium: 'Probably clutter: check first', low: 'Maybe clutter: review before removing' };
 const pkey = (repoPath, rel) => repoPath + '\u0000' + rel;
 
@@ -12,7 +12,7 @@ const pkey = (repoPath, rel) => repoPath + '\u0000' + rel;
 function preselect(res) {
   for (const it of res.items) {
     const k = pkey(res.path, it.path);
-    if (it.confidence === 'high') state.picked.add(k); else state.picked.delete(k);
+    if (it.confidence === 'high' && !it.costly) state.picked.add(k); else state.picked.delete(k); // build output is slow to rebuild: opt in
   }
 }
 
