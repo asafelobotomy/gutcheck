@@ -29,6 +29,7 @@ function qualityForm(cfg, lim = { min: 20, max: 20000 }) {
     if (!Number.isInteger(n) || n < lim.min || n > lim.max) { max.focus(); return toast(`Max lines must be a whole number from ${lim.min} to ${lim.max}.`, 'bad'); }
     e.target.disabled = true;
     await window.api.setQualitySettings({ maxLines: n, locMode: mode.value, ignore: ignore.value.split(',').map((s) => s.trim()).filter(Boolean) });
+    if (inflight.quality) await inflight.quality; // that scan started with the old limits
     await scanQualityNow(); // keeps the old results on screen until the new ones arrive
   });
   return h('div', { class: 'qform' },

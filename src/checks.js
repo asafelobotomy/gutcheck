@@ -16,7 +16,7 @@ function checkCI(s) {
   if (!s.remote) return out;
   if (s.ci.error) return [{ id: 'ci-unavailable', category: 'CI', severity: 'info', title: 'CI status unavailable', detail: s.ci.error }];
   if (!s.hasWorkflows) {
-    out.push({ id: 'ci-none', category: 'CI', severity: 'info', title: 'No GitHub Actions workflows', detail: 'Add a workflow in .github/workflows to run tests on every push.', fix: s.deps && s.deps.manifests && s.deps.manifests.includes('package.json') ? { type: 'add-file', label: 'Add Node CI workflow', template: 'ci-node' } : undefined });
+    out.push({ id: 'ci-none', category: 'CI', severity: 'info', title: 'No GitHub Actions workflows', detail: 'Add a workflow in .github/workflows to run tests on every push.', fix: s.deps && s.deps.npmLock ? { type: 'add-file', label: 'Add Node CI workflow', template: 'ci-node' } : undefined });
     return out;
   }
   for (const r of s.ci.failed) {
@@ -53,12 +53,12 @@ function checkBranches(s) {
   const out = [];
   const g = s.git;
   if (g.dirty > 0)
-    out.push({ id: 'git-dirty', category: 'Branches', severity: 'warn', title: `${g.dirty} uncommitted change${g.dirty > 1 ? 's' : ''}`, detail: `On branch ${g.branch}`, fix: { type: 'commit-all', label: 'Commit all…' } });
+    out.push({ id: 'git-dirty', category: 'Branches', severity: 'warn', title: `${g.dirty} uncommitted change${g.dirty > 1 ? 's' : ''}`, detail: g.detached || !g.branch ? 'On a detached HEAD: create a branch before committing.' : `On branch ${g.branch}`, fix: g.detached || !g.branch ? undefined : { type: 'commit-all', label: 'Commit all…' } });
   if (g.ahead > 0)
     out.push({ id: 'git-ahead', category: 'Branches', severity: 'warn', title: `${g.ahead} unpushed commit${g.ahead > 1 ? 's' : ''} on ${g.branch}`, detail: 'Push to back up your work.', fix: { type: 'push', label: 'Push' } });
   if (g.behind > 0)
     out.push({ id: 'git-behind', category: 'Branches', severity: 'info', title: `${g.behind} commit${g.behind > 1 ? 's' : ''} behind upstream`, detail: `${g.branch} can be fast-forwarded.`, fix: { type: 'pull', label: 'Pull (ff-only)' } });
-  if (g.branch && !g.upstream && s.remote)
+  if (g.branch && !g.upstream && s.remote && !(s.hygiene && s.hygiene.noCommits))
     out.push({ id: 'git-no-upstream', category: 'Branches', severity: 'info', title: `Branch ${g.branch} has no upstream`, detail: 'Not tracking a remote branch.', fix: { type: 'push', label: 'Push & set upstream' } });
   if (g.mergedBranches.length)
     out.push({ id: 'git-merged', category: 'Branches', severity: 'info', title: `${g.mergedBranches.length} local branch${g.mergedBranches.length > 1 ? 'es' : ''} already merged`, detail: g.mergedBranches.join(', '), fix: { type: 'delete-merged', label: 'Delete merged', branches: g.mergedBranches } });
@@ -85,7 +85,7 @@ function checkFiles(s) {
     if (!f.contributing && !r.contributing) add('no-contributing', 'info', 'Missing CONTRIBUTING.md', 'Explain how to contribute.', { type: 'add-file', label: 'Add CONTRIBUTING.md', template: 'contributing' });
     if (!f.codeOfConduct && !r.codeOfConduct) add('no-coc', 'info', 'Missing CODE_OF_CONDUCT.md', 'Set community expectations.', { type: 'add-file', label: 'Add code of conduct', template: 'conduct' });
   }
-  if (s.remote && !f.prTemplate && s.remote.isPublic) add('no-pr-template', 'info', 'No pull request template', 'Add .github/pull_request_template.md.', { type: 'add-file', label: 'Add PR template', template: 'pr-template' });
+  if (pub && !r.isFork && !f.prTemplate) add('no-pr-template', 'info', 'No pull request template', 'Add .github/pull_request_template.md.', { type: 'add-file', label: 'Add PR template', template: 'pr-template' });
   if (s.remote && !s.remote.description) add('no-description', 'info', 'Repo has no GitHub description', 'Helps discovery and sets context.', { type: 'repo-edit', label: 'Set description…' });
   return out;
 }
@@ -121,7 +121,7 @@ function checkRepoSettings(s) {
     out.push({ id: 'no-protection', category: 'Repo', severity: s.remote.isPublic ? 'warn' : 'info', title: `Default branch ${s.remote.defaultBranch} is unprotected`, detail: 'No branch protection rule or active ruleset. At minimum block force-pushes and deletion; ideally require PRs and status checks.', fix: { type: 'protect-branch', label: 'Protect…', preset: 'basic' } });
   if (s.remote.deleteBranchOnMerge === false && !s.remote.archived && s.remote.viewerPermission === 'ADMIN')
     out.push({ id: 'no-auto-delete', category: 'Repo', severity: 'info', title: 'Merged branches are not deleted automatically', detail: 'Head branches pile up after every merged PR.', fix: { type: 'repo-edit', label: 'Turn on auto-delete…', deleteBranchOnMerge: true } });
-  if (s.remote.openIssues > 25) out.push({ id: 'many-issues', category: 'Repo', severity: 'info', title: `${s.remote.openIssues} open issues/PRs`, detail: 'Consider triaging.' });
+  if (s.remote.openIssues > 25) out.push({ id: 'many-issues', category: 'Repo', severity: 'info', title: `${s.remote.openIssues} open issues`, detail: 'Consider triaging.' });
   const pushed = daysAgo(s.remote.pushedAt);
   if (pushed != null && pushed > DAYS_PER_YEAR && !s.remote.archived) out.push({ id: 'inactive', category: 'Repo', severity: 'info', title: `No pushes in ${pushed} days`, detail: 'Archive it if it is finished.' });
   return out;

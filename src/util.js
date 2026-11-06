@@ -1,4 +1,5 @@
 // Small helpers shared across modules.
+const path = require('node:path');
 
 const DAY = 86400000;
 const DAYS_PER_YEAR = 365;
@@ -7,6 +8,8 @@ const COMMAND_TIMEOUT_MS = 60000; // generous ceiling for one git / gh call
 const daysAgo = (iso) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / DAY) : null);
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`; // POSIX single-quote, safe to paste into a shell
 const plural = (n, w, pl = w + 's') => `${n} ${n === 1 ? w : pl}`;
+// The folder box accepts "~/Projects" (as its placeholder suggests) and relative paths.
+const expandHome = (p, home) => path.resolve(p === '~' ? home : p.startsWith('~/') ? path.join(home, p.slice(2)) : p);
 const list = (a, max = 6) => a.slice(0, max).join(', ') + (a.length > max ? `, +${a.length - max} more` : '');
 
 // Folders no scan should descend into: huge build/dependency output owned by a tool.
@@ -33,4 +36,4 @@ function cmpVersion(a, b) {
   return 0;
 }
 
-module.exports = { NODE_LOCKFILES, installCommand, DAYS_PER_YEAR, MAX_PLAN_ITEMS, COMMAND_TIMEOUT_MS, cmpVersion, DAY, daysAgo, sq, plural, list, HEAVY_DIRS };
+module.exports = { expandHome, NODE_LOCKFILES, installCommand, DAYS_PER_YEAR, MAX_PLAN_ITEMS, COMMAND_TIMEOUT_MS, cmpVersion, DAY, daysAgo, sq, plural, list, HEAVY_DIRS };

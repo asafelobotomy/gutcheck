@@ -39,7 +39,7 @@ function auditWorkflow(rel, text) {
   const run = new Set(runLines(lines));
   lines.forEach((raw, i) => {
     const line = raw.replace(/\s+#.*$/, '');
-    const uses = /^\s*(?:-\s+)?uses:\s*['"]?([^'"\s]+)/.exec(line);
+    const uses = !run.has(i + 1) && /^\s*(?:-\s+)?uses:\s*['"]?([^'"\s]+)/.exec(line);
     if (uses) {
       const u = uses[1];
       if (/^github\/codeql-action\//.test(u)) res.codeql = true;
@@ -51,7 +51,7 @@ function auditWorkflow(rel, text) {
     if (/^\s*(?:-\s+)?(pull_request_target|workflow_run)\b|^on:.*\b(pull_request_target|workflow_run)\b/.test(line)) res.prTarget = true;
     if (PR_HEAD_CHECKOUT.test(line) && /\bref:/.test(line)) res.headCheckout = true;
     if (/^permissions:/.test(line)) { res.topPermissions = true; if (/write-all/.test(line)) res.writeAll = true; }
-    else if (/^\s+permissions:/.test(line)) res.jobPermissions = true;
+    else if (/^\s+permissions:/.test(line) && !run.has(i + 1)) { res.jobPermissions = true; if (/write-all/.test(line)) res.writeAll = true; }
     if (/^\s*runs-on:.*self-hosted/.test(line)) res.selfHosted = true;
   });
   return res;

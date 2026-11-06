@@ -67,6 +67,19 @@ function rollup(state) {
   return 'PENDING';
 }
 
+// Ruleset ref patterns are fnmatch-style: `*` stops at "/", `**` crosses it, `?` is one character.
+function refMatches(pattern, ref) {
+  let re = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (c === '*' && pattern[i + 1] === '*') { re += '.*'; i++; }
+    else if (c === '*') re += '[^/]*';
+    else if (c === '?') re += '[^/]';
+    else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  }
+  return new RegExp(`^${re}$`).test(ref);
+}
+
 // An active branch ruleset (repo or inherited from the org) that covers the default branch.
 // Readers can see active rulesets, so this works without admin rights.
 function rulesetCovers(rulesets, branch) {
@@ -74,7 +87,7 @@ function rulesetCovers(rulesets, branch) {
     if (r.enforcement !== 'ACTIVE' || r.target !== 'BRANCH') return false;
     const inc = (r.conditions && r.conditions.refName && r.conditions.refName.include) || [];
     const exc = (r.conditions && r.conditions.refName && r.conditions.refName.exclude) || [];
-    const hit = (pats) => pats.some((p) => p === '~ALL' || p === '~DEFAULT_BRANCH' || p === `refs/heads/${branch}`);
+    const hit = (pats) => pats.some((p) => p === '~ALL' || p === '~DEFAULT_BRANCH' || (typeof p === 'string' && !!branch && refMatches(p, `refs/heads/${branch}`)));
     return hit(inc) && !hit(exc);
   });
 }
@@ -236,4 +249,4 @@ async function fetchSecurity(ref, opts = {}) {
   return val;
 }
 
-module.exports = { fetchRepos, fetchFailedRuns, fetchSecurity, refreshRate, getRate, rulesetCovers };
+module.exports = { fetchRepos, fetchFailedRuns, fetchSecurity, refreshRate, getRate, rulesetCovers, refMatches };

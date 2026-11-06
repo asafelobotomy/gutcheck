@@ -32,7 +32,8 @@ const dependabot = (manifests) => {
   return `version: 2\nupdates:\n${blocks.join('')}`;
 };
 
-// id -> { file, label, build(ctx) }   ctx: { author, name, manifests }
+// id -> { file, label, build(ctx) }   ctx: { author, name, manifests, branch }
+const branchOf = (c) => (c && typeof c.branch === 'string' && /^[A-Za-z0-9._/-]{1,100}$/.test(c.branch) ? c.branch : 'main');
 const TEMPLATES = {
   license: { file: 'LICENSE', label: 'MIT licence', build: (c) => MIT(c.author) },
   readme: { file: 'README.md', label: 'README', build: (c) => `# ${c.name}\n\nTODO: describe what this project does, how to install it and how to run it.\n` },
@@ -45,7 +46,7 @@ const TEMPLATES = {
   contributing: {
     file: 'CONTRIBUTING.md',
     label: 'Contributing guide',
-    build: (c) => `# Contributing to ${c.name}\n\n1. Fork the repository and create a branch from \`main\`.\n2. Make your change and add or update tests.\n3. Run the test suite.\n4. Open a pull request describing what changed and why.\n`,
+    build: (c) => `# Contributing to ${c.name}\n\n1. Fork the repository and create a branch from \`${branchOf(c)}\`.\n2. Make your change and add or update tests.\n3. Run the test suite.\n4. Open a pull request describing what changed and why.\n`,
   },
   conduct: {
     file: 'CODE_OF_CONDUCT.md',
@@ -61,8 +62,8 @@ const TEMPLATES = {
   'ci-node': {
     file: '.github/workflows/ci.yml',
     label: 'Node CI workflow',
-    build: () => `name: CI\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      # Actions are pinned to full commit SHAs so a moved tag cannot change what runs; Dependabot keeps them current.\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          persist-credentials: false\n      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0\n        with:\n          node-version: 22\n          cache: npm\n      - run: npm ci\n      - run: npm test\n`,
+    build: (c) => `name: CI\n\non:\n  push:\n    branches: [${JSON.stringify(branchOf(c))}]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      # Actions are pinned to full commit SHAs so a moved tag cannot change what runs; Dependabot keeps them current.\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          persist-credentials: false\n      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0\n        with:\n          node-version: 22\n          cache: npm\n      - run: npm ci\n      - run: npm test\n`,
   },
 };
 
-module.exports = { TEMPLATES };
+module.exports = { TEMPLATES, branchOf };

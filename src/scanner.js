@@ -114,7 +114,8 @@ function collectFiles(dir) {
 }
 
 async function collectDeps(dir, names, deep) {
-  const d = { manifests: [], manifestsWithoutLock: [], needsInstall: false, installer: installCommand(names), outdated: null, outdatedNames: [] };
+  // npmLock: the generated Node CI workflow runs `npm ci` with the npm cache, which both need this.
+  const d = { manifests: [], manifestsWithoutLock: [], needsInstall: false, installer: installCommand(names), npmLock: names.includes('package.json') && installCommand(names)[0] === 'npm' && (names.includes('package-lock.json') || names.includes('npm-shrinkwrap.json')), outdated: null, outdatedNames: [] };
   const lockFor = {
     'package.json': NODE_LOCKFILES,
     'Cargo.toml': ['Cargo.lock'],

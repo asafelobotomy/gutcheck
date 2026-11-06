@@ -226,3 +226,26 @@ test('repo-edit sanitises text and archive is dangerous', async () => {
   assert.equal((await plan(repo, { type: 'repo-edit' })).ok, false);
   assert.equal((await plan(repo, { type: 'repo-archive' })).risk, 'danger');
 });
+
+test('the preview shows every argument that runs, single-quoted so a pasted copy cannot expand', async () => {
+  const repo = { path: '/r', name: 'r', git: { dirty: 1, branch: 'main', branches: [] } };
+  const run = async () => ({ ok: true, stdout: ' M a.txt' });
+  const dash = await plan(repo, { type: 'commit-all', message: '-c' }, { run });
+  assert.equal(dash.display[2].text, 'git commit -m -c', 'a message such as "-c" is not hidden from the preview');
+  assert.deepEqual(dash.steps[2].args.slice(-3), ['commit', '-m', '-c']);
+  const shell = await plan(repo, { type: 'commit-all', message: "fix $(id) `id` it's" }, { run });
+  assert.equal(shell.display[2].text, `git commit -m 'fix $(id) \`id\` it'\\''s'`);
+});
+
+test('templates follow the repo\'s default branch', async () => {
+  const dir = tempRepo();
+  try {
+    sh(dir, 'branch', '-m', 'trunk');
+    const repo = await scanRepo(dir, {});
+    const p = await plan(repo, { type: 'add-file', template: 'ci-node' });
+    assert.ok(p.ok, p.error);
+    assert.match(p.steps[0].content, /branches: \["trunk"\]/);
+    const c = await plan(repo, { type: 'add-file', template: 'contributing' });
+    assert.match(c.steps[0].content, /branch from `trunk`/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

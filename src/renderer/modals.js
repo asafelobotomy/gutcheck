@@ -129,6 +129,7 @@ async function openBackgroundSettings() {
   const out = await askInputs(BACKGROUND_SPEC, cur);
   if (!out) return;
   const saved = await window.api.setBackground(out);
+  if (saved.error) return toast(saved.error, 'bad');
   toast(!saved.trayAvailable && (saved.minimizeToTray || saved.closeToTray || saved.launchOnStartup)
     ? 'Saved, but no system tray was found, so the window will stay visible.' : 'Startup and tray options saved.');
 }

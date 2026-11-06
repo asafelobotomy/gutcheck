@@ -43,7 +43,7 @@ function collectProject(dir, names) {
     } catch {}
   }
   return {
-    changelog: has(/^(changelog|changes|history|news|releases)(\.[a-z]+)?$/i),
+    changelog: anyLoc(/^(changelog|changes|history|news|releases)(\.[a-z]+)?$/i),
     gitattributes: names.includes('.gitattributes'),
     editorconfig: names.includes('.editorconfig'),
     codeowners: anyLoc(/^CODEOWNERS$/),

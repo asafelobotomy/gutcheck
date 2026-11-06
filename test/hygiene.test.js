@@ -8,7 +8,7 @@ const { auditWorkflow, auditWorkflows } = require('../src/workflows');
 const { collectHygiene, remoteIssue } = require('../src/hygiene');
 const { checkWorkflows, checkGitHygiene, checkProject, checkSecurityFeatures } = require('../src/checks-hygiene');
 const { hygieneFix } = require('../src/report-fixes');
-const { rulesetCovers } = require('../src/github');
+const { rulesetCovers, refMatches } = require('../src/github');
 const { depFolderAdvice } = require('../src/workspace');
 
 const sh = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim();
@@ -111,6 +111,25 @@ test('rulesets protect the default branch: ~ALL, ~DEFAULT_BRANCH or the exact re
   assert.equal(rulesetCovers(rs(['~ALL'], [], 'EVALUATE')), false, 'evaluate mode does not enforce');
   assert.equal(rulesetCovers(rs(['~ALL'], [], 'ACTIVE', 'TAG'), 'main'), false);
   assert.equal(rulesetCovers(null, 'main'), false);
+});
+
+test('ruleset ref patterns are fnmatch globs, so a pattern can cover the default branch', () => {
+  const rs = (include, exclude = []) => ({ nodes: [{ enforcement: 'ACTIVE', target: 'BRANCH', conditions: { refName: { include, exclude } } }] });
+  assert.equal(rulesetCovers(rs(['refs/heads/ma*']), 'main'), true);
+  assert.equal(rulesetCovers(rs(['refs/heads/**']), 'release/1'), true);
+  assert.equal(rulesetCovers(rs(['refs/heads/*']), 'release/1'), false, '* does not cross a slash');
+  assert.equal(rulesetCovers(rs(['refs/heads/**'], ['refs/heads/m?in']), 'main'), false);
+  assert.equal(refMatches('refs/heads/m.in', 'refs/heads/main'), false, 'dots are literal');
+  assert.equal(rulesetCovers(rs(['refs/heads/*']), null), false);
+});
+
+test('workflow audit: write-all on a job counts; uses: and permissions: text inside a run script does not', () => {
+  const wf = ['on: push', 'permissions:', '  contents: read', 'jobs:', '  a:', '    permissions: write-all', '    runs-on: ubuntu-latest', '    steps:', '      - run: |', '          cat <<X', '          uses: some/action@v1', '          permissions: write-all', '          X'].join('\n');
+  const r = auditWorkflow('w.yml', wf);
+  assert.equal(r.writeAll, true);
+  assert.deepEqual(r.unpinned, []);
+  const scriptOnly = auditWorkflow('w.yml', wf.replace('    permissions: write-all\n', ''));
+  assert.equal(scriptOnly.writeAll, false);
 });
 
 test('security features: only flagged where GitHub offers them free, with fixes', () => {

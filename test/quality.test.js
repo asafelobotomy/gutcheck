@@ -143,6 +143,8 @@ test('secrets: kind and location only, never the value; markers; debug; large fi
     assert.ok(q.debug.some((d) => d.kind === 'debugger'));
     assert.ok(q.debug.some((d) => d.kind === 'breakpoint'));
     assert.equal(q.largeFiles[0].path, 'blob.js');
+    fs.writeFileSync(path.join(dir, 'video.mp4'), Buffer.alloc(7 * 1024 * 1024));
+    assert.equal((await scanQuality(dir)).largeFiles[0].path, 'video.mp4', 'binaries count, not only source files');
     const ids = q.advice.map((a) => a.id);
     for (const id of ['q-secrets', 'q-markers', 'q-debug', 'q-large-files', 'q-no-tests']) assert.ok(ids.includes(id), id);
     assert.equal(q.advice.find((a) => a.id === 'q-secrets').severity, 'error');

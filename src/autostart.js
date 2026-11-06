@@ -6,9 +6,15 @@ const path = require('node:path');
 const ENTRY = 'gutcheck.desktop';
 const HIDDEN_FLAG = '--hidden'; // start straight into the tray
 
-// Desktop Entry spec: an argument with spaces or special characters is double-quoted.
-// `%` is a field code there, so any argument containing one is quoted and escaped.
-const quoteArg = (a) => (/^[\w@+=:,./-]+$/.test(a) ? a : '"' + a.replace(/(["`$\\])/g, '\\$1').replace(/%/g, '%%') + '"');
+// Desktop Entry spec: an argument with spaces or special characters is double-quoted, and inside
+// the quotes " ` $ \ get a backslash. `%` is a field code, so it is doubled. The spec then applies
+// the key-file string escapes on top (every backslash written twice, so a literal $ is \\$), and
+// control characters cannot appear in a value at all.
+const quoteArg = (a) => {
+  if (/^[\w@+=:,./-]+$/.test(a)) return a;
+  const exec = '"' + a.replace(/(["`$\\])/g, '\\$1').replace(/%/g, '%%') + '"';
+  return exec.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\t/g, '\\t').replace(/\r/g, '\\r');
+};
 
 function desktopEntry(exec, args = []) {
   const line = [exec, ...args].map(quoteArg).join(' ');

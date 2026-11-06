@@ -5,7 +5,7 @@
 const path = require('node:path');
 const { READONLY_GIT } = require('./exec');
 const { apply, defaultCtx } = require('./apply');
-const { MAX_PLAN_ITEMS } = require('./util');
+const { MAX_PLAN_ITEMS, sq } = require('./util');
 const INSTALLERS = ['npm install', 'yarn install', 'pnpm install', 'bun install'];
 const { TEMPLATES } = require('./templates');
 const { IGNORE_OK } = require('./clutter');
@@ -21,8 +21,10 @@ const cleanText = (s, max) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f
 // Read-only git for planning: same hardening as scans (no hooks, no fsmonitor, no index lock).
 const readGit = (ctx, args, cwd) => ctx.run('git', [...READONLY_GIT, ...args], { cwd });
 
-const quote = (a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : JSON.stringify(a));
-const show = (cmd, args) => `${cmd} ${args.filter((a, i, all) => !(a === '-c' || all[i - 1] === '-c')).map(quote).join(' ')}`;
+// The preview shows every argument that runs (the git builder adds its hardening -c option after
+// building this), single-quoted so a pasted copy cannot expand $(...) or backticks.
+const quote = (a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : sq(a));
+const show = (cmd, args) => `${cmd} ${args.map(quote).join(' ')}`;
 
 // Step builders. `display` is what the user sees in the confirm dialog.
 const git = (args, dir, note) => ({ kind: 'cmd', cmd: 'git', args: ['-c', 'core.fsmonitor=false', ...args], cwd: dir, display: show('git', args), note });
@@ -261,7 +263,7 @@ const ACTIONS = {
       if (ctx.fs.existsSync(target)) fail(`${t.file} already exists.`);
       const author = (await readGit(ctx, ['config', 'user.name'], r.path)).stdout.trim() || 'Author';
       const manifests = (r.deps && r.deps.manifests) || [];
-      const content = t.build({ author, name: path.basename(r.path), manifests });
+      const content = t.build({ author, name: path.basename(r.path), manifests, branch: (r.remote && r.remote.defaultBranch) || r.git.branch || 'main' });
       const steps = [{ kind: 'write', root: r.path, path: target, content, display: `write ${t.file} (${content.length} bytes)`, preview: content.split('\n').slice(0, 14).join('\n') }];
       if (p.commit) steps.push(git(['add', '--', t.file], r.path), git(['commit', '-m', `Add ${t.label}`, '--', t.file], r.path));
       return { risk: p.commit ? 'caution' : 'safe', title: `Add ${t.file}${p.commit ? ' and commit it' : ''}`, steps, undo: p.commit ? 'git reset --soft HEAD~1 && git rm --cached ' + t.file : `rm ${t.file}` };

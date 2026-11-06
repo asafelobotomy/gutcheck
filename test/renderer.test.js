@@ -188,3 +188,37 @@ test('dialogs close on Escape and give focus back; repo rows work from the keybo
   press(t.w, row, 'Enter');
   assert.ok(t.$('#detail .dhead'), 'Enter opens the repo');
 });
+
+test('a scan call that fails does not leave the app stuck scanning', async () => {
+  const t = await boot();
+  t.w.api.scan = async () => { throw new Error('boom'); };
+  await scan(t);
+  assert.equal(t.$('#scan').disabled, false);
+  assert.equal(t.$('#progress').hidden, true);
+  assert.match(t.$('#toast').textContent, /boom/);
+});
+
+test('the current view and repo are announced to screen readers; scan progress is a progressbar', async () => {
+  const t = await boot();
+  await scan(t);
+  assert.equal(t.$('#dashboard').getAttribute('aria-current'), 'page');
+  click(t.$('#overview'));
+  assert.equal(t.$('#overview').getAttribute('aria-current'), 'page');
+  assert.equal(t.$('#dashboard').getAttribute('aria-current'), null);
+  const gamma = t.$$('#repos li').find((li) => li.textContent.includes('gamma'));
+  click(gamma);
+  assert.equal(t.$$('#repos li[aria-current="true"]').length, 1);
+  assert.match(t.$$('#repos li[aria-current="true"]')[0].getAttribute('aria-label'), /gamma, grade D, 2 errors/);
+  assert.equal(t.$('#progress').getAttribute('role'), 'progressbar');
+  assert.equal(t.$('#progress').getAttribute('aria-valuenow'), '100');
+});
+
+test('saving the Startup & tray options shows an error the main process reports', async () => {
+  const t = await boot();
+  t.w.api.setBackground = async () => ({ error: 'Could not change the login item: EACCES', trayAvailable: true });
+  click(t.$('#background'));
+  await tick();
+  click(t.$$('.modal button').find((b) => b.textContent === 'Continue'));
+  await tick();
+  assert.match(t.$('#toast').textContent, /EACCES/);
+});

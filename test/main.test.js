@@ -118,3 +118,24 @@ test('requests with bad input fail safely', async () => {
   assert.deepEqual(await call('trend:get'), []);
   assert.deepEqual(await call('audit:list'), []);
 });
+
+test('the workspace folder may be typed as ~/Projects or a relative path', async () => {
+  const { expandHome } = require('../src/util');
+  assert.equal(expandHome('~', '/home/me'), '/home/me');
+  assert.equal(expandHome('~/Projects', '/home/me'), '/home/me/Projects');
+  assert.equal(expandHome('/w/../x', '/home/me'), '/x');
+  assert.equal(expandHome('rel', '/home/me'), path.resolve('rel'));
+  assert.ok(expandHome('~other/x', '/home/me').endsWith('~other/x'), 'only the current user\'s ~ is expanded');
+  const { call } = load();
+  assert.equal((await call('scan:start', { root: '   ' })).ok, false);
+  assert.equal((await call('scan:start', { root: '~/definitely-not-a-gutcheck-folder' })).ok, false);
+});
+
+test('a login item that cannot be written comes back as a message, not a crash', async () => {
+  if (process.platform !== 'linux') return;
+  const { call, userData } = load();
+  fs.writeFileSync(path.join(userData, 'autostart'), 'a file where the folder should be');
+  const out = await call('background:set', { launchOnStartup: true, closeToTray: true });
+  assert.match(out.error, /login item/);
+  assert.equal(out.closeToTray, true, 'the other options are still saved');
+});

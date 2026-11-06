@@ -14,6 +14,7 @@ const { buildAdvice } = require('./advice');
 const DEFAULTS = { maxLines: 400, locMode: 'total', ignore: [] };
 const LINE_LIMITS = { min: 20, max: 20000 }; // allowed range for the user's file-length limit
 const MAX_FILES = 6000;
+const MAX_SIZE_CHECKS = 20000; // files whose size is checked for the large-file advice (any type)
 const MAX_READ = 1024 * 1024;
 const BIG_FILE = 5 * 1024 * 1024;
 const DENSE_FILE = 15; // magic numbers in one file before it is called out
@@ -68,7 +69,14 @@ async function scanQuality(dir, rawSettings) {
   const candidates = all.filter((rel) => LANGS[path.extname(rel).slice(1).toLowerCase()] || R.CONFIG_EXT.has(path.extname(rel).slice(1).toLowerCase()) || R.CONST_FILE_RE.test(rel));
   if (candidates.length > MAX_FILES) res.truncated = true;
 
+  // Large files of any type (binaries are the usual culprit), not only the source files read below.
   let n = 0;
+  for (const rel of all.slice(0, MAX_SIZE_CHECKS)) {
+    if (++n % 200 === 0) await tick();
+    try { const st = await fsp.lstat(path.join(dir, ...rel.split('/'))); if (st.isFile() && st.size > BIG_FILE) largeFiles.push({ path: rel, size: st.size }); } catch {}
+  }
+
+  n = 0;
   for (const rel of candidates.slice(0, MAX_FILES)) {
     if (++n % 25 === 0) await tick(); // let the app breathe during big scans
     const ext = path.extname(rel).slice(1).toLowerCase();
@@ -77,7 +85,6 @@ async function scanQuality(dir, rawSettings) {
     let st;
     try { st = await fsp.lstat(abs); } catch { continue; }
     if (!st.isFile()) continue;
-    if (st.size > BIG_FILE) largeFiles.push({ path: rel, size: st.size });
     if (st.size > MAX_READ) { res.skipped.large++; continue; }
     let text;
     try { text = await fsp.readFile(abs, 'utf8'); } catch { continue; }

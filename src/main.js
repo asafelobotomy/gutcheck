@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, session, clipboard, Tray, Menu, nativeImage } = require('electron');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
 const { discover, scanRepo, scanAll } = require('./scanner');
@@ -7,6 +8,7 @@ const github = require('./github');
 const { createService } = require('./service');
 const { appendAudit, readAudit } = require('./audit');
 const { run } = require('./exec');
+const { expandHome } = require('./util');
 const { createTrayController } = require('./tray');
 const { setAutostart, isAutostart, HIDDEN_FLAG } = require('./autostart');
 const { createSettingsStore } = require('./settings');
@@ -74,7 +76,9 @@ handle('dir:pick', async () => {
 const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
 handle('scan:start', async (_e, { root, deep } = {}) => {
-  if (typeof root !== 'string' || !isDir(root)) return { ok: false, error: 'Folder does not exist' };
+  if (typeof root !== 'string' || !root.trim()) return { ok: false, error: 'Folder does not exist' };
+  root = expandHome(root.trim(), os.homedir());
+  if (!isDir(root)) return { ok: false, error: 'Folder does not exist' };
   if (scanning) return { ok: false, error: 'A scan is already running' };
   scanning = true;
   try {
@@ -88,7 +92,7 @@ handle('scan:start', async (_e, { root, deep } = {}) => {
       win.webContents.send('scan:repo', { res, done, total });
     });
     service.recordScan(root, results);
-    return { ok: true, count: results.length, rate: github.getRate() };
+    return { ok: true, root, count: results.length, rate: github.getRate() };
   } finally {
     scanning = false;
   }
@@ -131,8 +135,11 @@ handle('background:get', () => background());
 handle('background:set', (_e, patch) => {
   const p = patch && typeof patch === 'object' ? patch : {};
   const s = updateSettings(Object.fromEntries(BACKGROUND_KEYS.filter((k) => typeof p[k] === 'boolean').map((k) => [k, p[k]])));
-  if (typeof p.launchOnStartup === 'boolean') setAutostart(app, p.launchOnStartup, { dir: autostartDir() });
-  return background(s);
+  let error = null;
+  if (typeof p.launchOnStartup === 'boolean') {
+    try { setAutostart(app, p.launchOnStartup, { dir: autostartDir() }); } catch (e) { error = 'Could not change the login item: ' + (e && e.message); }
+  }
+  return { ...background(s), error };
 });
 
 handle('open:url', (_e, url) => openExternal(url));
@@ -149,7 +156,7 @@ if (trayCtl.singleInstance()) {
     session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
     // A moved or updated AppImage: point the login entry at the copy that is running now.
-    if (app.isPackaged && isAutostart(app, { dir: autostartDir() })) setAutostart(app, true, { dir: autostartDir() });
+    try { if (app.isPackaged && isAutostart(app, { dir: autostartDir() })) setAutostart(app, true, { dir: autostartDir() }); } catch {}
     trayCtl.create();
     createWindow();
   });

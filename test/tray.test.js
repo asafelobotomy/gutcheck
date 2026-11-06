@@ -112,7 +112,10 @@ test('autostart uses the AppImage path, quotes awkward paths, and uses login ite
   assert.deepEqual(launchCommand({ isPackaged: false, getAppPath: () => '/src/gc' }, {}, '/usr/bin/electron'), { exec: '/usr/bin/electron', args: ['/src/gc', '--no-sandbox', '--hidden'] });
   assert.equal(quoteArg('/plain/path-1.0'), '/plain/path-1.0');
   assert.equal(quoteArg('/opt/100%/g'), '"/opt/100%%/g"');
-  assert.equal(quoteArg('/a b/$x"y'), '"/a b/\\$x\\"y"');
+  // Exec quoting (\$, \") plus the key-file string escape on top: each backslash written twice.
+  assert.equal(quoteArg('/a b/$x"y'), '"/a b/\\\\$x\\\\"y"');
+  assert.equal(quoteArg('/a\\b c'), '"/a\\\\\\\\b c"');
+  assert.ok(!quoteArg('/a\nExec=evil').includes('\n'), 'a newline cannot start a new key');
   assert.match(desktopEntry('/My Apps/g', ['--hidden']), /Exec="\/My Apps\/g" --hidden/);
   const calls = [];
   const app = { setLoginItemSettings: (o) => calls.push(o), getLoginItemSettings: () => ({ openAtLogin: true }) };

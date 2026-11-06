@@ -92,15 +92,18 @@ function renderStats() {
   );
 }
 
+const NAV = { dashboard: 'dashboard', overview: 'overview', quality: 'quality', clutter: 'clutter', history: 'history' };
 function renderList() {
   document.body.classList.toggle('dash', state.view === 'dashboard'); // the dashboard shows these numbers itself
+  for (const [view, id] of Object.entries(NAV)) { const b = $(id); if (b) { if (state.view === view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); } }
   const q = $('q').value.toLowerCase();
   const sort = $('sort').value;
   let rs = [...state.repos.values()].filter((r) => r.name.toLowerCase().includes(q));
   rs.sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : sort === 'prs' ? (b.prs?.length || 0) - (a.prs?.length || 0) : (a.score ?? 0) - (b.score ?? 0));
   $('repos').replaceChildren(...rs.map((r) => {
     const c = counts(r);
-    return activate(h('li', { class: state.view === 'repo' && r.path === state.selected ? 'sel' : '' },
+    const sel = state.view === 'repo' && r.path === state.selected;
+    return activate(h('li', { class: sel ? 'sel' : '', 'aria-current': sel ? 'true' : null, 'aria-label': `${r.name}, grade ${r.grade}${c.err ? `, ${c.err} errors` : ''}${c.warn ? `, ${c.warn} warnings` : ''}` },
       h('div', { class: 'grade g' + r.grade }, r.grade),
       h('div', { class: 'rinfo' },
         h('div', { class: 'rname' }, r.name),
@@ -229,7 +232,7 @@ function settingsPanel(r) {
 const FILE_TEMPLATES = [
   ['license', 'LICENSE', (r) => r.files.license], ['readme', 'README', (r) => r.files.readme], ['gitignore', '.gitignore', (r) => r.files.gitignore],
   ['security', 'SECURITY.md', (r) => r.files.security], ['contributing', 'CONTRIBUTING.md', (r) => r.files.contributing], ['conduct', 'CODE_OF_CONDUCT.md', (r) => r.files.codeOfConduct],
-  ['pr-template', 'PR template', (r) => r.files.prTemplate], ['dependabot', 'dependabot.yml', (r) => r.files.dependabotConfig], ['ci-node', 'Node CI workflow', (r) => r.hasWorkflows],
+  ['pr-template', 'PR template', (r) => r.files.prTemplate], ['dependabot', 'dependabot.yml', (r) => r.files.dependabotConfig], ['ci-node', 'Node CI workflow', (r) => r.hasWorkflows || !r.deps?.npmLock],
 ];
 
 function filesPanel(r) {
@@ -332,16 +335,18 @@ async function startScan() {
   state.scanning = true; state.clutter = null; state.quality = null; state.picked.clear(); state.repos.clear(); state.selected = null; state.view = 'dashboard';
   $('ptext').textContent = 'Scanning…'; $('progress').hidden = false;
   $('scan').disabled = true; renderStats(); renderList(); renderMain();
-  const out = await window.api.scan(root, $('deep').checked);
+  let out;
+  try { out = await window.api.scan(root, $('deep').checked); } catch (e) { out = { ok: false, error: 'Scan failed: ' + ((e && e.message) || e) }; }
+  finally { state.scanning = false; $('scan').disabled = false; $('progress').hidden = true; }
   showRate(out.rate);
-  state.scanning = false; $('scan').disabled = false; $('progress').hidden = true;
+  if (out.root) $('root').value = out.root; // "~/Projects" is shown as the folder it means
   await loadTrend();
   if (!out.ok) toast(out.error, 'bad');
   else if (!out.count) toast('No git repositories found under that folder.', 'bad');
   renderMain();
 }
 
-window.api.onBegin(({ total }) => { $('progress').hidden = false; $('bar').style.width = '0'; $('ptext').textContent = `Found ${total} repositories…`; });
+window.api.onBegin(({ total }) => { $('progress').hidden = false; $('bar').style.width = '0'; $('progress').setAttribute('aria-valuenow', '0'); $('ptext').textContent = `Found ${total} repositories…`; });
 
 // Repo results can arrive faster than we can usefully paint; coalesce to one render per frame.
 let paintQueued = false;
@@ -363,6 +368,7 @@ function showRate(rate) {
 window.api.onRepo(({ res, done, total }) => {
   state.repos.set(res.path, res);
   $('bar').style.width = (done / total) * 100 + '%';
+  $('progress').setAttribute('aria-valuenow', String(Math.round((done / total) * 100)));
   $('ptext').textContent = `Scanned ${done}/${total}`;
   schedulePaint();
 });

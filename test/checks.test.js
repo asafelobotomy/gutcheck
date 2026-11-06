@@ -107,3 +107,28 @@ test('a detached HEAD has no branch name, so no "no upstream" finding or push co
   assert.ok(ids.includes('git-detached'));
   assert.ok(!ids.includes('git-no-upstream'));
 });
+
+const snapOf = (o = {}) => ({ git: { branch: 'main', detached: false, upstream: 'origin/main', ahead: 0, behind: 0, dirty: 0, branches: [], remoteBranches: [], mergedBranches: [] }, remote: { owner: 'o', name: 'n', isPublic: false, description: 'd' }, files: { license: true, readme: true, gitignore: true }, deps: { manifests: [], manifestsWithoutLock: [] }, prs: [], ci: { failed: [] }, alerts: [], hasWorkflows: true, ...o });
+
+test('uncommitted changes on a detached HEAD say so and offer no commit that would fail', () => {
+  const { evaluate } = require('../src/checks');
+  const f = evaluate(snapOf({ git: { ...snapOf().git, branch: null, detached: true, upstream: null, dirty: 2 } })).findings.find((x) => x.id === 'git-dirty');
+  assert.doesNotMatch(f.detail, /null/);
+  assert.equal(f.fix, undefined);
+  assert.equal(evaluate(snapOf({ git: { ...snapOf().git, dirty: 1 } })).findings.find((x) => x.id === 'git-dirty').fix.type, 'commit-all');
+});
+
+test('a repo with no commits gets no "push and set upstream" button', () => {
+  const { evaluate } = require('../src/checks');
+  const g = { ...snapOf().git, upstream: null };
+  assert.ok(evaluate(snapOf({ git: g })).findings.some((f) => f.id === 'git-no-upstream'));
+  assert.ok(!evaluate(snapOf({ git: g, hygiene: { noCommits: true, storage: {}, goneBranches: [] } })).findings.some((f) => f.id === 'git-no-upstream'));
+});
+
+test('the Node CI template is only offered where npm ci can run; the issue count is called issues', () => {
+  const { evaluate, checkRepoSettings } = require('../src/checks');
+  const ciNone = (deps) => evaluate(snapOf({ hasWorkflows: false, deps: { manifests: ['package.json'], manifestsWithoutLock: [], ...deps } })).findings.find((f) => f.id === 'ci-none');
+  assert.equal(ciNone({ npmLock: true }).fix.template, 'ci-node');
+  assert.equal(ciNone({ npmLock: false }).fix, undefined, 'yarn/pnpm or no lockfile: npm ci would fail');
+  assert.equal(checkRepoSettings(snapOf({ remote: { ...snapOf().remote, openIssues: 40 } })).find((f) => f.id === 'many-issues').title, '40 open issues');
+});
