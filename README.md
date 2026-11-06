@@ -73,6 +73,61 @@ The **Clutter & tidy-up** view scans every repo (read-only) for things nothing n
 
 Files tracked by git are never offered for removal. Removal shows every item first; env files need you to type the repo name, and anything that is not a regenerable cache goes to your trash rather than being deleted. Only high-confidence items are pre-selected.
 
+## Command line and MCP server (for AI agents)
+
+GutCheck also runs without its window, so any coding agent (Claude Code, Claude Desktop, Cursor, Codex and others) can use its scans, report and actions through one set of tools instead of piecing together `git` and `gh` commands.
+
+**MCP server.** Add GutCheck to your agent as a stdio MCP server. It starts **read-only**; add `--allow-actions` to let the agent plan and apply fixes.
+
+```bash
+claude mcp add gutcheck -- /path/to/GutCheck.AppImage --mcp                    # Claude Code, read-only
+claude mcp add gutcheck -- /path/to/GutCheck.AppImage --mcp --allow-actions    # Claude Code, can fix
+```
+
+For other clients, add the same command to their MCP config. For Claude Desktop (`claude_desktop_config.json`) and Cursor (`.cursor/mcp.json`):
+
+```json
+{ "mcpServers": { "gutcheck": { "command": "/path/to/GutCheck.AppImage", "args": ["--mcp"] } } }
+```
+
+For Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.gutcheck]
+command = "/path/to/GutCheck.AppImage"
+args = ["--mcp"]
+```
+
+From a source checkout, use `node /path/to/gutcheck/src/cli.js mcp` as the command instead.
+
+| Tool | What it does |
+|---|---|
+| `gutcheck_overview` | Scan a folder (or reuse the last scan) and list repos worst first, with grade, score, error and warning counts and git state. Scans on first use; sends progress per repo. |
+| `gutcheck_findings` | Every finding, filtered by repo, minimum severity or category, each with its automatic fix if it has one |
+| `gutcheck_repo` | One repo in full: branches, PRs, failed CI runs, findings |
+| `gutcheck_report` | The "Copy for LLM" fix plan in Markdown, for one repo or the workspace |
+| `gutcheck_clutter`, `gutcheck_quality` | The clutter and code-quality scans |
+| `gutcheck_workspace` | Workspace and machine advice, including AI agent settings |
+| `gutcheck_actions` | Every action and its parameters |
+| `gutcheck_plan` | Turn `{ repo, finding }` (the finding's own fix) or `{ repo, action }` into exact commands, with a single-use token. Changes nothing. |
+| `gutcheck_apply` | Run planned tokens exactly as previewed; dangerous plans also need the repo name |
+| `gutcheck_history` | Changes GutCheck has made, from the app, the CLI or an agent |
+
+The same safety rails apply as in the app. Changes always go plan, then apply, and only the previewed commands run. Tokens are single use and expire after 5 minutes. The app's **Read-only** switch stops the server too, and the server never changes it. GutCheck never deletes repos, changes visibility, force-pushes or rewrites history. Secret values and `.env` contents never appear in results, and every change is recorded in **History**.
+
+**Command line.** Run `GutCheck.AppImage --cli <command>` (or `node src/cli.js <command>` from a checkout, or `npm link` for a `gutcheck` command):
+
+```bash
+gutcheck scan ~/Projects                 # repos worst first
+gutcheck findings --severity warn        # warnings and errors, with the fix command for each
+gutcheck report my-repo                  # the Markdown fix plan
+gutcheck fix my-repo git-dirty message="Save work"         # preview the exact commands
+gutcheck fix my-repo git-dirty message="Save work" --yes   # run them
+gutcheck --help
+```
+
+The CLI and the server share the app's data folder, so they use the same settings (workspace folder, Read-only switch, quality settings), History and trends. Each CLI command scans again, but the MCP server keeps its scan between calls.
+
 ## Startup & tray
 
 The **Startup & tray** button (top bar) has three options, all off by default:

@@ -1,9 +1,12 @@
 {
   "name": "gutcheck",
   "productName": "GutCheck",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Workspace-wide GitHub health dashboard built on the gh CLI",
-  "main": "src/main.js",
+  "main": "src/entry.js",
+  "bin": {
+    "gutcheck": "src/cli.js"
+  },
   "author": "solon",
   "license": "MIT",
   "engines": {

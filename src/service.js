@@ -24,7 +24,7 @@ const publicPlan = (token, p) => ({ ok: true, token, type: p.type, repoPath: p.r
 // deps: { known: Map(path -> scan result), settings: () => obj, audit: (entry) => void,
 //         trash: (path) => Promise, clipboard: { writeText }, rescan?: (dir) => Promise<result>,
 //         trendStore?: { read(): array, write(array) }, updateSettings?: (patch) => settings }
-function createService({ known, settings, audit, trash, clipboard, rescan = (d) => scanRepo(d, { deep: false }), trendStore = null, updateSettings = () => ({}) }) {
+function createService({ known, settings, audit, trash, clipboard = { writeText() {} }, rescan = (d) => scanRepo(d, { deep: false }), trendStore = null, updateSettings = () => ({}) }) {
   const plans = new Map(); // token -> { plan, expires } (only these stored plans can ever run)
   const busy = new Set(); // repo paths with an action in flight
   let clutterScanning = false;
@@ -74,7 +74,9 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
     return out;
   }
 
-  async function applyActions(tokens) {
+  // opts.confirm (headless callers): { token: repo name } must name the repo for every danger plan.
+  // The app enforces the same rule in its review dialog, where the user types the name.
+  async function applyActions(tokens, opts = {}) {
     if (!Array.isArray(tokens)) return [];
     const out = [];
     for (const token of tokens) {
@@ -82,6 +84,7 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
       plans.delete(token); // single use
       if (!entry || entry.expires < Date.now()) { out.push({ ok: false, error: 'Plan expired. Please review it again.' }); continue; }
       const p = entry.plan;
+      if (opts.confirm && p.confirmName && opts.confirm[token] !== p.confirmName) { out.push({ ok: false, repoName: p.repoName, error: `This is a dangerous action: confirm it by passing the repo name "${p.confirmName}" for this token.` }); continue; }
       if (!known.has(p.repoPath)) { out.push({ ok: false, repoName: p.repoName, error: 'This repo is no longer in the scanned workspace.' }); continue; }
       if (settings().readOnly) { out.push({ ok: false, repoName: p.repoName, error: 'Read-only mode is on.' }); continue; }
       if (busy.has(p.repoPath)) { out.push({ ok: false, repoName: p.repoName, error: 'Another action is running on this repo.' }); continue; }
@@ -160,8 +163,8 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
     }
   }
 
-  // Build the "Copy for LLM" report from the last scan and put it on the clipboard.
-  async function copyReport(dir) {
+  // Build the "Copy for LLM" report from the last scan (one repo, or the whole workspace).
+  async function reportText(dir) {
     const repos = dir ? [known.get(dir)].filter(Boolean) : [...known.values()];
     if (!repos.length) return { ok: false, error: dir ? 'Unknown repo' : 'Scan a workspace first.' };
     const clutter = new Map();
@@ -177,13 +180,20 @@ function createService({ known, settings, audit, trash, clipboard, rescan = (d) 
     }
     const root = settings().root;
     const text = buildReport({ repos, clutter, quality, workspace: dir ? [] : (await wsAdvice(root)) || [], root: dir ? null : root });
-    clipboard.writeText(text);
-    return { ok: true, chars: text.length, repos: repos.length };
+    return { ok: true, text, repos: repos.length };
+  }
+
+  // The same report, put on the clipboard (the app's Copy for LLM button).
+  async function copyReport(dir) {
+    const r = await reportText(dir);
+    if (!r.ok) return r;
+    clipboard.writeText(r.text);
+    return { ok: true, chars: r.text.length, repos: r.repos };
   }
 
   const forgetPlans = () => plans.clear();
 
-  return { planActions, applyActions, forgetPlans, clutterScan, qualityScan, qualitySettings, setQualitySettings, copyReport, recordScan, trend };
+  return { planActions, applyActions, forgetPlans, clutterScan, qualityScan, qualitySettings, setQualitySettings, reportText, copyReport, wsAdvice, recordScan, trend };
 }
 
 module.exports = { createService };
