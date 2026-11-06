@@ -40,6 +40,7 @@ function checkGitHygiene(s) {
   else if (h.remote === 'http') add('remote-http', 'warn', 'Origin uses unencrypted http://', 'Code and credentials travel in clear text. Switch the remote to https:// or SSH.');
   if (h.noCommits) add('git-no-commits', 'warn', 'Repository has no commits', 'Nothing is recorded yet, so nothing can be pushed or recovered.');
   if (h.stashes) add('git-stashes', h.stashes >= STASH_WARN ? 'warn' : 'info', `${plural(h.stashes, 'stash entry', 'stash entries')}`, 'Stashed work is easy to forget and is lost if the stash is cleared. Turn what you need into commits or branches.');
+  if (h.currentGone) add('git-upstream-gone', 'warn', `The upstream of ${s.git.branch} no longer exists`, 'The remote branch was deleted or renamed, so this branch is not backed up. Push it again (git push -u origin HEAD), or point it at the new branch with git branch -u.');
   if (h.goneBranches.length) add('git-gone', 'info', `${plural(h.goneBranches.length, 'branch', 'branches')} whose upstream was deleted`, list(h.goneBranches, 8));
   if (h.prunableWorktrees) add('git-worktrees', 'info', `${plural(h.prunableWorktrees, 'stale worktree')}`, 'Their folders are gone but git still tracks them.', { fix: { type: 'worktree-prune', label: 'Prune worktrees' } });
   if (h.submodulesUninit) add('git-submodules', 'info', `${plural(h.submodulesUninit, 'submodule')} not initialised`, 'The code they point to is missing from this checkout.');
@@ -58,7 +59,7 @@ function checkGitHygiene(s) {
 // Project conventions (GitHub community profile, Keep a Changelog, EditorConfig, runtime pinning).
 function checkProject(s) {
   const p = s.hygiene && s.hygiene.project;
-  if (!p || (s.hygiene && s.hygiene.noCommits)) return [];
+  if (!p || (s.hygiene && s.hygiene.noCommits) || (s.files && s.files.aurPackage)) return [];
   const out = [];
   const pub = !!(s.remote && s.remote.isPublic && !s.remote.isFork);
   const add = (id, severity, title, detail, extra = {}) => out.push({ id, category: 'Project setup', severity, title, detail, ...extra });

@@ -13,6 +13,9 @@ function buildAdvice(q, lim) {
   if (q.secretCount)
     add('q-secrets', 'error', `${plural(q.secretCount, 'possible hardcoded secret')}`, `${list(q.secrets.map((s) => `${at(s)} (${s.kind})`), 8)}. Values are never shown. Rotate them, move them to environment variables or a secret store, and check git history.`);
 
+  if (q.softSecretCount)
+    add('q-secrets-soft', 'info', `${plural(q.softSecretCount, 'key-like value')} in tests or saved web pages`, `${list((q.softSecrets || []).map((s) => `${at(s)} (${s.kind})`), 6)}. Values are never shown. Usually throwaway test fixtures or public browser keys; check none is a real key of yours.`);
+
   const L = q.loc;
   if (L.overCount) {
     const worst = L.over[0].measured;

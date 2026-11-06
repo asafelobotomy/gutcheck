@@ -132,3 +132,24 @@ test('the Node CI template is only offered where npm ci can run; the issue count
   assert.equal(ciNone({ npmLock: false }).fix, undefined, 'yarn/pnpm or no lockfile: npm ci would fail');
   assert.equal(checkRepoSettings(snapOf({ remote: { ...snapOf().remote, openIssues: 40 } })).find((f) => f.id === 'many-issues').title, '40 open issues');
 });
+
+test('a remote on another host is info, not "not backed up"; an AUR package repo skips project-file checks', () => {
+  const s = base();
+  s.remote = null;
+  s.originUrl = 'ssh://aur@aur.archlinux.org/pkg.git';
+  const f = evaluate(s).findings.find((x) => x.id === 'no-remote');
+  assert.equal(f.severity, 'info');
+  assert.match(f.detail, /origin is aur\.archlinux\.org/);
+  assert.ok(!f.detail.includes('aur@'), 'no user or path from the URL');
+  const aur = base();
+  aur.files = { aurPackage: true };
+  assert.ok(!evaluate(aur).findings.some((x) => ['no-readme', 'no-license', 'no-gitignore'].includes(x.id)));
+});
+
+test('the current branch losing its upstream is a warning', () => {
+  const s = base();
+  s.hygiene = { currentGone: true, goneBranches: [], storage: {}, project: null };
+  const f = evaluate(s).findings.find((x) => x.id === 'git-upstream-gone');
+  assert.equal(f.severity, 'warn');
+  assert.match(f.title, /main/);
+});

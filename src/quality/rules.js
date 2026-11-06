@@ -38,6 +38,7 @@ const GENERIC_SECRET = /(?:password|passwd|secret|token|api[_-]?key|auth[_-]?key
 // Checked against the captured value only: a `{` or `$` elsewhere on the line says nothing about it.
 const PLACEHOLDER = /example|changeme|change_me|your[_-]|xxx|placeholder|dummy|sample|redacted|<|\{|\$|\*\*\*/i;
 const ENV_LOOKUP = /process\.env|os\.environ|getenv|ENV\[/;
+const URL_VALUE = /^[a-z][a-z0-9+.-]*:\/\//i; // `token_url: "https://..."` names an endpoint, not a secret
 
 function entropy(s) {
   const f = {};
@@ -46,12 +47,16 @@ function entropy(s) {
 }
 
 // Returns a list of secret kinds found on one raw line (testFile relaxes the generic rule only).
+// A match that is probably not a live secret of this project: a fixture in a test file, or a Google
+// browser key inside a saved web page (Google's browser keys are public by design and restricted by referrer).
+const softSecret = (kind, rel, testFile) => testFile || (kind === 'Google API key' && /\.html?$/i.test(rel));
+
 function secretKinds(line, testFile) {
   const out = [];
   for (const [kind, re] of SECRET_PATTERNS) if (re.test(line)) out.push(kind);
   if (!out.length && !testFile) {
     const m = GENERIC_SECRET.exec(line);
-    if (m && !PLACEHOLDER.test(m[1]) && !ENV_LOOKUP.test(line) && entropy(m[1]) >= 3) out.push('Hardcoded credential');
+    if (m && !PLACEHOLDER.test(m[1]) && !URL_VALUE.test(m[1]) && !ENV_LOOKUP.test(line) && entropy(m[1]) >= 3) out.push('Hardcoded credential');
   }
   return out;
 }
@@ -87,4 +92,4 @@ function constantDef(line) {
   return Number.isFinite(value) ? { name: m[1], value } : null;
 }
 
-module.exports = { CONST_FILE_RE, TEST_RE, GENERATED_RE, SKIP_SEGMENTS, SKIP_FILE_RE, CONFIG_EXT, MARKER_RE, secretKinds, debugKind, magicNumbers, constantDef };
+module.exports = { softSecret, CONST_FILE_RE, TEST_RE, GENERATED_RE, SKIP_SEGMENTS, SKIP_FILE_RE, CONFIG_EXT, MARKER_RE, secretKinds, debugKind, magicNumbers, constantDef };

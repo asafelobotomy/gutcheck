@@ -183,11 +183,17 @@ test('workspace advice: copies, duplicate clones, projects without git, loose fi
     fs.mkdirSync(path.join(root, 'scratch'));
     put(root, 'scratch/package.json', '{}');
     fs.mkdirSync(path.join(root, 'emptydir'));
+    put(root, 'scriptdir/tool.py', 'print(1)');
+    put(root, 'research/notes/plan.md', '# plan');
+    put(root, 'assets/pic.png', 'x');
     put(root, 'todo.txt');
     put(root, '.env', 'A=1');
     const repos = ['app', 'app-old', 'tool', 'tool2'].map((n) => ({ path: path.join(root, n), name: n, originUrl: n.startsWith('app') ? 'git@github.com:me/app.git' : 'https://github.com/me/' + n }));
     const ids = (await workspaceAdvice(root, repos)).map((a) => a.id);
-    for (const id of ['ws-loose-files', 'ws-loose-env', 'ws-no-git', 'ws-empty-dirs', 'ws-variant-app-old', 'ws-dup-clone-github.com/me/app']) assert.ok(ids.includes(id), id);
+    for (const id of ['ws-loose-files', 'ws-loose-env', 'ws-no-git', 'ws-no-git-notes', 'ws-empty-dirs', 'ws-variant-app-old', 'ws-dup-clone-github.com/me/app']) assert.ok(ids.includes(id), id);
+    const adv = await workspaceAdvice(root, repos);
+    assert.match(adv.find((a) => a.id === 'ws-no-git').detail, /scratch, scriptdir/, 'a folder of code without a manifest is a project too');
+    assert.match(adv.find((a) => a.id === 'ws-no-git-notes').detail, /^research\./, 'notes are found one level down; a folder of images is neither');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

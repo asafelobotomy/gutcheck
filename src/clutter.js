@@ -327,6 +327,19 @@ const VARIANT_RE = /^(.+?)[-_. ](old|backup|bak|copy|copy\d*|tmp|temp|archive|ar
 const normRemote = (u) => (u || '').toLowerCase().replace(/^(?:ssh:\/\/)?git@([^:/]+)[:/]/, '$1/').replace(/^https?:\/\//, '').replace(/^[^@/]+@/, '').replace(/\.git\/?$/, '').replace(/\/$/, '');
 const nameStyle = (n) => (/\s/.test(n) ? 'spaces' : /[A-Z]/.test(n) && !/[-_]/.test(n) ? 'camelCase' : n.includes('_') && n.includes('-') ? 'mixed' : n.includes('_') ? 'snake_case' : /[A-Z]/.test(n) ? 'Mixed-Case' : 'kebab/lowercase');
 
+const CODE_EXT = /\.(js|mjs|cjs|ts|tsx|jsx|py|rs|go|rb|java|kt|c|cc|cpp|h|hpp|cs|php|swift|sh|lua|gd|dart|zig)$/i;
+const NOTE_EXT = /\.(md|markdown|txt|rst|org|adoc|pdf|docx?|odt)$/i;
+
+// What a folder without git holds, looking at most two levels down: 'code', 'notes' or null.
+async function folderKind(abs, top) {
+  const names = [...top];
+  for (const n of top.slice(0, 50)) {
+    if (n.startsWith('.') || NO_DESCEND.has(n)) continue;
+    try { if ((await fsp.stat(path.join(abs, n))).isDirectory()) names.push(...(await fsp.readdir(path.join(abs, n))).slice(0, 200)); } catch {}
+  }
+  return names.some((n) => CODE_EXT.test(n)) ? 'code' : names.some((n) => NOTE_EXT.test(n)) ? 'notes' : null;
+}
+
 async function workspaceAdvice(root, repos) {
   const out = [];
   const add = (id, severity, title, detail) => out.push({ id, category: 'Workspace', severity, title, detail });
@@ -340,6 +353,7 @@ async function workspaceAdvice(root, repos) {
   if (looseEnv.length) add('ws-loose-env', 'warn', 'Env files in the workspace root', `${list(looseEnv)}. They belong to no project and nothing in the workspace reads them.`);
 
   const untracked = [];
+  const notes = [];
   const empty = [];
   for (const e of ents) {
     if (!e.isDirectory() || e.name.startsWith('.') || NO_DESCEND.has(e.name)) continue;
@@ -347,10 +361,13 @@ async function workspaceAdvice(root, repos) {
     if (repoPaths.some((p) => p === abs || p.startsWith(abs + path.sep))) continue;
     let sub = [];
     try { sub = await fsp.readdir(abs); } catch { continue; }
-    if (!sub.length) empty.push(e.name);
-    else if (sub.some((n) => MANIFESTS.includes(n))) untracked.push(e.name);
+    if (!sub.length) { empty.push(e.name); continue; }
+    const kind = sub.some((n) => MANIFESTS.includes(n)) ? 'code' : await folderKind(abs, sub);
+    if (kind === 'code') untracked.push(e.name);
+    else if (kind === 'notes') notes.push(e.name);
   }
   if (untracked.length) add('ws-no-git', 'warn', `${plural(untracked.length, 'project')} without version control`, `${list(untracked)}. These look like projects but are not git repos: run "git init" or archive them.`);
+  if (notes.length) add('ws-no-git-notes', 'info', `${plural(notes.length, 'folder')} of notes without version control`, `${list(notes)}. Documents only, not backed up anywhere: put them in a git repo (or the project they belong to) if you want to keep them.`);
   if (empty.length) add('ws-empty-dirs', 'info', `${plural(empty.length, 'empty folder')} in the workspace root`, `${list(empty)}. Safe to delete.`);
 
   const names = repos.map((r) => r.name);

@@ -21,6 +21,7 @@ const DENSE_FILE = 15; // magic numbers in one file before it is called out
 const MAX_KEPT = 200; // findings of one kind kept per repo (counts stay exact)
 const CANDIDATE_MIN = 3; // a literal repeated this often deserves a name
 const CANDIDATE_MIN_VALUE = 10; // single digits are indices and counts, not worth a name
+const DOCS_DIR_RE = /(^|\/)docs?\//; // HTML under docs/ is documentation (often saved pages), not code to split
 const REUSE_MIN = 100; // smaller values (3, 5, 30...) collide by accident, so only larger ones count as "the same constant"
 
 // Validate user settings (they come from disk and from the UI): an invalid field falls back to
@@ -57,6 +58,8 @@ async function scanQuality(dir, rawSettings) {
   const debug = [];
   const secrets = [];
   let secretCount = 0;
+  const softSecrets = []; // test fixtures and public browser keys in saved web pages: listed, not counted as secrets
+  let softSecretCount = 0;
   const debugBy = { warn: 0, info: 0 };
   const largeFiles = [];
   let magicTotal = 0;
@@ -96,7 +99,10 @@ async function scanQuality(dir, rawSettings) {
     // Secrets: raw text, source and config files only.
     rawLines.forEach((l, i) => {
       if (l.length > 2000) return;
-      for (const kind of R.secretKinds(l, isTest)) { secretCount++; if (secrets.length < MAX_KEPT) secrets.push({ path: rel, line: i + 1, kind }); }
+      for (const kind of R.secretKinds(l, isTest)) {
+        if (R.softSecret(kind, rel, isTest)) { softSecretCount++; if (softSecrets.length < MAX_KEPT) softSecrets.push({ path: rel, line: i + 1, kind }); }
+        else { secretCount++; if (secrets.length < MAX_KEPT) secrets.push({ path: rel, line: i + 1, kind }); }
+      }
     });
     if (!spec) continue;
 
@@ -116,7 +122,8 @@ async function scanQuality(dir, rawSettings) {
     const measured = cfg.locMode === 'code' ? code : total;
     const entry = { path: rel, lines: total, code, lang: spec.lang, test: isTest, measured };
     res.largest.push(entry);
-    if (measured > cfg.maxLines) res.over.push(entry);
+    // Saved or generated HTML pages kept as documentation are not code to split up.
+    if (measured > cfg.maxLines && !(spec.lang === 'HTML' && DOCS_DIR_RE.test(rel))) res.over.push(entry);
 
     if (R.CONST_FILE_RE.test(rel) && !isTest) constantsFiles.push(rel);
     if (spec.fam === 'plain') continue;
@@ -176,7 +183,7 @@ async function scanQuality(dir, rawSettings) {
     markers: { TODO: markers.TODO, FIXME: markers.FIXME, HACK: markers.HACK, XXX: markers.XXX, total: markers.TODO + markers.FIXME + markers.HACK + markers.XXX, items: markers.items },
     // Lists are capped; the counts are exact. Breakpoints are kept ahead of console.log in the list.
     debug: [...debug.filter((d) => d.severity === 'warn'), ...debug.filter((d) => d.severity !== 'warn')].slice(0, 40), debugCount: debugBy.warn + debugBy.info, breakpointCount: debugBy.warn,
-    secrets: secrets.slice(0, 40), secretCount,
+    secrets: secrets.slice(0, 40), secretCount, softSecrets: softSecrets.slice(0, 40), softSecretCount,
     largeFiles: largeFiles.slice(0, 10),
     skipped: res.skipped, truncated: res.truncated,
   };

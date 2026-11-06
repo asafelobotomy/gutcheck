@@ -211,3 +211,21 @@ test('two-letter constants such as KB count as named constants', () => {
   assert.deepEqual(R.constantDef('const MASK = 0xff;'), { name: 'MASK', value: 255 });
   assert.deepEqual(R.magicNumbers('const KB = 1024;'), []);
 });
+
+test('secrets: URL values are not credentials; test fixtures and browser keys in saved pages are listed apart', async () => {
+  const dir = repo();
+  try {
+    const GKEY = 'AIza' + 'B'.repeat(35);
+    put(dir, 'src/sources.rs', 'igdb_token: "https://id.twitch.tv/oauth2/token-endpoint".into(),\n');
+    put(dir, 'internal/redact_test.go', `const k = "${AWS}"\n`);
+    put(dir, 'docs/archive/page/raw.html', `<script src="https://maps.example/js?key=${GKEY}"></script>\n` + lines(500, '<p>x</p>'));
+    put(dir, 'web/index.html', lines(500, '<p>x</p>'));
+    const q = await scanQuality(dir);
+    assert.equal(q.secretCount, 0, 'a URL in a token field is an endpoint');
+    assert.deepEqual(q.softSecrets.map((s) => [s.path, s.kind]).sort(), [['docs/archive/page/raw.html', 'Google API key'], ['internal/redact_test.go', 'AWS access key']]);
+    assert.ok(q.advice.some((a) => a.id === 'q-secrets-soft' && a.severity === 'info'));
+    assert.ok(!q.advice.some((a) => a.id === 'q-secrets'));
+    assert.ok(!JSON.stringify(q).includes(GKEY) && !JSON.stringify(q).includes(AWS));
+    assert.deepEqual(q.loc.over.map((f) => f.path), ['web/index.html'], 'HTML under docs/ is documentation, not code to split');
+  } finally { cleanup(dir); }
+});

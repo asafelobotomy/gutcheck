@@ -7,6 +7,7 @@
 
 const { PROTECTION } = require('./protection');
 const { hygieneFix, REFS } = require('./report-fixes');
+const { agentFix } = require('./agents');
 const { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches } = require('./checks');
 const { daysAgo, sq, plural } = require('./util');
 
@@ -50,6 +51,7 @@ function fixFor(f, r) {
   const install = ((r.deps && r.deps.installer) || ['npm', 'install']).join(' ');
 
   if (id.startsWith('q-')) return qualityFix(id);
+  if (id.startsWith('agent-')) return agentFix(id) || { phase: 7, rank: 9, why: t(f.detail, LEN.text), cmds: [] };
   const hy = hygieneFix(id, r);
   if (hy) return hy;
   if (id === 'env-tracked') return { phase: 0, rank: 0, why: 'Committed secrets are readable by anyone with repo access and stay in history.', cmds: ['# for each file listed above:', 'git rm --cached <file>', 'git commit -m "Stop tracking env files"'], note: 'Tell the owner to rotate every secret those files held. Removing them from history needs a history rewrite: do NOT do that without explicit approval.' };
@@ -109,6 +111,7 @@ function qualityFix(id) {
   const Q = 8;
   const steps = {
     'q-secrets': { phase: 0, rank: 2, why: 'Credentials in source are readable by anyone with access and stay in git history.', cmds: [], note: 'For each location listed under Code quality: rotate the credential at its provider first, then move it to an environment variable or secret store and delete it from the code. Check history with git log -S. NEVER print, copy or repeat the value anywhere.' },
+    'q-secrets-soft': { phase: Q, rank: 0, why: 'Key-shaped values sit in test files or saved web pages.', cmds: [], note: 'Check each listed location is a throwaway fixture or a public browser key, not a real key of the project. Do not print the values. Rotate any that turn out to be real.' },
     'q-loc': { phase: Q, rank: 1, why: 'Very long files are hard to read, review and test.', cmds: [], note: 'Split the listed files by responsibility into smaller modules, one file at a time, keeping behaviour identical and running the tests after each split. Ask before changing public interfaces.' },
     'q-constants-reuse': { phase: Q, rank: 2, why: 'A raw number duplicates a constant that already exists.', cmds: [], note: 'For each entry, confirm it is the same quantity (a coincidence of value is not a duplicate), then import and use the constant.' },
     'q-constants-candidates': { phase: Q, rank: 3, why: 'The same unexplained number is repeated.', cmds: [], note: 'Create a named constant (in the project constants module) for each number that represents one idea, and use it at each listed place.' },
@@ -216,6 +219,7 @@ function qualitySection(q) {
   L.push(`\n**Code quality** (${q.files} files, ${q.lines} lines; limit ${q.loc.max} ${q.loc.mode === 'code' ? 'code lines' : 'lines'} per file)`);
   if (q.loc.over.length) L.push('Over the limit:\n' + q.loc.over.slice(0, 15).map((f) => `- \`${t(f.path, LEN.path)}\` ${f.measured} (${f.lang}${f.test ? ', test' : ''})`).join('\n'));
   if (q.secrets.length) L.push('Possible hardcoded secrets (location and kind only):\n' + q.secrets.slice(0, 15).map((s) => `- \`${t(s.path, LEN.path)}:${s.line}\` ${s.kind}`).join('\n'));
+  if ((q.softSecrets || []).length) L.push('Key-like values in tests or saved web pages (location and kind only; check they are not real keys):\n' + q.softSecrets.slice(0, 10).map((s) => `- \`${t(s.path, LEN.path)}:${s.line}\` ${s.kind}`).join('\n'));
   if (q.magic.total) L.push(`Magic numbers: ${q.magic.total} in ${q.magic.fileCount} files. Worst files:\n` + q.magic.files.slice(0, 8).map((f) => `- \`${t(f.path, LEN.path)}\` ${f.count}` + (f.examples[0] ? ` (e.g. line ${f.examples[0].line}: \`${t(f.examples[0].text, LEN.short)}\`)` : '')).join('\n'));
   if (q.magic.reuse.length) L.push('Existing constants used as raw numbers:\n' + q.magic.reuse.slice(0, 8).map((r) => `- ${r.value} is \`${r.constant}\` (${t(r.definedIn, LEN.title)}); raw at ${r.uses.slice(0, 3).map((u) => `${t(u.path, LEN.short)}:${u.line}`).join(', ')}`).join('\n'));
   if (q.magic.repeated.length) L.push('Repeated unnamed numbers:\n' + q.magic.repeated.slice(0, 8).map((r) => `- ${r.value} x${r.count} (${r.uses.slice(0, 3).map((u) => `${t(u.path, LEN.short)}:${u.line}`).join(', ')})`).join('\n'));

@@ -4,6 +4,7 @@
 
 const { daysAgo, DAYS_PER_YEAR } = require('./util');
 const { checkWorkflows, checkGitHygiene, checkProject, checkSecurityFeatures } = require('./checks-hygiene');
+const { checkAgents } = require('./agents');
 
 const { STALE_BRANCH_DAYS } = require('./renderer/metrics'); // one value for findings and the dashboard
 
@@ -76,6 +77,8 @@ function checkFiles(s) {
   const pub = !!(s.remote && s.remote.isPublic);
   const r = s.remote || {};
   // Public code without a licence cannot legally be reused; for private or local repos it only matters if that changes.
+  // Distro packaging repos (AUR: PKGBUILD + .SRCINFO) hold only a build recipe, so project docs and licence files do not apply.
+  if (f.aurPackage) return out;
   if (!f.license) add('no-license', pub ? 'error' : 'info', 'Missing LICENSE', pub ? 'Without a licence nobody may legally use, copy or contribute to the code.' : 'Not needed while private, but add one before you share it.', { type: 'add-file', label: 'Add MIT licence', template: 'license' });
   if (!f.readme) add('no-readme', 'error', 'Missing README', 'Describe what the project is and how to run it.', { type: 'add-file', label: 'Create README', template: 'readme' });
   if (!f.gitignore) add('no-gitignore', 'warn', 'Missing .gitignore', 'Build output and secrets may get committed.', { type: 'add-file', label: 'Create .gitignore', template: 'gitignore' });
@@ -110,10 +113,14 @@ function checkDeps(s) {
   return out;
 }
 
+// Host of a remote URL (https://host/..., ssh://user@host/..., user@host:path), never its path or user.
+const hostOf = (u) => { const m = /^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?([^/:]+)/i.exec(u || ''); return m ? m[1] : 'another host'; };
+
 function checkRepoSettings(s) {
   const out = [];
   if (!s.remote) {
-    out.push({ id: 'no-remote', category: 'Repo', severity: 'warn', title: 'No GitHub remote', detail: 'Local only. Not backed up.' });
+    if (s.originUrl) out.push({ id: 'no-remote', category: 'Repo', severity: 'info', title: 'Remote is not on GitHub', detail: `origin is ${hostOf(s.originUrl)}, so GitHub checks (CI, PRs, protection, alerts) are skipped.` });
+    else out.push({ id: 'no-remote', category: 'Repo', severity: 'warn', title: 'No GitHub remote', detail: 'Local only. Not backed up.' });
     return out;
   }
   if (s.remote.archived) out.push({ id: 'archived', category: 'Repo', severity: 'info', title: 'Repository is archived', detail: 'Read-only on GitHub.' });
@@ -131,7 +138,7 @@ const WEIGHT = { error: 15, warn: 5, info: 1 };
 
 function evaluate(snapshot) {
   const findings = [...checkCI(snapshot), ...checkPRs(snapshot), ...checkBranches(snapshot), ...checkFiles(snapshot), ...checkDeps(snapshot), ...checkRepoSettings(snapshot),
-    ...checkWorkflows(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkSecurityFeatures(snapshot)];
+    ...checkWorkflows(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkSecurityFeatures(snapshot), ...checkAgents(snapshot)];
   const penalty = findings.reduce((n, f) => n + WEIGHT[f.severity], 0);
   const score = Math.max(0, 100 - penalty);
   const order = { error: 0, warn: 1, info: 2 };

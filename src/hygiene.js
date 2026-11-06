@@ -68,6 +68,7 @@ async function collectHygiene(dir, { names, rawOrigin, deep, branch }) {
   const h = {
     stashes: lines(stash.stdout).length,
     goneBranches: lines(track.stdout).map((l) => l.split('\t')).filter(([n, t]) => t === '[gone]' && n !== branch).map(([n]) => n),
+    currentGone: !!branch && lines(track.stdout).some((l) => l === `${branch}\t[gone]`), // pushes and pulls of the current branch have nowhere to go
     prunableWorktrees: lines(wt.stdout).filter((l) => l.startsWith('prunable')).length,
     remote: remoteIssue(rawOrigin),
     noCommits: !head.ok,

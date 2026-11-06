@@ -53,6 +53,7 @@ function qualityRepoEl(res) {
   if (q.magic.repeated.length) details.push(h('details', {}, h('summary', {}, `Repeated numbers without a name (${q.magic.repeated.length})`),
     miniList(q.magic.repeated.map((r) => [h('b', {}, `${r.value} `), `x${r.count} in ${plural(r.files, 'file')}: ${r.uses.slice(0, 3).map(where).join(', ')}`]))));
   if (q.secrets.length) details.push(h('details', { open: 'open' }, h('summary', {}, `Possible secrets (${q.secretCount}), locations only`), miniList(q.secrets.map((s) => [h('code', {}, where(s)), ` ${s.kind}`]))));
+  if ((q.softSecrets || []).length) details.push(h('details', {}, h('summary', {}, `Key-like values in tests or saved web pages (${q.softSecretCount}), locations only`), miniList(q.softSecrets.map((s) => [h('code', {}, where(s)), ` ${s.kind}`]))));
   if (q.markers.items.length) details.push(h('details', {}, h('summary', {}, `TODO / FIXME markers (${q.markers.total})`), miniList(q.markers.items.slice(0, 20).map((m) => [h('code', {}, where(m)), h('span', { class: 'badge' }, m.kind), ` ${m.text}`]))));
   if (q.languages.length) details.push(h('details', {}, h('summary', {}, 'Lines by language'),
     langBars(q.languages)));
