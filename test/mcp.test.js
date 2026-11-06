@@ -20,7 +20,9 @@ function workspace() {
     const d = path.join(root, n);
     fs.mkdirSync(d);
     sh(d, 'init', '-q', '-b', 'main');
-    sh(d, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init');
+    sh(d, 'config', 'user.email', 't@t'); // CI runners have no global identity, and commit-all commits
+    sh(d, 'config', 'user.name', 't');
+    sh(d, 'commit', '-q', '--allow-empty', '-m', 'init');
   }
   fs.writeFileSync(path.join(root, 'beta', 'new.txt'), 'x'); // one uncommitted change
   return root;
