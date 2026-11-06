@@ -30,7 +30,7 @@ function load() {
 
 test('every IPC channel is registered', () => {
   const { handlers } = load();
-  for (const c of ['settings:get', 'settings:set', 'auth:status', 'rate:get', 'dir:pick', 'scan:start', 'scan:one', 'action:plan', 'action:apply', 'clutter:scan', 'report:copy', 'trend:get', 'quality:scan', 'quality:set', 'audit:list', 'background:get', 'background:set', 'open:url', 'open:folder']) assert.ok(handlers.has(c), c);
+  for (const c of ['settings:get', 'settings:set', 'auth:status', 'rate:get', 'dir:pick', 'scan:start', 'scan:one', 'action:plan', 'action:apply', 'clutter:scan', 'report:copy', 'trend:get', 'quality:scan', 'quality:set', 'audit:list', 'background:get', 'background:set', 'open:url', 'open:folder', 'agents:status', 'agents:plan', 'agents:apply', 'agents:copy']) assert.ok(handlers.has(c), c);
 });
 
 test('quality settings round-trip through IPC with validation', async () => {
@@ -138,4 +138,21 @@ test('a login item that cannot be written comes back as a message, not a crash',
   const out = await call('background:set', { launchOnStartup: true, closeToTray: true });
   assert.match(out.error, /login item/);
   assert.equal(out.closeToTray, true, 'the other options are still saved');
+});
+
+test('agents: Read-only blocks connecting, the actions choice is remembered, only the agents\' docs open', async () => {
+  const { call, opened } = load();
+  const st = await call('agents:status');
+  assert.ok(Array.isArray(st.clients) && st.clients.length >= 5);
+  assert.equal(st.allowActions, false);
+  assert.match((await call('agents:status', { allowActions: true })).command, /--allow-actions/);
+  assert.equal((await call('agents:status')).allowActions, false, 'looking does not save');
+  await call('agents:plan', { id: 'nope', allowActions: true });
+  assert.equal((await call('agents:status')).allowActions, true, 'planning saves the choice');
+  await call('settings:set', { readOnly: true });
+  assert.match((await call('agents:plan', { id: 'cursor' })).error, /Read-only/);
+  assert.match((await call('agents:apply', { token: 'x' })).error, /Read-only/);
+  await call('open:url', 'https://cursor.com/docs/context/mcp');
+  await call('open:url', 'https://evil.example/');
+  assert.deepEqual(opened, [['url', 'https://cursor.com/docs/context/mcp']]);
 });

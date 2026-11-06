@@ -77,18 +77,27 @@ Files tracked by git are never offered for removal. Removal shows every item fir
 
 GutCheck also runs without its window, so any coding agent (Claude Code, Claude Desktop, Cursor, Codex and others) can use its scans, report and actions through one set of tools instead of piecing together `git` and `gh` commands.
 
-**MCP server.** Add GutCheck to your agent as a stdio MCP server. It starts **read-only**; add `--allow-actions` to let the agent plan and apply fixes.
+**Connect from the app.** Open **Settings > Connect an AI agent…**. GutCheck lists Claude Code, Codex CLI, Claude Desktop, Cursor, VS Code (Copilot) and Gemini CLI, shows which are installed and already connected, and connects each with that tool's own method:
+
+- Claude Code and Codex: their `mcp add` command. Claude Code is found on your PATH, or inside Claude Desktop if it is bundled there.
+- The others: a merge into their MCP config file. Other servers and settings are kept, and the original is backed up once as `<file>.gutcheck.bak`.
+
+The exact command or JSON is shown before anything runs, the change is recorded in History, and **Disconnect** removes only GutCheck's entry. A config file that is not plain JSON (VS Code allows comments) is never rewritten; you get the snippet to paste instead. **Copy** puts the command or snippet on the clipboard for any agent, and the switch at the top chooses read-only or `--allow-actions`.
+
+**MCP server.** To set it up by hand, add GutCheck to your agent as a stdio MCP server. It starts **read-only**; add `--allow-actions` to let the agent plan and apply fixes.
 
 ```bash
-claude mcp add gutcheck -- /path/to/GutCheck.AppImage --mcp                    # Claude Code, read-only
-claude mcp add gutcheck -- /path/to/GutCheck.AppImage --mcp --allow-actions    # Claude Code, can fix
+claude mcp add --transport stdio --scope user gutcheck -- /path/to/GutCheck.AppImage --mcp                    # Claude Code, read-only
+claude mcp add --transport stdio --scope user gutcheck -- /path/to/GutCheck.AppImage --mcp --allow-actions    # Claude Code, can fix
 ```
 
-For other clients, add the same command to their MCP config. For Claude Desktop (`claude_desktop_config.json`) and Cursor (`.cursor/mcp.json`):
+For other clients, add the same command to their MCP config. For Claude Desktop (`claude_desktop_config.json`), Cursor (`~/.cursor/mcp.json`) and Gemini CLI (`~/.gemini/settings.json`):
 
 ```json
 { "mcpServers": { "gutcheck": { "command": "/path/to/GutCheck.AppImage", "args": ["--mcp"] } } }
 ```
+
+For VS Code, the user `mcp.json` uses `servers` and needs a type: `{ "servers": { "gutcheck": { "type": "stdio", "command": "...", "args": ["--mcp"] } } }`.
 
 For Codex (`~/.codex/config.toml`):
 
@@ -130,7 +139,7 @@ The CLI and the server share the app's data folder, so they use the same setting
 
 ## Startup & tray
 
-The **Startup & tray** button (top bar) has three options, all off by default:
+**Settings** (top bar) has three startup and tray options, all off by default:
 
 - **Launch when I log in**: starts GutCheck at login, straight into the tray with no window. On Linux this writes `~/.config/autostart/gutcheck.desktop` (pointing at the AppImage you ran, so keep it in a stable place); on Windows and macOS it uses the system login items. Turning it off removes the entry.
 - **Minimise to the system tray**: minimising hides the window; click the tray icon to bring it back.

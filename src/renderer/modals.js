@@ -64,7 +64,8 @@ function askInputs(spec, values) {
       close(out);
     };
     box.addEventListener('keydown', (e) => e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type === 'text' && submit());
-    box.append(h('h3', { class: 'mh' }, spec.title), ...rows,
+    const extra = spec.extra ? spec.extra(close) : [];
+    box.append(h('h3', { class: 'mh' }, spec.title), ...(spec.lead || []).map((t) => h('h4', {}, t)), ...rows, ...extra,
       h('div', { class: 'mbtns' }, h('button', { onclick: () => close(null) }, 'Cancel'), h('button', { class: 'primary', onclick: submit }, 'Continue')));
   });
 }
@@ -113,10 +114,14 @@ function showResults(outs) {
   });
 }
 
-/* ---------------------------------------------------------------- startup & tray */
+/* ---------------------------------------------------------------- settings: startup, tray, agents */
 
 const BACKGROUND_SPEC = {
-  title: 'Startup & tray',
+  title: 'Settings',
+  lead: ['Startup & tray'],
+  // Opening the agents dialog closes this one without saving (it has its own Save/Connect steps).
+  extra: (close) => [h('h4', {}, 'AI agents'), h('p', { class: 'sub' }, 'Let Claude, Codex, Cursor, Copilot or Gemini use GutCheck\'s scans and fixes over MCP.'),
+    h('div', {}, h('button', { onclick: () => { close(null); openAgents(); } }, 'Connect an AI agent…'))],
   fields: [
     { name: 'launchOnStartup', label: 'Launch GutCheck when I log in (starts in the tray)', type: 'checkbox' },
     { name: 'minimizeToTray', label: 'Minimise to the system tray', type: 'checkbox' },

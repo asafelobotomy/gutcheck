@@ -56,10 +56,16 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
     setQualitySettings: async (p) => { calls.push(['qualitySet', p]); return { ...quality.settings, ...p }; },
     background: async () => ({ launchOnStartup: false, minimizeToTray: true, closeToTray: false, trayAvailable: true }),
     setBackground: async (p) => { calls.push(['background', p]); return { launchOnStartup: !!p.launchOnStartup, minimizeToTray: true, closeToTray: false, trayAvailable: true }; },
+    agents: async (allow) => { calls.push(['agents', allow]); const a = allow === undefined ? false : !!allow; return { allowActions: a, command: `/x/GutCheck.AppImage --mcp${a ? ' --allow-actions' : ''}`, clients: [
+      { id: 'claude-code', name: 'Claude Code', kind: 'cli', installed: true, configured: false, file: null, docs: 'https://code.claude.com/docs/en/mcp', snippet: 'claude mcp add …' },
+      { id: 'cursor', name: 'Cursor', kind: 'json', installed: false, configured: false, file: '/h/.cursor/mcp.json', docs: 'https://cursor.com/docs/context/mcp', snippet: '{}' }] }; },
+    planAgent: async (id, allow, remove) => { calls.push(['planAgent', id, allow, remove]); return { ok: true, token: 'tk', title: 'Connect GutCheck to Claude Code', display: ['claude mcp add --transport stdio --scope user gutcheck -- /x --mcp'], preview: null, note: null, allowActions: allow }; },
+    applyAgent: async (tok) => { calls.push(['applyAgent', tok]); return { ok: true, title: 'Connect', results: [{ text: 'claude mcp add', ok: true, out: '' }] }; },
+    copyAgent: async (id, allow) => { calls.push(['copyAgent', id, allow]); return { ok: true }; },
     onBegin: () => {}, onRepo: (cb) => { onRepo = cb; },
   };
   const ctx = dom.getInternalVMContext();
-  for (const f of ['metrics.js', 'app.js', 'modals.js', 'clutter-view.js', 'quality-view.js', 'dashboard.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
+  for (const f of ['metrics.js', 'app.js', 'modals.js', 'clutter-view.js', 'quality-view.js', 'dashboard.js', 'agents-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
   await tick();
   return { dom, w, doc: w.document, calls, $: (s) => w.document.querySelector(s), $$: (s) => [...w.document.querySelectorAll(s)], run: (code) => new vm.Script(code).runInContext(ctx) };
 }

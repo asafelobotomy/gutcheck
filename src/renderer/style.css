@@ -136,3 +136,7 @@ body.dash #stats { display: none; }
 .qstats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 details { margin: 8px 0; } summary { cursor: pointer; color: var(--muted); } summary:hover { color: var(--text); }
 .mini { margin: 6px 0 6px 14px; font-size: 12px; } .mini > div { padding: 2px 0; word-break: break-all; }
+.mbtns.left { justify-content: flex-start; margin-top: 8px; }
+div.warnbox { font-size: 12px; border-left: 3px solid var(--warn); color: var(--warn); padding: 4px 8px; margin: 6px 0; }
+.modal h4 { margin: 14px 0 4px; font-size: 13px; }
+.modal .plans { max-height: 52vh; overflow: auto; }

@@ -222,3 +222,40 @@ test('saving the Startup & tray options shows an error the main process reports'
   await tick();
   assert.match(t.$('#toast').textContent, /EACCES/);
 });
+
+test('Settings > AI agents: connect shows the exact command first, follows the actions switch, and copies', async () => {
+  const t = await boot();
+  click(t.$('#background'));
+  await tick();
+  assert.equal(t.$('.modal .mh').textContent, 'Settings');
+  click(t.$$('.modal button').find((b) => b.textContent === 'Connect an AI agent…'));
+  await tick();
+  assert.equal(t.$('.modal .mh').textContent, 'AI agents');
+  assert.equal(t.$$('.overlay').length, 1, 'the settings dialog closed first');
+  const cards = t.$$('.agent');
+  assert.deepEqual(cards.map((c) => c.dataset.agent), ['claude-code', 'cursor']);
+  const btn = (card, label) => [...card.querySelectorAll('button')].find((b) => b.textContent === label);
+  assert.equal(btn(cards[1], 'Connect').disabled, true, 'an agent that is not installed cannot be connected, only copied');
+
+  const allow = t.$('.modal input[type=checkbox]');
+  allow.checked = true;
+  allow.dispatchEvent(new t.w.Event('change'));
+  await tick();
+  assert.match(t.$('.modal code').textContent, /--allow-actions$/);
+
+  click(btn(t.$$('.agent')[0], 'Connect'));
+  await tick();
+  assert.deepEqual(t.calls.find((c) => c[0] === 'planAgent'), ['planAgent', 'claude-code', true, false]);
+  assert.equal(t.$$('.overlay').length, 2, 'review opens on top');
+  assert.match(t.$$('.modal').pop().textContent, /claude mcp add --transport stdio --scope user gutcheck -- \/x --mcp/);
+  assert.ok(!t.calls.some((c) => c[0] === 'applyAgent'), 'nothing runs before Apply');
+  click(t.$$('.modal').pop().querySelector('button.primary'));
+  await tick();
+  assert.deepEqual(t.calls.find((c) => c[0] === 'applyAgent'), ['applyAgent', 'tk']);
+
+  click(t.$$('.modal').pop().querySelector('button.primary')); // close the results
+  await tick();
+  click(btn(t.$$('.agent')[1], 'Copy'));
+  await tick();
+  assert.deepEqual(t.calls.find((c) => c[0] === 'copyAgent'), ['copyAgent', 'cursor', true]);
+});

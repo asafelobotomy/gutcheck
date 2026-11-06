@@ -12,6 +12,7 @@ const { expandHome } = require('./util');
 const { createTrayController } = require('./tray');
 const { setAutostart, isAutostart, HIDDEN_FLAG } = require('./autostart');
 const { createSettingsStore } = require('./settings');
+const { createAgentConnect } = require('./agent-connect');
 
 let win;
 let scanning = false;
@@ -55,8 +56,10 @@ function createWindow() {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
 }
 
+// Only GitHub pages and the agents' own MCP docs (linked from Settings > AI agents) open externally.
+const AGENT_DOCS = new Set(require('./agent-connect').clients().map((c) => c.docs));
 function openExternal(url) {
-  if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url);
+  if (/^https:\/\/github\.com\//.test(url) || AGENT_DOCS.has(url)) shell.openExternal(url);
 }
 
 handle('settings:get', () => loadSettings());
@@ -140,6 +143,23 @@ handle('background:set', (_e, patch) => {
     try { setAutostart(app, p.launchOnStartup, { dir: autostartDir() }); } catch (e) { error = 'Could not change the login item: ' + (e && e.message); }
   }
   return { ...background(s), error };
+});
+
+// Settings > AI agents: connect GutCheck's MCP server to installed coding agents (plan, review, apply).
+const agents = createAgentConnect({ launch: { env: process.env, execPath: process.execPath, isPackaged: app.isPackaged, appPath: app.getAppPath() }, audit });
+const agentAllow = (v) => (typeof v === 'boolean' ? v : !!loadSettings().agentAllowActions);
+handle('agents:status', (_e, { allowActions } = {}) => ({ ...agents.status(agentAllow(allowActions)), allowActions: agentAllow(allowActions) }));
+handle('agents:plan', (_e, { id, allowActions, remove } = {}) => {
+  if (typeof allowActions === 'boolean') updateSettings({ agentAllowActions: allowActions });
+  if (loadSettings().readOnly) return { ok: false, error: 'Read-only mode is on.' };
+  return agents.plan(String(id || ''), { allowActions: agentAllow(allowActions), remove: remove === true });
+});
+handle('agents:apply', (_e, { token } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.apply(String(token || ''))));
+handle('agents:copy', (_e, { id, allowActions } = {}) => {
+  const c = agents.status(agentAllow(allowActions)).clients.find((x) => x.id === id);
+  if (!c) return { ok: false };
+  clipboard.writeText(c.snippet);
+  return { ok: true };
 });
 
 handle('open:url', (_e, url) => openExternal(url));
