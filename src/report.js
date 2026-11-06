@@ -8,6 +8,7 @@
 const { PROTECTION } = require('./protection');
 const { hygieneFix, REFS } = require('./report-fixes');
 const { agentFix } = require('./agents');
+const { testsSection, testsFix } = require('./tests/report');
 const { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches } = require('./checks');
 const { daysAgo, sq, plural } = require('./util');
 
@@ -51,6 +52,7 @@ function fixFor(f, r) {
   const install = ((r.deps && r.deps.installer) || ['npm', 'install']).join(' ');
 
   if (id.startsWith('q-')) return qualityFix(id);
+  if (id.startsWith('t-')) return testsFix(id);
   if (id.startsWith('agent-')) return agentFix(id) || { phase: 7, rank: 9, why: t(f.detail, LEN.text), cmds: [] };
   const hy = hygieneFix(id, r);
   if (hy) return hy;
@@ -177,9 +179,9 @@ function clutterStep(c) {
   };
 }
 
-function stepsFor(r, c, q) {
+function stepsFor(r, c, q, tt) {
   const steps = [];
-  for (const f of [...(r.findings || []), ...((c && c.advice) || []), ...((q && q.advice) || [])]) {
+  for (const f of [...(r.findings || []), ...((c && c.advice) || []), ...((q && q.advice) || []), ...((tt && tt.advice) || [])]) {
     const fx = fixFor(f, r);
     if (!fx) continue;
     steps.push({ ...fx, sev: f.severity, title: f.title, detail: f.detail });
@@ -228,12 +230,12 @@ function qualitySection(q) {
   return L.length > 1 ? L.join('\n') + '\n' : '';
 }
 
-function repoSection(r, c, level = 2, q = null) {
+function repoSection(r, c, level = 2, q = null, tt = null) {
   const h = '#'.repeat(level);
   if (r.error) return `${h} ${t(r.name)}\n\nGutCheck could not scan this repo: ${t(r.error, LEN.text)}\n`;
-  const steps = stepsFor(r, c, q);
+  const steps = stepsFor(r, c, q, tt);
   const body = steps.length ? `\n${h}# Action plan (do in this order)\n\n${renderSteps(steps, level)}` : '\nNo issues found. Nothing to do.\n';
-  return `${h} ${t(r.name)}\n\n${snapshot(r)}\n${prTable(r)}${clutterSection(c)}${qualitySection(q)}${body}`;
+  return `${h} ${t(r.name)}\n\n${snapshot(r)}\n${prTable(r)}${clutterSection(c)}${qualitySection(q)}${testsSection(tt)}${body}`;
 }
 
 const PREAMBLE = `You are helping tidy and fix the health of a git workspace. Below is a status report produced by GutCheck, followed by an ordered action plan with exact commands.
@@ -248,7 +250,7 @@ Rules:
 `;
 
 // repos: scan results; clutter: Map(path -> clutter result); workspace: advice[] (optional)
-function buildReport({ repos, clutter = new Map(), quality = new Map(), workspace = [], root = null }) {
+function buildReport({ repos, clutter = new Map(), quality = new Map(), tests = new Map(), workspace = [], root = null }) {
   const ok = repos.filter((r) => !r.error);
   const single = repos.length === 1;
   const out = [];
@@ -264,9 +266,9 @@ function buildReport({ repos, clutter = new Map(), quality = new Map(), workspac
       out.push(`## Workspace-level tidy-up\n\n${renderSteps(ws.map((s) => ({ ...s, detail: '' })), 1)}`);
     }
     out.push('## Repositories\n\nHandle repos in the order listed above.\n');
-    for (const r of sorted) out.push(repoSection(r, clutter.get(r.path), 3, quality.get(r.path)));
+    for (const r of sorted) out.push(repoSection(r, clutter.get(r.path), 3, quality.get(r.path), tests.get(r.path)));
   } else {
-    out.push(repoSection(repos[0], clutter.get(repos[0].path), 2, quality.get(repos[0].path)));
+    out.push(repoSection(repos[0], clutter.get(repos[0].path), 2, quality.get(repos[0].path), tests.get(repos[0].path)));
   }
   out.push('## Verification\n\nAfter the steps above, each repo should show: `git status` clean, no unpushed commits, no failing `gh run list --status failure` on the default branch, and no leftover clutter. Report anything you could not finish and why.\n');
   return out.join('\n');

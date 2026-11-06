@@ -79,10 +79,16 @@ async function apply(p, ctx = {}) {
         results.push({ text: s.display, ok: false, out: String(e.message) });
         return { ok: false, results };
       }
+    } else if (s.kind === 'mkdir') {
+      // Only GutCheck's own run folder (layer-3 test runs), never inside a repo.
+      try { io.mkdirSync(s.path, { recursive: true, mode: 0o700 }); results.push({ text: s.display, ok: true, out: '' }); } catch (e) { results.push({ text: s.display, ok: false, out: String(e.message) }); return { ok: false, results }; }
     } else {
-      const r = await ctx.run(s.cmd, s.args, { cwd: s.cwd, input: s.input, timeout: s.timeout || COMMAND_TIMEOUT_MS });
-      results.push({ text: s.display, ok: r.ok, out: (r.stdout + r.stderr).trim().slice(0, 2000) });
-      if (!r.ok) return { ok: false, results };
+      const r = await ctx.run(s.cmd, s.args, { cwd: s.cwd, input: s.input, timeout: s.timeout || COMMAND_TIMEOUT_MS, env: s.env, maxBuffer: s.saveOutput ? 64 * 1024 * 1024 : undefined });
+      // okCodes: tools that exit non-zero to report findings (mutmut exits 1-2 when mutants survive).
+      const good = r.ok || (Array.isArray(s.okCodes) && s.okCodes.includes(r.code));
+      if (s.saveOutput && good) { try { io.writeFileSync(s.saveOutput, r.stdout); } catch {} }
+      results.push({ text: s.display, ok: good, out: (r.stdout + r.stderr).trim().slice(-2000) });
+      if (!good) return { ok: false, results };
     }
   }
   return { ok: true, results };

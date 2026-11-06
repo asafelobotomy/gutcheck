@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('api', {
   clutterScan: (dirs) => ipcRenderer.invoke('clutter:scan', { dirs }),
   copyReport: (dir) => ipcRenderer.invoke('report:copy', { dir }),
   trend: () => ipcRenderer.invoke('trend:get'),
+  testsScan: (dirs) => ipcRenderer.invoke('tests:scan', { dirs }),
   qualityScan: (dirs) => ipcRenderer.invoke('quality:scan', { dirs }),
   setQualitySettings: (patch) => ipcRenderer.invoke('quality:set', patch),
   audit: () => ipcRenderer.invoke('audit:list'),

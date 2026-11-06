@@ -259,3 +259,20 @@ test('Settings > AI agents: connect shows the exact command first, follows the a
   await tick();
   assert.deepEqual(t.calls.find((c) => c[0] === 'copyAgent'), ['copyAgent', 'cursor', true]);
 });
+
+test('Tests view: totals, coverage pill, advice, and a run asks for the repo name before anything runs', async () => {
+  const t = await boot();
+  await scan(t);
+  click(t.$('#tests'));
+  await tick();
+  assert.equal(t.$('#detail h2').textContent, 'Tests');
+  const stats = Object.fromEntries(t.$$('.qstats .stat').map((s) => [s.querySelector('span').textContent, s.querySelector('b').textContent]));
+  assert.equal(stats['Test cases'], '12');
+  assert.equal(stats['Repos without tests'], '1');
+  assert.equal(stats['With coverage'], '1/2');
+  assert.match(t.$('.cblock').textContent, /coverage 41%/);
+  click(t.$$('.cblock button').find((b) => b.textContent.startsWith('Run coverage (Python)')));
+  await tick();
+  assert.deepEqual(t.calls.find((c) => c[0] === 'plan')[1], [{ dir: '/w/gamma', action: { type: 'tests-run', kind: 'coverage', stack: 'python', root: '.' } }]);
+  assert.ok(t.$('.modal input[type=text]'), 'the review asks for the repo name');
+});

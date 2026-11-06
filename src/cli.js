@@ -16,6 +16,9 @@ Usage: gutcheck <command> [options]
   report [repo]                 the Markdown fix plan ("Copy for LLM")
   clutter [repo...]             caches, temp files, stray env files (read-only)
   quality [repo...]             code-quality scan (read-only)
+  tests [repo...]               test review: missing, skipped and assertion-free tests, CI gaps,
+                                coverage and mutation results (read-only); run them with
+                                fix <repo> tests-run kind=coverage|mutation --yes
   workspace                     workspace and machine advice (git config, disk, AI agent setup)
   actions                       actions that fix accepts, with parameters
   fix <repo> <finding|action> [key=value...]
@@ -105,6 +108,7 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
     case 'report': { const r = await engine.report({ repo: rest[0] }); if (!r.ok) return done(r); out(r.text); return 0; }
     case 'clutter': return done(await engine.clutter({ repos: rest }));
     case 'quality': return done(await engine.quality({ repos: rest }));
+    case 'tests': return done(await engine.tests({ repos: rest }), (r) => r.repos.forEach((x) => { out(`\n${x.name}: ${x.testCases} tests in ${x.testFiles} files${x.results && x.results.coverage ? `, coverage ${x.results.coverage.percent}%` : ''}${x.results && x.results.mutation ? `, mutation score ${x.results.mutation.score}%` : ''}`); (x.advice || []).forEach((a) => out(`  ${icon[a.severity]} ${a.title}${a.fix ? `  (gutcheck fix ${x.name} tests-run kind=${a.fix.kind}${a.fix.stack ? ` stack=${a.fix.stack}` : ''})` : ''}\n      ${String(a.detail).slice(0, 300)}`)); }));
     case 'workspace': return done(await engine.workspace(), (r) => r.advice.forEach((x) => out(`${icon[x.severity]} ${x.title}\n    ${x.detail}${x.ref ? `\n    Source: ${x.ref}` : ''}`)));
     case 'fix': {
       const [repo, what, ...kv] = rest;

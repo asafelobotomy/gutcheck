@@ -125,6 +125,7 @@ handle('action:apply', (_e, { tokens } = {}) => service.applyActions(tokens));
 handle('clutter:scan', (_e, { dirs } = {}) => service.clutterScan(dirs));
 handle('trend:get', () => service.trend());
 handle('quality:scan', (_e, { dirs } = {}) => service.qualityScan(dirs));
+handle('tests:scan', (_e, { dirs } = {}) => service.testsScan(dirs));
 handle('quality:set', (_e, patch) => service.setQualitySettings(patch));
 handle('report:copy', (_e, { dir } = {}) => service.copyReport(dir));
 

@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id);
 // gen counts workspace scans: an on-demand result from an older workspace is dropped. scanError: last failure per on-demand scan.
-const state = { repos: new Map(), selected: null, view: 'dashboard', scanning: false, readOnly: false, clutter: null, quality: null, picked: new Set(), trend: [], gen: 0, scanError: {} };
+const state = { repos: new Map(), selected: null, view: 'dashboard', scanning: false, readOnly: false, clutter: null, quality: null, tests: null, picked: new Set(), trend: [], gen: 0, scanError: {} };
 
 // DOM helper: all text goes through textContent, so repo/PR titles from GitHub can never inject markup.
 function h(tag, attrs = {}, ...kids) {
@@ -92,7 +92,7 @@ function renderStats() {
   );
 }
 
-const NAV = { dashboard: 'dashboard', overview: 'overview', quality: 'quality', clutter: 'clutter', history: 'history' };
+const NAV = { dashboard: 'dashboard', overview: 'overview', quality: 'quality', tests: 'tests', clutter: 'clutter', history: 'history' };
 function renderList() {
   document.body.classList.toggle('dash', state.view === 'dashboard'); // the dashboard shows these numbers itself
   for (const [view, id] of Object.entries(NAV)) { const b = $(id); if (b) { if (state.view === view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); } }
@@ -318,6 +318,7 @@ async function renderHistory() {
 function renderMain() {
   if (state.view === 'clutter') renderClutterView();
   else if (state.view === 'quality') renderQualityView();
+  else if (state.view === 'tests') renderTestsView();
   else if (state.view === 'repo' && state.repos.has(state.selected)) renderRepo();
   else if (state.view === 'history') renderHistory();
   else if (state.view === 'overview') renderOverview();
@@ -332,7 +333,7 @@ async function startScan() {
   const root = $('root').value.trim();
   if (!root || state.scanning) return;
   state.gen++; state.scanError = {};
-  state.scanning = true; state.clutter = null; state.quality = null; state.picked.clear(); state.repos.clear(); state.selected = null; state.view = 'dashboard';
+  state.scanning = true; state.clutter = null; state.quality = null; state.tests = null; state.picked.clear(); state.repos.clear(); state.selected = null; state.view = 'dashboard';
   $('ptext').textContent = 'Scanning…'; $('progress').hidden = false;
   $('scan').disabled = true; renderStats(); renderList(); renderMain();
   let out;

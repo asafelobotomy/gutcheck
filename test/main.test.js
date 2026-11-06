@@ -30,7 +30,7 @@ function load() {
 
 test('every IPC channel is registered', () => {
   const { handlers } = load();
-  for (const c of ['settings:get', 'settings:set', 'auth:status', 'rate:get', 'dir:pick', 'scan:start', 'scan:one', 'action:plan', 'action:apply', 'clutter:scan', 'report:copy', 'trend:get', 'quality:scan', 'quality:set', 'audit:list', 'background:get', 'background:set', 'open:url', 'open:folder', 'agents:status', 'agents:plan', 'agents:apply', 'agents:copy']) assert.ok(handlers.has(c), c);
+  for (const c of ['settings:get', 'settings:set', 'auth:status', 'rate:get', 'dir:pick', 'scan:start', 'scan:one', 'action:plan', 'action:apply', 'clutter:scan', 'report:copy', 'trend:get', 'quality:scan', 'quality:set', 'audit:list', 'background:get', 'background:set', 'open:url', 'open:folder', 'agents:status', 'agents:plan', 'agents:apply', 'agents:copy', 'agents:cleanup', 'tests:scan']) assert.ok(handlers.has(c), c);
 });
 
 test('quality settings round-trip through IPC with validation', async () => {

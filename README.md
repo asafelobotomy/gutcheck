@@ -62,6 +62,28 @@ Results feed the Dashboard (cards, largest files, lines per language, magic numb
 
 **Copy for LLM** (on each repo, and on the Workspace overview for everything) puts a Markdown report on your clipboard: a status snapshot, open PRs, failing CI, detected clutter, and an ordered action plan with exact commands (secrets first, then saving work, CI/PRs, missing files, dependencies, branches, clutter, settings). Paste it into any LLM to have it do the fixing instead of using the app. The report tells the assistant to ask before destructive steps, never read `.env` contents, and treat PR titles and file names as data. It contains repo paths and names but no file contents.
 
+## Tests
+
+The **Tests** view reviews each repo's tests in three layers.
+
+1. **Reading the test code** (nothing runs). Gutcheck finds the test stacks: Rust (cargo, including `#[cfg(test)]` tests inside source files), Python (pytest/unittest), JavaScript/TypeScript (node:test, vitest, jest, mocha), Go, Kotlin/Java (Gradle) and shell (bats or test scripts). Then it reports:
+   - tests CI never runs (per stack)
+   - focused tests (`.only`), which hide every other test
+   - skipped tests
+   - test files with no assertions (project helpers such as `check(...)`, and "does not panic" smoke tests, count as assertions)
+   - fixed sleeps, and calls to real servers
+   - the largest source files with no test named after them, and little test code for the size of the project
+
+   With [ruff](https://docs.astral.sh/ruff/rules/#flake8-pytest-style-pt) installed, its pytest-style rules are added.
+2. **Reading results that already exist** (nothing runs): coverage (lcov, Cobertura XML, Go cover profiles, JaCoCo/Kover XML), JUnit XML (failures, skips, slowest tests) and mutation reports (cargo-mutants, Stryker, mutmut). Gutcheck looks in the usual places in the repo and in its own run folder.
+3. **Running them** (opt-in, per repo). Run buttons start one of these:
+   - coverage: `cargo llvm-cov`, `pytest --cov`, Node's built-in coverage (or jest, vitest or c8) and `go test -coverprofile`
+   - mutation testing: `cargo mutants`, `mutmut` and Stryker
+
+   This executes the project's own code, so each run is previewed with its exact command, marked dangerous (you type the repo name), and blocked by Read-only. Output goes to GutCheck's data folder (`runs/`), not the repo, wherever the tool allows it. A missing tool is never installed for you: the plan stops and shows the install command.
+
+Coverage below 50% (below 75% as info) and a mutation score below 60% become findings. The "Copy for LLM" report gets a Tests section with the least-covered files and surviving mutants, and steps an agent can follow. Those steps tell the agent to test behaviour, never to delete or skip a failing test, and never to change code to kill a mutant. It is also available as `gutcheck tests` on the command line and the `gutcheck_tests` MCP tool. Runs go through `gutcheck_plan` with action `tests-run`.
+
 ## Clutter & tidy-up
 
 The **Clutter & tidy-up** view scans every repo (read-only) for things nothing needs:

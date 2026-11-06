@@ -10,6 +10,7 @@ const INSTALLERS = ['npm install', 'yarn install', 'pnpm install', 'bun install'
 const { TEMPLATES } = require('./templates');
 const { IGNORE_OK } = require('./clutter');
 const { PROTECTION } = require('./protection');
+const { planTestRun } = require('./tests/runs');
 
 class PlanError extends Error {}
 const fail = (msg) => { throw new PlanError(msg); };
@@ -303,6 +304,13 @@ const ACTIONS = {
         steps, warnings,
         undo: trashed ? 'Restore from your trash. Regenerable caches are rebuilt by your tools.' : 'Regenerable caches are rebuilt by your tools.',
       };
+    },
+  },
+
+  // Layer-3 test runs (coverage or mutation testing). Executes the project's own code: dangerous risk.
+  'tests-run': {
+    async plan(r, p, ctx) {
+      try { return await planTestRun(r, p, ctx); } catch (e) { fail(e.message); }
     },
   },
 

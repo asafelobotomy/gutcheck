@@ -12,6 +12,7 @@ const { devAdvice } = require('./workspace');
 const { buildReport } = require('./report');
 const Metrics = require('./renderer/metrics');
 const { scanQuality, normalizeSettings, LINE_LIMITS } = require('./quality');
+const { scanTests } = require('./tests');
 
 const { DAYS_PER_YEAR } = require('./util');
 
@@ -29,6 +30,7 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
   const busy = new Set(); // repo paths with an action in flight
   let clutterScanning = false;
   let qualityScanning = false;
+  let testsScanning = false;
 
   // ---- Trend history: a small snapshot per scan (scores and totals only), local to this machine ----
   const rootKey = (r) => (r ? path.resolve(r) : ''); // '/w' and '/w/' are the same workspace
@@ -163,6 +165,23 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
     }
   }
 
+  // Read-only test review (static review + existing results). `dirs` limits it to those repos.
+  async function testsScan(dirs) {
+    if (testsScanning) return { ok: false, error: 'A test review is already running' };
+    const targets = (Array.isArray(dirs) && dirs.length ? dirs : [...known.keys()]).filter((d) => known.has(d) && !known.get(d).error);
+    if (!targets.length) return { ok: false, error: 'Scan a workspace first.' };
+    testsScanning = true;
+    try {
+      const repos = [];
+      for (const d of targets) {
+        try { repos.push({ path: d, name: path.basename(d), ...(await scanTests(d)) }); } catch (e) { repos.push({ path: d, name: path.basename(d), error: String(e.message || e), advice: [], stacks: [], runnable: [], results: {}, testCases: 0, testFiles: 0 }); }
+      }
+      return { ok: true, repos };
+    } finally {
+      testsScanning = false;
+    }
+  }
+
   // Build the "Copy for LLM" report from the last scan (one repo, or the whole workspace).
   async function reportText(dir) {
     const repos = dir ? [known.get(dir)].filter(Boolean) : [...known.values()];
@@ -178,8 +197,13 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
       if (r.error) continue;
       try { quality.set(r.path, await scanQuality(r.path, qcfg)); } catch {}
     }
+    const tests = new Map();
+    for (const r of repos) {
+      if (r.error) continue;
+      try { tests.set(r.path, await scanTests(r.path)); } catch {}
+    }
     const root = settings().root;
-    const text = buildReport({ repos, clutter, quality, workspace: dir ? [] : (await wsAdvice(root)) || [], root: dir ? null : root });
+    const text = buildReport({ repos, clutter, quality, tests, workspace: dir ? [] : (await wsAdvice(root)) || [], root: dir ? null : root });
     return { ok: true, text, repos: repos.length };
   }
 
@@ -193,7 +217,7 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
 
   const forgetPlans = () => plans.clear();
 
-  return { planActions, applyActions, forgetPlans, clutterScan, qualityScan, qualitySettings, setQualitySettings, reportText, copyReport, wsAdvice, recordScan, trend };
+  return { planActions, applyActions, forgetPlans, clutterScan, qualityScan, testsScan, qualitySettings, setQualitySettings, reportText, copyReport, wsAdvice, recordScan, trend };
 }
 
 module.exports = { createService };

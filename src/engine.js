@@ -13,15 +13,8 @@ const { appendAudit, readAudit } = require('./audit');
 const { expandHome } = require('./util');
 
 const OFF = 'Actions are turned off: start GutCheck with --allow-actions to plan and apply changes. Everything else works read-only.';
-const APP_NAME = 'GutCheck'; // Electron names the data folder after productName
 
-// Where Electron's app.getPath('userData') points for this app, so CLI and app share settings.
-function dataDir(env = process.env, platform = process.platform, home = os.homedir()) {
-  if (env.GUTCHECK_DATA_DIR) return env.GUTCHECK_DATA_DIR;
-  if (platform === 'win32') return path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), APP_NAME);
-  if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', APP_NAME);
-  return path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), APP_NAME);
-}
+const { dataDir } = require('./paths');
 
 // Catalogue of every action an agent can plan: parameters and allowed values. Planning still
 // validates everything; this only saves the caller from guessing.
@@ -50,6 +43,7 @@ const ACTION_CATALOG = {
   'add-file': { about: 'Add a standard file on the default branch', params: { template: '"license", "readme", "gitignore", "security", "contributing", "conduct", "pr-template", "dependabot" or "ci-node"', commit: 'true to commit it' } },
   'npm-install': { about: 'Install dependencies with the project\'s package manager', params: {} },
   'clean-clutter': { about: 'Move detected clutter to the trash (caches are deleted)', params: { paths: 'array of clutter paths from gutcheck_clutter' } },
+  'tests-run': { about: 'Run the tests with coverage, or mutation testing (runs the project\'s own code; dangerous, needs the repo name)', params: { kind: '"coverage" or "mutation"', stack: 'optional: "rust", "python", "node" or "go" (from gutcheck_tests runnable)', root: 'optional: the stack\'s folder, e.g. "wizard"' } },
   'gitignore-append': { about: 'Append known-safe rules to .gitignore', params: { entries: 'array of rules from a clutter finding' } },
 };
 
@@ -177,6 +171,12 @@ function createEngine(opts = {}) {
     const d = dirsOf(names);
     return d.error ? { ok: false, error: d.error } : service.qualityScan(d.dirs);
   }
+  async function tests({ repos: names, onProgress } = {}) {
+    const s = await ensure({ onProgress });
+    if (!s.ok) return s;
+    const d = dirsOf(names);
+    return d.error ? { ok: false, error: d.error } : service.testsScan(d.dirs);
+  }
   async function workspace({ onProgress } = {}) {
     const s = await ensure({ onProgress });
     if (!s.ok) return s;
@@ -220,7 +220,7 @@ function createEngine(opts = {}) {
 
   const history = ({ limit = 50 } = {}) => ({ ok: true, entries: readAudit(auditFile, Math.max(1, Math.min(500, limit))) });
 
-  return { scan, repos, findings, repoDetail, report, clutter, quality, workspace, plan, apply, history, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
+  return { scan, repos, findings, repoDetail, report, clutter, quality, tests, workspace, plan, apply, history, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
 }
 
 module.exports = { createEngine, dataDir, ACTION_CATALOG };

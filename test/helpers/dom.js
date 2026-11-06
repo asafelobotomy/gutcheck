@@ -62,15 +62,23 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
     planAgent: async (id, allow, remove) => { calls.push(['planAgent', id, allow, remove]); return { ok: true, token: 'tk', title: 'Connect GutCheck to Claude Code', display: ['claude mcp add --transport stdio --scope user gutcheck -- /x --mcp'], preview: null, note: null, allowActions: allow }; },
     applyAgent: async (tok) => { calls.push(['applyAgent', tok]); return { ok: true, title: 'Connect', results: [{ text: 'claude mcp add', ok: true, out: '' }] }; },
     copyAgent: async (id, allow) => { calls.push(['copyAgent', id, allow]); return { ok: true }; },
+    testsScan: async (d) => { calls.push(['testsScan', d]); return TESTS; },
     onBegin: () => {}, onRepo: (cb) => { onRepo = cb; },
   };
   const ctx = dom.getInternalVMContext();
-  for (const f of ['metrics.js', 'app.js', 'modals.js', 'clutter-view.js', 'quality-view.js', 'dashboard.js', 'agents-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
+  for (const f of ['metrics.js', 'app.js', 'modals.js', 'clutter-view.js', 'quality-view.js', 'tests-view.js', 'dashboard.js', 'agents-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
   await tick();
   return { dom, w, doc: w.document, calls, $: (s) => w.document.querySelector(s), $$: (s) => [...w.document.querySelectorAll(s)], run: (code) => new vm.Script(code).runInContext(ctx) };
 }
 
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 const snap = (ts, avg, errors, scores = {}) => ({ ts, root: '/w', avg, errors, warns: 2, infos: 0, prs: 0, failingCI: 1, dirty: 1, ahead: 1, clutter: null, scores });
+
+const TESTS = { ok: true, repos: [
+  { path: '/w/gamma', name: 'gamma', testCases: 12, testFiles: 2, stacks: [{ id: 'python', name: 'Python', runner: 'pytest', root: '.' }], skipped: [], focused: [], untested: [], untestedCount: 0,
+    runnable: [{ stack: 'python', root: '.', name: 'Python', coverage: true, mutation: true }],
+    results: { coverage: { percent: 41, file: 'coverage.xml', date: '2026-11-01T00:00:00.000Z', lowest: [{ path: 'a.py', percent: 10, lines: 40 }] }, junit: null, mutation: null },
+    advice: [{ id: 't-ci-none', category: 'Tests', severity: 'warn', title: 'No CI runs the 12 tests', detail: '' }, { id: 't-coverage', category: 'Tests', severity: 'warn', title: 'Line coverage 41%', detail: '', fix: { type: 'tests-run', label: 'Run coverage again…', kind: 'coverage', stack: 'python', root: '.' } }] },
+  { path: '/w/alpha', name: 'alpha', testCases: 0, testFiles: 0, stacks: [], skipped: [], focused: [], untested: [], runnable: [], results: {}, advice: [{ id: 't-none', category: 'Tests', severity: 'warn', title: 'No tests', detail: '' }] }] };
 
 module.exports = { boot, tick, snap, REPOS, CLUTTER };
