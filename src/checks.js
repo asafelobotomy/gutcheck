@@ -90,8 +90,8 @@ function checkFiles(s) {
   // Distro packaging repos (AUR: PKGBUILD + .SRCINFO) hold only a build recipe, so project docs and licence files do not apply.
   if (f.aurPackage) return out;
   if (!f.license) add('no-license', pub ? 'error' : 'info', 'Missing LICENSE', pub ? 'Without a licence nobody may legally use, copy or contribute to the code.' : 'Not needed while private, but add one before you share it.', { type: 'add-file', label: 'Add MIT licence', template: 'license' });
-  if (!f.readme) add('no-readme', 'error', 'Missing README', 'Describe what the project is and how to run it.', { type: 'add-file', label: 'Create README', template: 'readme' });
-  if (!f.gitignore) add('no-gitignore', 'warn', 'Missing .gitignore', 'Build output and secrets may get committed.', { type: 'add-file', label: 'Create .gitignore', template: 'gitignore' });
+  if (!f.readme) add('no-readme', 'error', 'Missing README', 'Describe what the project is and how to run it.', { type: 'add-file', label: 'Add README', template: 'readme' });
+  if (!f.gitignore) add('no-gitignore', 'warn', 'Missing .gitignore', 'Build output and secrets may get committed.', { type: 'add-file', label: 'Add .gitignore', template: 'gitignore' });
   // GitHub also counts defaults from the owner's .github repository (the remote.* flags include those).
   if (pub && !r.isFork) {
     if (!f.security && !r.securityPolicy) add('no-security', 'warn', 'No security policy', 'Tell people how to report vulnerabilities privately (SECURITY.md).', { type: 'add-file', label: 'Add SECURITY.md', template: 'security' });

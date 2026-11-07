@@ -15,7 +15,7 @@ test('Startup, tray and schedule dialog loads the current options and saves the 
   assert.deepEqual(boxes.map((b) => b.checked), [false, true, false, false]);
   assert.equal(t.$('.modal select').value, '24');
   boxes[0].checked = true;
-  click(t.$$('.modal button').find((b) => b.textContent === 'Continue'));
+  click(t.$$('.modal button').find((b) => b.textContent === 'Save'));
   await tick();
   assert.deepEqual(t.calls.find((c) => c[0] === 'background')[1], { launchOnStartup: true, minimizeToTray: true, closeToTray: false, scheduleEnabled: false, scheduleHours: '24' });
   assert.match(t.$('#toast').textContent, /saved/i);
@@ -157,7 +157,7 @@ test('History loaded late does not draw over the view the user switched to', asy
   click(t.$('#dashboard'));
   release();
   await tick();
-  assert.ok(!t.$('#detail').textContent.includes('Action history'));
+  assert.ok(!t.$('#detail h2').textContent.includes('History'));
   assert.match(t.$('#detail h2').textContent, /Dashboard/);
 });
 
@@ -219,7 +219,7 @@ test('saving the Startup & tray options shows an error the main process reports'
   t.w.api.setBackground = async () => ({ error: 'Could not change the login item: EACCES', trayAvailable: true });
   click(t.$('#background'));
   await tick();
-  click(t.$$('.modal button').find((b) => b.textContent === 'Continue'));
+  click(t.$$('.modal button').find((b) => b.textContent === 'Save'));
   await tick();
   assert.match(t.$('#toast').textContent, /EACCES/);
 });
@@ -234,6 +234,7 @@ test('Settings > AI agents: connect shows the exact command first, follows the a
   await tick();
   assert.equal(t.$('.modal .mh').textContent, 'AI agents');
   assert.equal(t.$$('.overlay').length, 1, 'the settings dialog closed first');
+  assert.ok(!/\bnull\b/.test(t.$('.modal').textContent), 'no stray "null" text');
   const cards = t.$$('.agent');
   assert.deepEqual(cards.map((c) => c.dataset.agent), ['claude-code', 'cursor']);
   const btn = (card, label) => [...card.querySelectorAll('button')].find((b) => b.textContent === label);
@@ -288,7 +289,7 @@ test('a finding can be ignored with a reason, and the Baseline view offers to cr
   const [reason, all] = t.$$('.modal input');
   reason.value = 'parked on purpose';
   assert.equal(all.type, 'checkbox');
-  click(t.$$('.modal button').find((x) => x.textContent === 'Continue'));
+  click(t.$$('.modal button').find((x) => x.textContent === 'Ignore'));
   await tick();
   assert.deepEqual(t.calls.find((c) => c[0] === 'ignore')[1], { dir: '/w/beta', id: 'a', reason: 'parked on purpose', allRepos: false });
   click(t.$('#baseline'));

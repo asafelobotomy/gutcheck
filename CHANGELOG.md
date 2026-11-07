@@ -4,6 +4,19 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Changed
+
+- The sidebar holds every view, in one order (Dashboard, Workspace overview, Baseline, Code quality, Tests, Clutter & tidy-up, History), and highlights the one you are on. History moved there from the top bar.
+- Shorter, plainer intros on the Code quality, Tests, Clutter and AI agents screens; "Rescan" everywhere; fix buttons all start with "Add".
+- Dialogs name their action: Settings saves with **Save**, ignoring with **Ignore**.
+- Pull requests read "checks passing · not reviewed" instead of raw GitHub values; clutter made today says "today".
+- Clutter lists each repo's items first, then workspace and machine advice.
+
+### Fixed
+
+- Intro text no longer breaks in the middle of words, and heatmap column names are no longer cut off.
+- The AI agents dialog no longer shows a stray "null", and History rows no longer end in a dangling "·".
+
 ## [0.24.2] - 2026-11-07
 
 ### Fixed

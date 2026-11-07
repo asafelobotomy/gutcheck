@@ -114,7 +114,9 @@ function lineChart(entries, series, { fmt = String, get = (e, k) => e[k] } = {})
 function heatmapEl(hm, open) {
   const grid = h('div', { class: 'heat' });
   grid.style.gridTemplateColumns = `150px repeat(${hm.cols.length}, minmax(56px, 1fr))`;
-  grid.append(h('div', { class: 'hh' }), ...hm.cols.map((c) => h('div', { class: 'hh', title: c }, c)));
+  // Narrow heatmap columns: a short name, the full one as a tooltip.
+  const SHORT_CAT = { Dependencies: 'Deps', 'Security features': 'Security', 'Actions security': 'Actions' };
+  grid.append(h('div', { class: 'hh' }), ...hm.cols.map((c) => h('div', { class: 'hh', title: c }, SHORT_CAT[c] || c)));
   for (const r of hm.rows) {
     const name = h('div', { class: 'hn link', title: r.name }, r.name);
     activate(name, open(r.path));

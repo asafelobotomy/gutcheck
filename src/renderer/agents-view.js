@@ -51,11 +51,11 @@ async function openAgents() {
 
     box.append(
       h('h3', { class: 'mh' }, 'AI agents'),
-      h('p', { class: 'sub' }, 'Connect an agent and it can use GutCheck\'s scans, findings, report and fixes as MCP tools (gutcheck_overview, gutcheck_findings, gutcheck_plan…), without looking up git or gh commands. It runs this command:'),
+      h('p', { class: 'sub' }, 'A connected agent can use GutCheck\'s scans, findings, report and fixes as MCP tools, instead of working out git and gh commands itself. It runs this command:'),
       h('div', {}, cmd),
       h('label', { class: 'frow chk' }, allow, ' Let agents plan and apply fixes (--allow-actions). Each change is still a single-use plan, the Read-only switch still stops it, and everything is recorded in History. Off: agents can only read.'),
       list,
-      st.cleanupPeriodDays !== undefined ? Object.assign(cleanupRow(), { className: 'plan safe cleanup-row' }) : null,
+      st.cleanupPeriodDays !== undefined ? Object.assign(cleanupRow(), { className: 'plan safe cleanup-row' }) : '', // append() would print null
       h('div', { class: 'mbtns' }, h('button', { class: 'primary', onclick: () => close() }, 'Close')));
     render();
   });

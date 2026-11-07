@@ -27,10 +27,10 @@ async function renderHistory() {
   const entries = await window.api.audit();
   if (state.view !== 'history') return; // the user moved on while it loaded
   put($('detail'), 
-    h('h2', {}, 'Action history'),
-    h('p', { class: 'sub' }, 'Everything GutCheck has changed on this machine (newest first). Stored locally in the app data folder.'),
+    h('h2', {}, 'History'),
+    h('p', { class: 'sub' }, 'Every change GutCheck has made on this machine, newest first.'),
     entries.length ? null : h('p', { class: 'empty' }, 'Nothing yet.'),
     ...entries.map((e) => h('div', { class: 'finding ' + (e.ok ? '' : 'error') },
       h('div', { class: 't' }, h('b', {}, `${e.ok ? '✓' : '✗'} ${e.repo}: ${e.title}`),
-        h('span', {}, new Date(e.ts).toLocaleString() + ' · ' + (e.steps || []).map((s) => s.cmd).join('  ;  '))))));
+        h('span', {}, [new Date(e.ts).toLocaleString(), (e.steps || []).map((s) => s.cmd).join('  ;  ')].filter(Boolean).join(' · '))))));
 }

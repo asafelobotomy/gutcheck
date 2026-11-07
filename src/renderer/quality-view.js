@@ -67,7 +67,7 @@ function renderQualityView() {
   if (state.view !== 'quality') return;
   const c = state.quality;
   const head = [h('h2', {}, 'Code quality'),
-    h('p', { class: 'sub' }, 'File length against your limit, magic numbers and constants reuse, hardcoded secrets (locations only, values are never shown), debug leftovers and TODO markers. Read-only: it respects .gitignore and skips tests for the magic-number check.')];
+    h('p', { class: 'sub' }, 'Long files, magic numbers, hardcoded secrets (where, never the value), debug leftovers and TODOs. Read-only.')];
   if (!c) {
     const err = state.scanError.quality;
     const msg = !state.repos.size ? 'Choose a workspace folder and press Scan first.' : err ? `Code-quality scan failed: ${err}` : 'Scanning…';

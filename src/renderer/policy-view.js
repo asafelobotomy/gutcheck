@@ -6,6 +6,7 @@
 
 const IGNORE_SPEC = {
   title: 'Ignore this finding',
+  submit: 'Ignore',
   fields: [
     { name: 'reason', label: 'Why you accept it (shown wherever the finding would be)', type: 'text', required: true, placeholder: 'e.g. internal tool, no outside contributors' },
     { name: 'allRepos', label: 'Ignore it in every repo', type: 'checkbox' },
@@ -22,7 +23,7 @@ async function applyIgnore(r, o) {
 
 function ignoreButton(r, f) {
   return btn('Ignore…', async () => {
-    const v = await askInputs({ ...IGNORE_SPEC, title: `Ignore: ${f.title}` }, {});
+    const v = await askInputs({ ...IGNORE_SPEC, title: `Ignore "${f.title}"` }, {});
     if (!v) return;
     await applyIgnore(r, { id: f.id, reason: v.reason, allRepos: !!v.allRepos });
   });

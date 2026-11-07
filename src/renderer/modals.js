@@ -66,7 +66,7 @@ function askInputs(spec, values) {
     box.addEventListener('keydown', (e) => e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type === 'text' && submit());
     const extra = spec.extra ? spec.extra(close) : [];
     box.append(h('h3', { class: 'mh' }, spec.title), ...(spec.lead || []).map((t) => h('h4', {}, t)), ...rows, ...extra,
-      h('div', { class: 'mbtns' }, h('button', { onclick: () => close(null) }, 'Cancel'), h('button', { class: 'primary', onclick: submit }, 'Continue')));
+      h('div', { class: 'mbtns' }, h('button', { onclick: () => close(null) }, 'Cancel'), h('button', { class: 'primary', onclick: submit }, spec.submit || 'Continue')));
   });
 }
 
@@ -118,6 +118,7 @@ function showResults(outs) {
 
 const BACKGROUND_SPEC = {
   title: 'Settings',
+  submit: 'Save',
   lead: ['Startup, tray and scheduled scans'],
   // Opening the agents dialog closes this one without saving (it has its own Save/Connect steps).
   extra: (close) => [h('h4', {}, 'AI agents'), h('p', { class: 'sub' }, 'Let Claude, Codex, Cursor, Copilot or Gemini use GutCheck\'s scans and fixes over MCP.'),

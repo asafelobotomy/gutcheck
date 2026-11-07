@@ -204,11 +204,13 @@ function branchesPanel(r) {
     ...rows, ...remoteRows];
 }
 
+const CHECKS = { SUCCESS: 'checks passing', FAILURE: 'checks failing', PENDING: 'checks running' };
+const REVIEW = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes requested', REVIEW_REQUIRED: 'review required' };
 function prsPanel(r) {
   if (!r.prs?.length) return [];
   const act = (type, p, extra) => actOn(r, type, { number: p.number, ...extra });
   return [h('h3', {}, `Open pull requests (${r.prs.length})`), ...r.prs.map((p) => h('div', { class: 'row' },
-    h('div', { class: 'grow' }, h('b', {}, `#${p.number} ${p.title}`), h('div', { class: 'muted' }, `${p.headRefName}${p.isDraft ? ' · draft' : ''} · checks: ${p.statusCheckRollup} · review: ${p.reviewDecision || 'none'}${p.mergeable === 'CONFLICTING' ? ' · conflicts' : ''}`)),
+    h('div', { class: 'grow' }, h('b', {}, `#${p.number} ${p.title}`), h('div', { class: 'muted' }, [p.headRefName, p.isDraft ? 'draft' : '', CHECKS[p.statusCheckRollup] || 'no checks', REVIEW[p.reviewDecision] || 'not reviewed', p.mergeable === 'CONFLICTING' ? 'conflicts' : ''].filter(Boolean).join(' · '))),
     p.isDraft ? btn('Ready for review', act('pr-ready', p)) : btn('Merge…', act('pr-merge', p, { method: 'squash', deleteBranch: true })),
     btn('Close', act('pr-close', p)),
     btn('Open ↗', () => window.api.openUrl(p.url))))];

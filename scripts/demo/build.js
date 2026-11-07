@@ -31,11 +31,13 @@ const REPOS = {
   'recipe-api': {
     files: { 'package.json': '{"name":"recipe-api","version":"2.1.0"}', 'package-lock.json': '{"lockfileVersion":3,"packages":{}}', 'README.md': README('recipe-api'), '.gitignore': 'node_modules/\n', '.github/workflows/ci.yml': UNPINNED, '.github/workflows/auto-merge.yml': AUTOMERGE, '.github/dependabot.yml': 'version: 2\nupdates:\n  - package-ecosystem: npm\n    directory: /\n    schedule:\n      interval: weekly\n' },
     tag: 'v2.0.0',
+    extra: { 'src/server.js': 'const http = require("http");\nfunction retry(n) { if (n > 7) return false; return setTimeout(() => retry(n + 1), 2500); }\nhttp.createServer((q, r) => r.end("ok")).listen(8080);\n// TODO: rate limiting\n', 'test/api.test.js': 'const test = require("node:test");\ntest.only("lists recipes", () => {});\n' },
     gh: { failed: true, dependabot: ['express 4.21.2', 'zod 3.25.1', 'pino 9.6.0', 'undici 6.21.1', 'helmet 8.1.0', 'dotenv 16.5.0'], alerts: 3 },
   },
   'photo-sorter': {
     files: { 'pyproject.toml': '[project]\nname = "photo-sorter"\nversion = "0.3.0"\n', 'README.md': '# photo-sorter\n', 'sorter.py': 'print("hi")\n' },
     dirty: ['notes.txt', 'sorter.py'],
+    untracked: { '__pycache__/sorter.cpython-312.pyc': 'x', '.pytest_cache/README.md': 'cache', 'sorter.py.bak': 'old', 'tests/test_sorter.py': 'import pytest\n\n@pytest.mark.skip\ndef test_sort():\n    pass\n' },
     gh: { conflict: true, prs: [{ number: 7, title: 'Sort by EXIF date', stale: true }] },
   },
   'garden-planner': {
@@ -57,13 +59,14 @@ function makeRepo(root, name, spec) {
   git(dir, 'init', '-q', '-b', 'main');
   git(dir, 'config', 'user.email', 'demo@example.com');
   git(dir, 'config', 'user.name', 'Demo');
-  for (const [f, t] of Object.entries(spec.files)) put(dir, f, t);
+  for (const [f, t] of Object.entries({ ...spec.files, ...(spec.extra || {}) })) put(dir, f, t);
   git(dir, 'add', '-A');
   git(dir, 'commit', '-qm', 'Initial commit');
   if (spec.tag) git(dir, 'tag', spec.tag);
   for (let i = 0; i < 6; i++) { put(dir, `src/change-${i}.txt`, String(i)); git(dir, 'add', '-A'); git(dir, 'commit', '-qm', `Change ${i}`); }
   if (!spec.local) git(dir, 'remote', 'add', 'origin', `https://github.com/example/${name}.git`);
   for (const f of spec.dirty || []) put(dir, f, 'edited\n');
+  for (const [f, t] of Object.entries(spec.untracked || {})) put(dir, f, t);
   git(dir, 'branch', 'old-experiment');
   if (spec.ahead) git(dir, 'branch', 'feature/merged-already');
   return dir;

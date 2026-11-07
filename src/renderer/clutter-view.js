@@ -67,7 +67,7 @@ function clutterRepoEl(res) {
         h('span', { class: 'badge' }, CAT_LABEL[i.category] || i.category),
         h('span', { class: 'badge conf-' + i.confidence, title: CONF_TIP[i.confidence] }, i.confidence),
         i.ignored ? h('span', { class: 'badge' }, 'git-ignored') : null,
-        h('div', { class: 'muted' }, `${i.reason} · ${fmtSize(i.size)} · ${i.ageDays}d old${i.keep ? ` · keeps ${i.keep}` : ''}`)));
+        h('div', { class: 'muted' }, `${i.reason} · ${fmtSize(i.size)} · ${i.ageDays ? `${i.ageDays}d old` : 'today'}${i.keep ? ` · keeps ${i.keep}` : ''}`)));
   });
   return h('div', { class: 'cblock' },
     h('h3', {}, `${res.name}`, h('span', { class: 'pill' }, `${plural(res.count, 'item')} · ${fmtSize(res.totalSize)}`)),
@@ -82,7 +82,7 @@ function renderClutterView() {
   if (state.view !== 'clutter') return;
   const c = state.clutter;
   const head = [h('h2', {}, 'Clutter & tidy-up'),
-    h('p', { class: 'sub' }, 'Stale and duplicate env files, caches, test output, temp and backup files, plus organisation advice. Nothing tracked by git is ever offered. Env files are only compared by checksum; their contents are never read into the app. Removal previews every item first and moves anything that is not regenerable to your trash.')];
+    h('p', { class: 'sub' }, 'Caches, temp and backup files, stray env files (never opened) and tidy-up advice. Tracked files are never offered, every removal is previewed, and anything that cannot be rebuilt goes to your trash.')];
   if (!c) {
     const err = state.scanError.clutter;
     const msg = !state.repos.size ? 'Choose a workspace folder and press Scan first.' : err ? `Clutter scan failed: ${err}` : 'Scanning…';
@@ -99,8 +99,8 @@ function renderClutterView() {
   const rescan = btn('Rescan', (e) => { e.target.disabled = true; scanClutterNow(); });
   put($('detail'), ...head,
     h('div', { class: 'toolbar' }, rescan, all, h('span', { class: 'muted' }, `${plural(total.n, 'item')}, ${fmtSize(total.size)} found across ${plural(c.repos.size, 'repo')}`)),
-    c.workspace.length ? [h('h3', {}, 'Workspace'), ...c.workspace.map((f) => adviceEl(null, f))] : null,
-    repos.length ? repos.map(clutterRepoEl) : h('p', { class: 'ok-msg' }, 'No clutter found. Tidy.'));
+    repos.length ? repos.map(clutterRepoEl) : h('p', { class: 'ok-msg' }, 'No clutter found. Tidy.'),
+    c.workspace.length ? [h('h3', {}, 'Workspace and this machine'), ...c.workspace.map((f) => adviceEl(null, f))] : null);
   $('detail').scrollTop = top;
 }
 
