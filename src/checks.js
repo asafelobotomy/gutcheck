@@ -5,6 +5,8 @@
 const { daysAgo, DAYS_PER_YEAR } = require('./util');
 const { checkWorkflows, checkGitHygiene, checkProject, checkSecurityFeatures } = require('./checks-hygiene');
 const { checkAgents } = require('./agents');
+const { checkDepAutomation } = require('./dep-automation');
+const { checkRelease } = require('./release');
 
 const { STALE_BRANCH_DAYS } = require('./renderer/metrics'); // one value for findings and the dashboard
 
@@ -153,14 +155,17 @@ function checkRepoSettings(s) {
 
 const WEIGHT = { error: 15, warn: 5, info: 1 };
 
-function evaluate(snapshot) {
-  const findings = [...checkCI(snapshot), ...checkPRs(snapshot), ...checkBranches(snapshot), ...checkFiles(snapshot), ...checkDeps(snapshot), ...checkRepoSettings(snapshot),
-    ...checkWorkflows(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkSecurityFeatures(snapshot), ...checkAgents(snapshot)];
-  const penalty = findings.reduce((n, f) => n + WEIGHT[f.severity], 0);
-  const score = Math.max(0, 100 - penalty);
-  const order = { error: 0, warn: 1, info: 2 };
-  findings.sort((a, b) => order[a.severity] - order[b.severity]);
-  return { findings, score, grade: score >= 90 ? 'A' : score >= 75 ? 'B' : score >= 55 ? 'C' : 'D' };
+const ORDER = { error: 0, warn: 1, info: 2 };
+// Score and grade for a list of findings (also used after ignores remove some).
+function score(findings) {
+  const sorted = [...findings].sort((a, b) => ORDER[a.severity] - ORDER[b.severity]);
+  const n = Math.max(0, 100 - sorted.reduce((t, f) => t + WEIGHT[f.severity], 0));
+  return { findings: sorted, score: n, grade: n >= 90 ? 'A' : n >= 75 ? 'B' : n >= 55 ? 'C' : 'D' };
 }
 
-module.exports = { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches, evaluate, checkPRs, checkFiles, checkDeps, checkRepoSettings };
+function evaluate(snapshot) {
+  return score([...checkCI(snapshot), ...checkPRs(snapshot), ...checkBranches(snapshot), ...checkFiles(snapshot), ...checkDeps(snapshot), ...checkDepAutomation(snapshot), ...checkRepoSettings(snapshot),
+    ...checkWorkflows(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkRelease(snapshot), ...checkSecurityFeatures(snapshot), ...checkAgents(snapshot)]);
+}
+
+module.exports = { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches, evaluate, score, checkPRs, checkFiles, checkDeps, checkRepoSettings };

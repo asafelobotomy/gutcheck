@@ -6,17 +6,18 @@ const press = (w, el, key) => el.dispatchEvent(new w.KeyboardEvent('keydown', { 
 const click = (el) => el.click();
 const scan = async (t) => { click(t.$('#scan')); await tick(80); };
 
-test('Startup & tray dialog loads the current options and saves the changed ones', async () => {
+test('Startup, tray and schedule dialog loads the current options and saves the changed ones', async () => {
   const t = await boot();
   click(t.$('#background'));
   await tick();
   const boxes = t.$$('.modal input[type=checkbox]');
-  assert.equal(boxes.length, 3);
-  assert.deepEqual(boxes.map((b) => b.checked), [false, true, false]);
+  assert.equal(boxes.length, 4);
+  assert.deepEqual(boxes.map((b) => b.checked), [false, true, false, false]);
+  assert.equal(t.$('.modal select').value, '24');
   boxes[0].checked = true;
   click(t.$$('.modal button').find((b) => b.textContent === 'Continue'));
   await tick();
-  assert.deepEqual(t.calls.find((c) => c[0] === 'background')[1], { launchOnStartup: true, minimizeToTray: true, closeToTray: false });
+  assert.deepEqual(t.calls.find((c) => c[0] === 'background')[1], { launchOnStartup: true, minimizeToTray: true, closeToTray: false, scheduleEnabled: false, scheduleHours: '24' });
   assert.match(t.$('#toast').textContent, /saved/i);
 });
 
@@ -275,4 +276,23 @@ test('Tests view: totals, coverage pill, advice, and a run asks for the repo nam
   await tick();
   assert.deepEqual(t.calls.find((c) => c[0] === 'plan')[1], [{ dir: '/w/gamma', action: { type: 'tests-run', kind: 'coverage', stack: 'python', root: '.' } }]);
   assert.ok(t.$('.modal input[type=text]'), 'the review asks for the repo name');
+});
+
+test('a finding can be ignored with a reason, and the Baseline view offers to create one', async () => {
+  const t = await boot();
+  await scan(t);
+  click(t.$$('#repos li').find((li) => li.textContent.includes('beta')));
+  click(t.$$('.finding button').find((x) => x.textContent === 'Ignore…'));
+  await tick();
+  const [reason, all] = t.$$('.modal input');
+  reason.value = 'parked on purpose';
+  assert.equal(all.type, 'checkbox');
+  click(t.$$('.modal button').find((x) => x.textContent === 'Continue'));
+  await tick();
+  assert.deepEqual(t.calls.find((c) => c[0] === 'ignore')[1], { dir: '/w/beta', id: 'a', reason: 'parked on purpose', allRepos: false });
+  click(t.$('#baseline'));
+  await tick();
+  assert.equal(t.$('#baseline').getAttribute('aria-current'), 'page');
+  assert.match(t.$('#detail').textContent, /No baseline yet/);
+  assert.ok(t.$$('#detail button').some((x) => x.textContent === 'Create a starting baseline'));
 });

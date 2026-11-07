@@ -11,6 +11,8 @@ const { createService } = require('./service');
 const { createSettingsStore } = require('./settings');
 const { appendAudit, readAudit } = require('./audit');
 const { expandHome } = require('./util');
+const { createPolicyStore, driftReport, repoKey } = require('./policy');
+const { createSeenStore } = require('./schedule');
 
 const OFF = 'Actions are turned off: start GutCheck with --allow-actions to plan and apply changes. Everything else works read-only.';
 
@@ -67,9 +69,12 @@ function createEngine(opts = {}) {
     write: (a) => { fs.writeFileSync(trendFile + '.tmp', JSON.stringify(a)); fs.renameSync(trendFile + '.tmp', trendFile); },
   };
   const auditFile = path.join(dir, 'audit.log');
+  const policy = createPolicyStore(dir);
+  const seen = createSeenStore(path.join(dir, 'seen.json'));
+  let lastFresh = null; // new findings found by the last scan (null: nothing to compare with)
   const service = createService({
     known, settings, audit: (e) => appendAudit(auditFile, { ...e, via: opts.via || 'cli' }),
-    rescan: (d) => scanRepo(d, { deep: !!store.load().deep }), trendStore,
+    rescan: (d) => scanRepo(d, { deep: !!store.load().deep, policy: policy.load }), trendStore,
     updateSettings: (p) => store.update(p && p.quality ? { quality: p.quality } : {}), // headless callers may only change quality settings
   });
 
@@ -85,8 +90,10 @@ function createEngine(opts = {}) {
       known.clear();
       service.forgetPlans();
       root = abs;
-      const results = await scanAll(dirs, { deep: !!deep }, (res, done, total) => { known.set(res.path, res); if (onProgress) onProgress(done, total, res.name); });
+      const results = await scanAll(dirs, { deep: !!deep, policy: policy.load }, (res, done, total) => { known.set(res.path, res); if (onProgress) onProgress(done, total, res.name); });
       service.recordScan(abs, results);
+      const rec = seen.record(abs, results);
+      lastFresh = rec.compared ? rec.fresh : null;
       if (!store.load().root) store.update({ root: abs }); // remembered for later calls; never replaces the app's own choice
       return { ok: true, root: abs, count: results.length, rate: github.getRate() };
     })();
@@ -142,7 +149,7 @@ function createEngine(opts = {}) {
     const x = resolve(repo);
     if (x.error) return { ok: false, error: x.error };
     const r = x.repo;
-    return { ok: true, ...summary(r), git: r.git, prs: r.prs, failedRuns: r.ci && r.ci.failed, findings: (r.findings || []).map((f) => finding(r, f)) };
+    return { ok: true, ...summary(r), git: r.git, prs: r.prs, failedRuns: r.ci && r.ci.failed, findings: (r.findings || []).map((f) => finding(r, f)), ignored: (r.ignored || []).map((f) => ({ id: f.id, title: f.title, reason: f.ignoredBecause, from: f.ignoredIn })), drift: r.drift || undefined };
   }
 
   async function report({ repo, onProgress } = {}) {
@@ -218,9 +225,47 @@ function createEngine(opts = {}) {
     return { ok: res.every((r) => r.ok), results: res.map((r) => ({ ok: r.ok, repo: r.repoName, title: r.title, error: r.error, steps: (r.results || []).map((x) => ({ cmd: x.text, ok: x.ok, output: x.out || undefined })) })) };
   }
 
+  // Findings that were not there at the previous scan of this workspace (stored ids only).
+  async function fresh({ rescan = false, onProgress } = {}) {
+    const s = rescan ? await scan({ onProgress }) : await ensure({ onProgress });
+    if (!s.ok) return s;
+    return { ok: true, root, compared: lastFresh != null, findings: lastFresh || [] };
+  }
+
+  // Ignore a finding with a reason (or stop ignoring it). Stored in GutCheck's data folder, logged.
+  async function ignore({ repo, finding, reason, remove = false, allRepos = false, onProgress } = {}) {
+    const s = await ensure({ onProgress });
+    if (!s.ok) return s;
+    let key = '*';
+    let r = null;
+    if (!allRepos) { const x = resolve(repo); if (x.error) return { ok: false, error: x.error }; r = x.repo; key = repoKey(r); }
+    const res = remove ? policy.removeIgnore(key, String(finding || '')) : policy.setIgnore(key, String(finding || ''), reason);
+    if (!res.ok) return res;
+    appendAudit(auditFile, { ok: true, repo: r ? r.name : 'all repos', title: `${remove ? 'Stopped ignoring' : 'Ignored'} ${finding}${remove ? '' : `: ${res.reason}`}`, via: opts.via || 'cli' });
+    if (r) known.set(r.path, await scanRepo(r.path, { deep: !!store.load().deep, policy: policy.load }));
+    return { ...res, file: policy.ignoreFile };
+  }
+
+  async function ignored({ onProgress } = {}) {
+    const s = await ensure({ onProgress });
+    if (!s.ok) return s;
+    return { ok: true, file: policy.ignoreFile, findings: [...known.values()].flatMap((r) => (r.ignored || []).map((f) => ({ repo: r.name, id: f.id, title: f.title, reason: f.ignoredBecause, from: f.ignoredIn, rule: f.ignoreRule }))) };
+  }
+
+  // Baseline drift: per rule, the repos that do not meet it. init writes a starting baseline.json.
+  async function drift({ init = false, onProgress } = {}) {
+    if (init) { const i = policy.initBaseline(); known.clear(); return { ok: true, file: i.file, created: i.created }; }
+    const b = policy.load().baseline;
+    if (!b) return { ok: true, file: policy.baselineFile, baseline: null, note: `No baseline yet. Run "gutcheck baseline init" (or pass init: true) to create ${policy.baselineFile}, then edit it.` };
+    const s = await ensure({ onProgress });
+    if (!s.ok) return s;
+    const results = [...known.values()];
+    return { ok: true, file: policy.baselineFile, rules: driftReport(results, b), repos: results.filter((r) => r.drift).map((r) => ({ name: r.name, missing: r.drift.failed.map((f) => f.id), passed: r.drift.passed, checked: r.drift.checked })).sort((a, b2) => b2.missing.length - a.missing.length) };
+  }
+
   const history = ({ limit = 50 } = {}) => ({ ok: true, entries: readAudit(auditFile, Math.max(1, Math.min(500, limit))) });
 
-  return { scan, repos, findings, repoDetail, report, clutter, quality, tests, workspace, plan, apply, history, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
+  return { scan, repos, findings, repoDetail, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
 }
 
 module.exports = { createEngine, dataDir, ACTION_CATALOG };

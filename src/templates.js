@@ -30,9 +30,13 @@ SOFTWARE.
 const ROOT_ECO = { 'package.json': 'npm', 'Cargo.toml': 'cargo', 'go.mod': 'gomod', 'pyproject.toml': 'pip', 'requirements.txt': 'pip' };
 const dependabot = (manifests, ecosystems, hasWorkflows) => {
   const list = ecosystems && ecosystems.length ? ecosystems : [...new Set(manifests.map((m) => ROOT_ECO[m]).filter(Boolean))].map((eco) => ({ eco, dir: '/' }));
-  const blocks = list.map((e) => `  - package-ecosystem: ${e.eco}\n    directory: ${e.dir}\n    schedule:\n      interval: weekly\n`);
+  // Minor and patch updates arrive as one PR per ecosystem (majors stay separate: they can break), and
+  // a cooldown lets brand-new releases age a week first. Neither delays security updates.
+  const COOL = '    cooldown:\n      default-days: 7\n';
+  const GROUP = '    groups:\n      minor-and-patch:\n        update-types: [minor, patch]\n';
+  const blocks = list.map((e) => `  - package-ecosystem: ${e.eco}\n    directory: ${e.dir}\n    schedule:\n      interval: weekly\n${COOL}${GROUP}`);
   // Only with workflows to update: Dependabot errors out on a github-actions entry with nothing to read.
-  if (hasWorkflows !== false) blocks.push('  - package-ecosystem: github-actions\n    directory: /\n    schedule:\n      interval: weekly\n');
+  if (hasWorkflows !== false) blocks.push(`  - package-ecosystem: github-actions\n    directory: /\n    schedule:\n      interval: weekly\n${COOL}    groups:\n      actions:\n        patterns: ["*"]\n`);
   return `version: 2\nupdates:\n${blocks.join('')}`;
 };
 

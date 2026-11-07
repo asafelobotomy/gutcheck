@@ -11,6 +11,8 @@ const HELP = `GutCheck ${version}: health checks for every git repo in a folder.
 Usage: gutcheck <command> [options]
 
   scan [folder]                 scan and list repos, worst first (default folder: the one last scanned)
+  new [--notify]                scan, then list only findings that were not there last scan; --notify
+                                also shows a desktop notification (for a cron job or systemd timer)
   findings                      every finding; filter with --repo, --severity error|warn|info, --category
   repo <name>                   one repo in full
   report [repo]                 the Markdown fix plan ("Copy for LLM")
@@ -24,6 +26,13 @@ Usage: gutcheck <command> [options]
   fix <repo> <finding|action> [key=value...]
                                 plan a fix and show the exact commands; add --yes to run them
                                 (and --confirm <repo name> for dangerous ones)
+  ignore <repo> <finding> <reason...>
+                                accept a finding: it leaves the score and report, shown with the
+                                reason (--all for every repo, a trailing * matches a prefix)
+  unignore <repo> <finding>     stop ignoring it (--all for an every-repo ignore)
+  ignored                       every ignored finding and why
+  drift                         compare every repo with your baseline (baseline.json)
+  baseline init                 create a starting baseline.json to edit
   history                       changes GutCheck has made
   mcp [--allow-actions]         run as an MCP server on stdio (read-only unless --allow-actions)
 
@@ -97,6 +106,12 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
   };
 
   if (cmd === 'actions') return done(engine.actions());
+  if (cmd === 'baseline') {
+    if (rest[0] !== 'init') { err('gutcheck: usage: gutcheck baseline init'); return 1; }
+    const r = await engine.drift({ init: true });
+    out(`${r.created ? 'Created' : 'Already there'}: ${r.file}. Edit "require" and "skip" in it, then run gutcheck drift.`);
+    return r.ok ? 0 : 1;
+  }
   if (cmd === 'history') return done(engine.history({ limit: Number(f.limit) || 50 }), (r) => r.entries.forEach((e) => out(`${e.ts}  ${e.ok ? 'ok    ' : 'FAILED'}  ${e.repo}: ${e.title}${e.via ? `  (${e.via})` : ''}`)));
 
   const s = await scanned();
@@ -104,6 +119,29 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
   switch (cmd) {
     case 'scan': if (!s.ok) { err(`gutcheck: ${s.error}`); return 1; } return done(await engine.repos(), printRepos);
     case 'findings': return done(await engine.findings({ repo: f.repo, severity: f.severity, category: f.category, limit: Number(f.limit) || 1000 }), printFindings);
+    case 'new': {
+      const r = await engine.fresh();
+      if (!r.ok || f.json) return done(r);
+      if (!r.compared) { out('First scan of this workspace: nothing to compare with yet. The next run lists what is new.'); return 0; }
+      if (!r.findings.length) { out('No new findings since the last scan.'); return 0; }
+      r.findings.forEach((x) => out(`${icon[x.severity]} ${x.repo}: ${x.title}  [${x.id}]`));
+      if (f.notify) {
+        const n = require('./schedule').notification(r.findings);
+        await require('./exec').run('notify-send', ['--app-name=GutCheck', n.title, n.body]);
+      }
+      return 0;
+    }
+    case 'ignore': case 'unignore': {
+      const [repo, id, ...why] = f.all ? [null, ...rest] : rest;
+      const r = await engine.ignore({ repo, finding: id, reason: why.join(' '), remove: cmd === 'unignore', allRepos: !!f.all });
+      return done(r, (x) => out(`${cmd === 'ignore' ? `Ignoring ${x.id} in ${x.key === '*' ? 'every repo' : x.key}: ${x.reason}` : `No longer ignoring ${x.id} in ${x.key === '*' ? 'every repo' : x.key}`}  (${x.file})`));
+    }
+    case 'ignored': return done(await engine.ignored(), (r) => { if (!r.findings.length) out('Nothing is ignored.'); r.findings.forEach((x) => out(`${x.repo}: ${x.title}  [${x.id}]\n    ${x.reason}  (${x.from})`)); });
+    case 'drift': return done(await engine.drift(), (r) => {
+      if (!r.rules) { out(r.note); return; }
+      out(`Baseline: ${r.file}\n`);
+      for (const x of r.rules) out(`  ${x.missing.length ? '!' : '✓'} ${x.label.padEnd(34)} ${x.ok} ok${x.missing.length ? `, missing in ${x.missing.join(', ')}` : ''}`);
+    });
     case 'repo': return done(await engine.repoDetail({ repo: rest[0] }));
     case 'report': { const r = await engine.report({ repo: rest[0] }); if (!r.ok) return done(r); out(r.text); return 0; }
     case 'clutter': return done(await engine.clutter({ repos: rest }));

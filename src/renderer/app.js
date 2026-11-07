@@ -92,7 +92,7 @@ function renderStats() {
   );
 }
 
-const NAV = { dashboard: 'dashboard', overview: 'overview', quality: 'quality', tests: 'tests', clutter: 'clutter', history: 'history' };
+const NAV = { drift: 'baseline', dashboard: 'dashboard', overview: 'overview', quality: 'quality', tests: 'tests', clutter: 'clutter', history: 'history' };
 function renderList() {
   document.body.classList.toggle('dash', state.view === 'dashboard'); // the dashboard shows these numbers itself
   for (const [view, id] of Object.entries(NAV)) { const b = $(id); if (b) { if (state.view === view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); } }
@@ -170,7 +170,8 @@ function findingEl(r, f) {
   return h('div', { class: 'finding ' + f.severity },
     h('div', { class: 't' }, h('b', {}, f.title), h('span', {}, f.detail || '')),
     f.url ? btn('Open ↗', () => window.api.openUrl(f.url)) : null,
-    f.fix ? btn(f.fix.label, () => runActions([{ repo: r, action: f.fix }])) : null);
+    f.fix ? btn(f.fix.label, () => runActions([{ repo: r, action: f.fix }])) : null,
+    ignoreButton(r, f));
 }
 
 function branchesPanel(r) {
@@ -260,7 +261,7 @@ function renderRepo() {
     toolbar,
     r.findings.length ? null : h('p', { class: 'ok-msg' }, 'No issues found. Nice.'),
     ...cats.flatMap((c) => [h('h3', {}, c), ...r.findings.filter((f) => f.category === c).map((f) => findingEl(r, f))]),
-    ...prsPanel(r), ...branchesPanel(r), ...settingsPanel(r), ...filesPanel(r));
+    ...ignoredPanel(r), ...prsPanel(r), ...branchesPanel(r), ...settingsPanel(r), ...filesPanel(r));
 }
 
 async function copyForLlm(b, dir, label) {
@@ -287,6 +288,7 @@ function renderMain() {
   else if (state.view === 'tests') renderTestsView();
   else if (state.view === 'repo' && state.repos.has(state.selected)) renderRepo();
   else if (state.view === 'history') renderHistory();
+  else if (state.view === 'drift') renderDriftView();
   else if (state.view === 'overview') renderOverview();
   else renderDashboard();
 }

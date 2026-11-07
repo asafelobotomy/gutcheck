@@ -140,3 +140,4 @@ details { margin: 8px 0; } summary { cursor: pointer; color: var(--muted); } sum
 div.warnbox { font-size: 12px; border-left: 3px solid var(--warn); color: var(--warn); padding: 4px 8px; margin: 6px 0; }
 .modal h4 { margin: 14px 0 4px; font-size: 13px; }
 .modal .plans { max-height: 52vh; overflow: auto; }
+.finding.ignored { opacity: .7; border-left-color: var(--muted, #888); }

@@ -59,6 +59,17 @@ const TOOLS = [
   { name: 'gutcheck_history', title: 'Action history',
     description: 'Changes GutCheck has made (from the app, the CLI or this server), newest first.',
     inputSchema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 500 } } }, annotations: { ...RO, openWorldHint: false }, run: (e, a) => e.history(a) },
+  { name: 'gutcheck_new', title: 'New findings',
+    description: 'Findings that were not there at the previous scan of this workspace (what changed since the user last looked). rescan: true scans again first. compared: false means there was no earlier scan to compare with.',
+    inputSchema: { type: 'object', properties: { rescan: { type: 'boolean', description: 'Scan again first (default: use the last scan).' } } }, annotations: RO, run: (e, a, progress) => e.fresh({ rescan: !!a.rescan, onProgress: progress }) },
+  { name: 'gutcheck_drift', title: 'Baseline drift',
+    description: 'Compare every repo with the user\'s baseline (baseline.json: what every repo should have, such as a licence, CI, pinned actions, grouped Dependabot updates, branch protection). Per rule, the repos that do not meet it. Returns a note when the user has no baseline yet.',
+    inputSchema: { type: 'object', properties: {} }, annotations: RO, run: (e) => e.drift() },
+  { name: 'gutcheck_ignore', title: 'Ignore a finding',
+    description: 'Accept a finding the user has decided not to fix, with their reason: it leaves the score and the report and is listed as ignored. Only do this when the user asked for it, in their words. remove: true stops ignoring. allRepos: true applies to every repo. A finding id ending in * matches every id with that prefix. Needs the server started with --allow-actions; every change is recorded in History.',
+    inputSchema: { type: 'object', required: ['finding'], properties: { ...repoArg, finding: str('Finding id, e.g. no-topics or pr-stale-*'), reason: str('Why the user accepts it (required unless remove)'), remove: { type: 'boolean' }, allRepos: { type: 'boolean' } } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    run: (e, a) => (e.allowActions ? e.ignore({ repo: a.repo, finding: a.finding, reason: a.reason, remove: !!a.remove, allRepos: !!a.allRepos }) : { ok: false, error: 'This server was started read-only: ignoring findings needs --allow-actions.' }) },
 ];
 
 const INSTRUCTIONS = `GutCheck checks the health of every git repo in a folder (CI, PRs, branches, uncommitted work, docs, Actions security, dependencies, clutter, code quality, AI agent setup) and can fix many issues.

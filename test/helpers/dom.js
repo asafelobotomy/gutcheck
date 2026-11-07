@@ -54,7 +54,7 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
     trend: async () => trend,
     qualityScan: async (d) => { calls.push(['qualityScan', d]); return quality; },
     setQualitySettings: async (p) => { calls.push(['qualitySet', p]); return { ...quality.settings, ...p }; },
-    background: async () => ({ launchOnStartup: false, minimizeToTray: true, closeToTray: false, trayAvailable: true }),
+    background: async () => ({ launchOnStartup: false, minimizeToTray: true, closeToTray: false, trayAvailable: true, scheduleEnabled: false, scheduleHours: '24' }),
     setBackground: async (p) => { calls.push(['background', p]); return { launchOnStartup: !!p.launchOnStartup, minimizeToTray: true, closeToTray: false, trayAvailable: true }; },
     agents: async (allow) => { calls.push(['agents', allow]); const a = allow === undefined ? false : !!allow; return { allowActions: a, command: `/x/GutCheck.AppImage --mcp${a ? ' --allow-actions' : ''}`, clients: [
       { id: 'claude-code', name: 'Claude Code', kind: 'cli', installed: true, configured: false, file: null, docs: 'https://code.claude.com/docs/en/mcp', snippet: 'claude mcp add …' },
@@ -63,10 +63,11 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
     applyAgent: async (tok) => { calls.push(['applyAgent', tok]); return { ok: true, title: 'Connect', results: [{ text: 'claude mcp add', ok: true, out: '' }] }; },
     copyAgent: async (id, allow) => { calls.push(['copyAgent', id, allow]); return { ok: true }; },
     testsScan: async (d) => { calls.push(['testsScan', d]); return TESTS; },
+    setIgnore: async (o) => { calls.push(['ignore', o]); return { ok: true }; }, drift: async () => ({ file: '/d/baseline.json', rules: null }), initBaseline: async () => ({ ok: true }), openBaseline: async () => {}, onDone: () => {},
     onBegin: () => {}, onRepo: (cb) => { onRepo = cb; },
   };
   const ctx = dom.getInternalVMContext();
-  for (const f of ['metrics.js', 'app.js', 'modals.js', 'overview-view.js', 'clutter-view.js', 'quality-view.js', 'tests-view.js', 'dashboard.js', 'agents-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
+  for (const f of ['metrics.js', 'app.js', 'modals.js', 'overview-view.js', 'clutter-view.js', 'quality-view.js', 'tests-view.js', 'dashboard.js', 'agents-view.js', 'policy-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
   await tick();
   return { dom, w, doc: w.document, calls, $: (s) => w.document.querySelector(s), $$: (s) => [...w.document.querySelectorAll(s)], run: (code) => new vm.Script(code).runInContext(ctx) };
 }

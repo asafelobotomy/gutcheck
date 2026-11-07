@@ -118,7 +118,7 @@ function showResults(outs) {
 
 const BACKGROUND_SPEC = {
   title: 'Settings',
-  lead: ['Startup & tray'],
+  lead: ['Startup, tray and scheduled scans'],
   // Opening the agents dialog closes this one without saving (it has its own Save/Connect steps).
   extra: (close) => [h('h4', {}, 'AI agents'), h('p', { class: 'sub' }, 'Let Claude, Codex, Cursor, Copilot or Gemini use GutCheck\'s scans and fixes over MCP.'),
     h('div', {}, h('button', { onclick: () => { close(null); openAgents(); } }, 'Connect an AI agent…'))],
@@ -126,6 +126,8 @@ const BACKGROUND_SPEC = {
     { name: 'launchOnStartup', label: 'Launch GutCheck when I log in (starts in the tray)', type: 'checkbox' },
     { name: 'minimizeToTray', label: 'Minimise to the system tray', type: 'checkbox' },
     { name: 'closeToTray', label: 'Closing the window keeps GutCheck running in the tray (quit from the tray menu)', type: 'checkbox' },
+    { name: 'scheduleEnabled', label: 'Scan the workspace on a schedule while GutCheck runs, and notify me about new warnings and errors', type: 'checkbox' },
+    { name: 'scheduleHours', label: 'Scan every', type: 'select', options: [['1', 'hour'], ['3', '3 hours'], ['6', '6 hours'], ['12', '12 hours'], ['24', 'day'], ['72', '3 days'], ['168', 'week']] },
   ],
 };
 
@@ -136,6 +138,6 @@ async function openBackgroundSettings() {
   const saved = await window.api.setBackground(out);
   if (saved.error) return toast(saved.error, 'bad');
   toast(!saved.trayAvailable && (saved.minimizeToTray || saved.closeToTray || saved.launchOnStartup)
-    ? 'Saved, but no system tray was found, so the window will stay visible.' : 'Startup and tray options saved.');
+    ? 'Saved, but no system tray was found, so the window will stay visible.' : 'Settings saved.');
 }
 $('background').addEventListener('click', openBackgroundSettings);

@@ -26,6 +26,11 @@ contextBridge.exposeInMainWorld('api', {
   copyAgent: (id, allowActions) => ipcRenderer.invoke('agents:copy', { id, allowActions }),
   openUrl: (u) => ipcRenderer.invoke('open:url', u),
   openFolder: (d) => ipcRenderer.invoke('open:folder', d),
+  setIgnore: (o) => ipcRenderer.invoke('ignore:set', o),
+  drift: () => ipcRenderer.invoke('drift:get'),
+  initBaseline: () => ipcRenderer.invoke('baseline:init'),
+  openBaseline: () => ipcRenderer.invoke('baseline:open'),
+  onDone: (cb) => ipcRenderer.on('scan:done', (_e, d) => cb(d)),
   onBegin: (cb) => ipcRenderer.on('scan:begin', (_e, d) => cb(d)),
   onRepo: (cb) => ipcRenderer.on('scan:repo', (_e, d) => cb(d)),
 });

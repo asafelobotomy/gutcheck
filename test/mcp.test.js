@@ -62,7 +62,8 @@ test('protocol: version negotiation, init gate, tool list, unknown tool and meth
   assert.deepEqual(list.map((t) => t.name), TOOLS.map((t) => t.name));
   for (const t of list) { assert.ok(!('run' in t)); assert.equal(t.inputSchema.type, 'object'); assert.ok(t.description.length > 30, t.name); assert.ok(t.annotations, t.name); }
   assert.equal(list.find((t) => t.name === 'gutcheck_apply').annotations.destructiveHint, true);
-  assert.ok(list.filter((t) => t.name !== 'gutcheck_apply').every((t) => t.annotations.readOnlyHint), 'only apply changes anything');
+  assert.ok(list.filter((t) => !['gutcheck_apply', 'gutcheck_ignore'].includes(t.name)).every((t) => t.annotations.readOnlyHint), 'only apply (and ignore, in GutCheck\'s own settings) change anything');
+  assert.equal(list.find((t) => t.name === 'gutcheck_ignore').annotations.destructiveHint, false);
   assert.equal((await c.req('tools/call', { name: 'nope' })).error.code, -32602);
   assert.equal((await c.req('resources/list')).error.code, -32601);
   assert.deepEqual((await c.req('ping')).result, {});

@@ -9,6 +9,7 @@ const { PROTECTION } = require('./protection');
 const { hygieneFix, REFS } = require('./report-fixes');
 const { agentFix } = require('./agents');
 const { testsSection, testsFix } = require('./tests/report');
+const { upkeepFix, ignoredLine } = require('./report-upkeep');
 const { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches } = require('./checks');
 const { daysAgo, sq, plural } = require('./util');
 
@@ -54,7 +55,7 @@ function fixFor(f, r) {
   if (id.startsWith('q-')) return qualityFix(id);
   if (id.startsWith('t-')) return testsFix(id);
   if (id.startsWith('agent-')) return agentFix(id) || { phase: 7, rank: 9, why: t(f.detail, LEN.text), cmds: [] };
-  const hy = hygieneFix(id, r);
+  const hy = hygieneFix(id, r) || upkeepFix(id, r);
   if (hy) return hy;
   if (id === 'env-tracked') return { phase: 0, rank: 0, why: 'Committed secrets are readable by anyone with repo access and stay in history.', cmds: ['# for each file listed above:', 'git rm --cached <file>', 'git commit -m "Stop tracking env files"'], note: 'Tell the owner to rotate every secret those files held. Removing them from history needs a history rewrite: do NOT do that without explicit approval.' };
   if (id === 'env-not-ignored') return { phase: 0, rank: 1, why: 'One careless "git add ." would commit your secrets.', cmds: ["printf '\\n.env\\n.env.*\\n!.env.example\\n' >> .gitignore"], note: 'Check .gitignore does not already contain these lines first.' };
@@ -163,6 +164,9 @@ function snapshot(r) {
   if (hy) L.push(`- Housekeeping: git data ${hy.storage.packKiB >= 1048576 ? (hy.storage.packKiB / 1048576).toFixed(1) + ' GB' : Math.round(hy.storage.packKiB / 1024) + ' MB'}, ${hy.stashes} stash${hy.stashes === 1 ? '' : 'es'}, ${hy.tags} tag${hy.tags === 1 ? '' : 's'}, ${hy.workflows ? hy.workflows.files : 0} workflow file${hy.workflows && hy.workflows.files === 1 ? '' : 's'}`);
   L.push(`- Open PRs: ${(r.prs || []).length}; failing CI runs: ${((r.ci && r.ci.failed) || []).length}; Dependabot alerts: ${Math.max((r.alerts || []).length, r.alertsTotal || 0)}`);
   if (r.deps && r.deps.manifests && r.deps.manifests.length) L.push(`- Manifests: ${r.deps.manifests.join(', ')}`);
+  if (r.release && r.release.latest) L.push(`- Release: latest tag ${t(r.release.latest, LEN.short)}${r.release.commitsSince != null ? `, ${r.release.commitsSince} commit${r.release.commitsSince === 1 ? '' : 's'} since` : ''}${r.release.manifest ? `; ${r.release.manifest.file} says ${t(r.release.manifest.version, LEN.short)}` : ''}`);
+  const ig = ignoredLine(r, t);
+  if (ig) L.push(ig);
   return L.join('\n');
 }
 

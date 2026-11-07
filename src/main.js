@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, session, clipboard, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, session, clipboard, Tray, Menu, nativeImage, Notification } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -13,6 +13,8 @@ const { createTrayController } = require('./tray');
 const { setAutostart, isAutostart, HIDDEN_FLAG } = require('./autostart');
 const { createSettingsStore } = require('./settings');
 const { createAgentConnect } = require('./agent-connect');
+const { createPolicyStore, driftReport } = require('./policy');
+const sched = require('./schedule');
 
 let win;
 let scanning = false;
@@ -35,6 +37,9 @@ const known = new Map(); // path -> latest scan result (only these paths may be 
 const store = () => createSettingsStore(path.join(app.getPath('userData'), 'settings.json'));
 const loadSettings = () => store().load();
 const updateSettings = (patch) => store().update(patch); // every settings write goes through here
+const policy = () => createPolicyStore(app.getPath('userData')); // ignores.json and baseline.json
+const seen = () => sched.createSeenStore(path.join(app.getPath('userData'), 'seen.json'));
+const policyNow = () => policy().load();
 
 const trayCtl = createTrayController({ app, Tray, Menu, nativeImage, getWindow: () => win, getSettings: () => loadSettings() });
 const autostartDir = () => path.join(app.getPath('appData'), 'autostart');
@@ -78,32 +83,54 @@ handle('dir:pick', async () => {
 
 const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
+// One workspace scan, from the Scan button or the schedule. Results stream to the window if it exists.
+async function scanWorkspace(root, deep) {
+  scanning = true;
+  const send = (ch, d) => { if (win && !win.isDestroyed()) win.webContents.send(ch, d); };
+  try {
+    const dirs = discover(root);
+    known.clear();
+    service.forgetPlans(); // plans reviewed for the previous workspace can no longer run
+    send('scan:begin', { total: dirs.length });
+    const results = await scanAll(dirs, { deep: !!deep, policy: policyNow }, (res, done, total) => {
+      known.set(res.path, res);
+      send('scan:repo', { res, done, total });
+    });
+    service.recordScan(root, results);
+    const rec = seen().record(root, results);
+    updateSettings({ lastScanAt: Date.now() });
+    return { ok: true, root, count: results.length, rate: github.getRate(), fresh: rec.compared ? rec.fresh : null };
+  } finally {
+    scanning = false;
+  }
+}
+
 handle('scan:start', async (_e, { root, deep } = {}) => {
   if (typeof root !== 'string' || !root.trim()) return { ok: false, error: 'Folder does not exist' };
   root = expandHome(root.trim(), os.homedir());
   if (!isDir(root)) return { ok: false, error: 'Folder does not exist' };
   if (scanning) return { ok: false, error: 'A scan is already running' };
-  scanning = true;
-  try {
-    updateSettings({ root, deep: !!deep });
-    const dirs = discover(root);
-    known.clear();
-    service.forgetPlans(); // plans reviewed for the previous workspace can no longer run
-    win.webContents.send('scan:begin', { total: dirs.length });
-    const results = await scanAll(dirs, { deep: !!deep }, (res, done, total) => {
-      known.set(res.path, res);
-      win.webContents.send('scan:repo', { res, done, total });
-    });
-    service.recordScan(root, results);
-    return { ok: true, root, count: results.length, rate: github.getRate() };
-  } finally {
-    scanning = false;
-  }
+  updateSettings({ root, deep: !!deep });
+  return scanWorkspace(root, deep);
 });
+
+// Scheduled scans: every few minutes, check whether one is due; notify only about new warnings and errors.
+async function scheduledScan() {
+  const s = loadSettings();
+  if (scanning || !s.root || !isDir(s.root) || !sched.isDue(Date.now(), s.lastScanAt, sched.normalizeSchedule(s.schedule))) return;
+  const out = await scanWorkspace(s.root, !!s.deep);
+  if (win && !win.isDestroyed()) win.webContents.send('scan:done', out);
+  const n = sched.notification((out.fresh || []).filter((f) => f.severity !== 'info'));
+  if (n && Notification.isSupported()) {
+    const note = new Notification({ title: n.title, body: n.body, icon: path.join(__dirname, 'assets', 'icon.png') });
+    note.on('click', () => { if (win) { win.show(); win.focus(); } });
+    note.show();
+  }
+}
 
 handle('scan:one', async (_e, { dir, deep } = {}) => {
   if (!known.has(dir)) return { ok: false, error: 'Unknown repo' };
-  const res = await scanRepo(dir, { deep: !!deep });
+  const res = await scanRepo(dir, { deep: !!deep, policy: policyNow });
   if (!known.has(dir)) return { ok: false, error: 'The workspace was rescanned meanwhile' };
   known.set(dir, res);
   return { ok: true, res, rate: github.getRate() };
@@ -117,7 +144,7 @@ const trendStore = {
   read: () => JSON.parse(fs.readFileSync(trendFile(), 'utf8')),
   write: (a) => { const f = trendFile(); fs.writeFileSync(f + '.tmp', JSON.stringify(a)); fs.renameSync(f + '.tmp', f); },
 };
-const rescan = (dir) => scanRepo(dir, { deep: !!loadSettings().deep }); // keep deep findings after an action
+const rescan = (dir) => scanRepo(dir, { deep: !!loadSettings().deep, policy: policyNow }); // keep deep findings after an action
 const service = createService({ known, settings: loadSettings, audit, trash: (f) => shell.trashItem(f), clipboard, rescan, trendStore, updateSettings });
 
 handle('action:plan', (_e, { items } = {}) => service.planActions(items));
@@ -131,14 +158,35 @@ handle('report:copy', (_e, { dir } = {}) => service.copyReport(dir));
 
 handle('audit:list', () => readAudit(auditFile()));
 
+// Ignores (with a reason) and the baseline: GutCheck's own data, not the repos. Each change is logged.
+const rescanKnown = async (dir) => { if (known.has(dir)) known.set(dir, await rescan(dir)); return known.get(dir); };
+handle('ignore:set', async (_e, { dir, id, reason, remove, allRepos } = {}) => {
+  const r = known.get(dir);
+  if (!r && !allRepos) return { ok: false, error: 'Unknown repo' };
+  const key = allRepos ? '*' : r.ignoreKey;
+  const res = remove ? policy().removeIgnore(key, String(id || '')) : policy().setIgnore(key, String(id || ''), reason);
+  if (!res.ok) return res;
+  audit({ ok: true, repo: allRepos ? 'all repos' : r.name, title: `${remove ? 'Stopped ignoring' : 'Ignored'} ${id}${remove ? '' : `: ${res.reason}`}`, via: 'app' });
+  if (allRepos) { for (const d of known.keys()) await rescanKnown(d); return { ok: true, all: true }; }
+  return { ok: true, res: await rescanKnown(dir) };
+});
+handle('drift:get', () => { const b = policyNow().baseline; return { file: policy().baselineFile, rules: b ? driftReport([...known.values()], b) : null }; });
+handle('baseline:init', async () => {
+  const i = policy().initBaseline();
+  for (const d of known.keys()) await rescanKnown(d);
+  return i;
+});
+handle('baseline:open', () => { const f = policy().baselineFile; if (fs.existsSync(f)) shell.openPath(f); });
+
 handle('settings:set', (_e, patch) => updateSettings(patch && typeof patch.readOnly === 'boolean' ? { readOnly: patch.readOnly } : {}));
 
 // Startup and tray options. Only booleans are accepted; launch-on-start-up is stored by the OS/desktop.
-const background = (s = loadSettings()) => ({ launchOnStartup: isAutostart(app, { dir: autostartDir() }), minimizeToTray: !!s.minimizeToTray, closeToTray: !!s.closeToTray, trayAvailable: trayCtl.hasTray() });
+const background = (s = loadSettings()) => { const sc = sched.normalizeSchedule(s.schedule); return { launchOnStartup: isAutostart(app, { dir: autostartDir() }), minimizeToTray: !!s.minimizeToTray, closeToTray: !!s.closeToTray, trayAvailable: trayCtl.hasTray(), scheduleEnabled: sc.enabled, scheduleHours: String(sc.hours) }; };
 handle('background:get', () => background());
 handle('background:set', (_e, patch) => {
   const p = patch && typeof patch === 'object' ? patch : {};
-  const s = updateSettings(Object.fromEntries(BACKGROUND_KEYS.filter((k) => typeof p[k] === 'boolean').map((k) => [k, p[k]])));
+  const patchSched = typeof p.scheduleEnabled === 'boolean' || p.scheduleHours != null ? { schedule: sched.normalizeSchedule({ ...sched.normalizeSchedule(loadSettings().schedule), ...(typeof p.scheduleEnabled === 'boolean' ? { enabled: p.scheduleEnabled } : {}), ...(p.scheduleHours != null ? { hours: Number(p.scheduleHours) } : {}) }) } : {};
+  const s = updateSettings({ ...Object.fromEntries(BACKGROUND_KEYS.filter((k) => typeof p[k] === 'boolean').map((k) => [k, p[k]])), ...patchSched });
   let error = null;
   if (typeof p.launchOnStartup === 'boolean') {
     try { setAutostart(app, p.launchOnStartup, { dir: autostartDir() }); } catch (e) { error = 'Could not change the login item: ' + (e && e.message); }
@@ -181,6 +229,7 @@ if (trayCtl.singleInstance()) {
     try { if (app.isPackaged && isAutostart(app, { dir: autostartDir() })) setAutostart(app, true, { dir: autostartDir() }); } catch {}
     trayCtl.create();
     createWindow();
+    setInterval(() => { scheduledScan().catch(() => {}); }, sched.CHECK_EVERY_MS).unref();
   });
   app.on('window-all-closed', () => app.quit());
 }

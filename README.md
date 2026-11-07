@@ -15,6 +15,8 @@ A desktop dashboard that gives you a health check across every GitHub project in
 - **Git hygiene**: credentials or `http://` in the remote URL, stash pile-ups, branches whose upstream was deleted, stale worktrees, uninitialised submodules, repos nested inside repos, repository size (GitHub's 1 GB / 5 GB guidance), loose objects, and with Deep scan files of 50 MB+ anywhere in history. For a repo over 1 GB, Deep scan also shows where the space is: current files, older versions, deleted files and unreferenced objects. It says whether rewriting history would actually help, and gives the safe steps (Git LFS for new versions, archives out of git) before any rewrite. GutCheck never rewrites history itself; a rewrite is listed only as an option for the owner, with a backup first
 - **Security features** (repos you administer): secret scanning, push protection, CodeQL default setup (only suggested where CodeQL has a supported language, or workflows to analyse) and private vulnerability reporting on public repos; Dependabot security updates everywhere
 - **Dependencies**: missing lockfiles, uninstalled packages (with the right package manager), Dependabot alerts, outdated npm packages (Deep scan). Dependabot alerts show the true total (not only the first page GitHub returns), a severity breakdown, the packages with the most alerts and the fixed versions, with commands for the ecosystems the repo uses
+- **Dependency automation**: a workflow that auto-merges Dependabot or Renovate PRs without checking the update type (so majors merge unreviewed), and Dependabot updates that are not grouped once five or more of their PRs are open at once. The Dependabot file GutCheck adds groups minor and patch updates and waits seven days before proposing a new release (`cooldown`); security updates are never delayed
+- **Releases**: the newest version tag (`v1.2.3` or `1.2.3`, pre-releases ignored) compared with the version in `package.json`, `Cargo.toml` or `pyproject.toml` (behind a release, or bumped and never tagged once pushed; GitHub's latest release counts, so a tag CI made but you have not fetched is not reported), five or more commits on a release older than 90 days, and a versioned changelog that skips the newest release
 - **Repo settings**: missing remote, unprotected default branch (branch protection or an active ruleset both count), auto-delete of merged branches, inactivity. Private repos on a free plan are not told to protect their branch: GitHub only offers that on a paid plan or public repos (checked once per owner with a read-only call). A failed GitHub "Dependabot Updates" run is a warning, not a broken build
 - **AI coding agents** (when Claude Code, Claude Desktop, Cursor, Codex CLI, Gemini CLI or Copilot is installed): per repo, a committed `.claude/settings.local.json`, credentials written into `.mcp.json`, CLAUDE.md or AGENTS.md over 200 lines, CLAUDE.md and AGENTS.md drifting apart, rules only one tool reads, and repos agents work in without instructions. For the machine: how much session history is kept, how much of it is older than 7 and 14 days, and the `cleanupPeriodDays` value that would clear it (set it from the advice or **Settings > AI agents**, previewed like any other change), the KDE file indexer watching agent folders, no cap on parallel subagents on a small machine, and many enabled plugins. Transcripts are only measured, never opened, and no setting value appears in a finding.
 - **Workspace**: loose files, projects without git (code, or folders of notes), copies and duplicate clones, naming, missing global git email or gitignore, plain-text credential storage, and disk used by dependency folders of projects untouched for 90 days
@@ -153,6 +155,9 @@ From a source checkout, use `node /path/to/gutcheck/src/cli.js mcp` as the comma
 | `gutcheck_plan` | Turn `{ repo, finding }` (the finding's own fix) or `{ repo, action }` into exact commands, with a single-use token. Changes nothing. |
 | `gutcheck_apply` | Run planned tokens exactly as previewed; dangerous plans also need the repo name |
 | `gutcheck_history` | Changes GutCheck has made, from the app, the CLI or an agent |
+| `gutcheck_new` | Findings that were not there at the previous scan |
+| `gutcheck_drift` | Every repo compared with your baseline, per rule |
+| `gutcheck_ignore` | Ignore a finding with the user's reason, or stop ignoring it (needs `--allow-actions`) |
 
 The same safety rails apply as in the app. Changes always go plan, then apply, and only the previewed commands run. Tokens are single use and expire after 5 minutes. The app's **Read-only** switch stops the server too, and the server never changes it. GutCheck never deletes repos, changes visibility, force-pushes or rewrites history. Secret values and `.env` contents never appear in results, and every change is recorded in **History**.
 
@@ -164,18 +169,30 @@ gutcheck findings --severity warn        # warnings and errors, with the fix com
 gutcheck report my-repo                  # the Markdown fix plan
 gutcheck fix my-repo git-dirty message="Save work"         # preview the exact commands
 gutcheck fix my-repo git-dirty message="Save work" --yes   # run them
+gutcheck new --notify                    # only what is new since the last scan, as a desktop notification
+gutcheck ignore my-repo no-topics "internal tool"           # accept a finding, with the reason
+gutcheck baseline init && gutcheck drift                    # what every repo should have, and who differs
 gutcheck --help
 ```
 
 The CLI and the server share the app's data folder, so they use the same settings (workspace folder, Read-only switch, quality settings), History and trends. Each CLI command scans again, but the MCP server keeps its scan between calls.
 
-## Startup & tray
+## Ignoring findings
 
-**Settings** (top bar) has three startup and tray options, all off by default:
+Not every finding fits every repo. **Ignore…** on a finding (or `gutcheck ignore <repo> <finding> <reason>`) asks why, then takes it out of the score, the dashboard and the report; it stays listed under **Ignored** with your reason, and **Stop ignoring** brings it back. Tick **Ignore it in every repo** (`--all`) for findings you never want. A finding id ending in `*` covers a family (`pr-stale-*`). Ignores live in `ignores.json` in GutCheck's data folder, keyed by `owner/name`, so they survive a fresh clone. A repo can also carry its own in `.gutcheck.json` (`{ "ignore": { "no-topics": "internal tool" } }`), which everyone who scans it shares. The "Copy for LLM" report lists ignored findings and their reasons so an agent does not suggest them again. Every ignore is recorded in History, and agents can only ignore through an MCP server started with `--allow-actions`.
+
+## Baseline
+
+A baseline says what every repo should have. **Baseline** in the sidebar (or `gutcheck baseline init`) writes a starting `baseline.json` in GutCheck's data folder; edit its `require` list (add `:public` to a rule for public repos only) and `skip` (repos exempt from a rule). Rules: `license`, `readme`, `gitignore`, `security-policy`, `contributing`, `code-of-conduct`, `codeowners`, `editorconfig`, `gitattributes`, `changelog`, `ci`, `actions-pinned`, `dependabot`, `dependabot-groups`, `dependabot-cooldown`, `agents-file`, `branch-protection`, `auto-delete`, `secret-scanning`, `private-reporting`, `description`. Each repo that differs gets one "Baseline" finding, and the view (or `gutcheck drift`) shows each rule with the repos missing it. Rules that cannot apply (protection on a free private repo, Dependabot without manifests) are not counted.
+
+## Startup, tray and scheduled scans
+
+**Settings** (top bar) has these startup, tray and schedule options, all off by default:
 
 - **Launch when I log in**: starts GutCheck at login, straight into the tray with no window. On Linux this writes `~/.config/autostart/gutcheck.desktop` (pointing at the AppImage you ran, so keep it in a stable place); on Windows and macOS it uses the system login items. Turning it off removes the entry.
 - **Minimise to the system tray**: minimising hides the window; click the tray icon to bring it back.
 - **Closing the window keeps GutCheck running in the tray**: use **Quit** in the tray menu to exit.
+- **Scan on a schedule**: while GutCheck runs (in the tray is enough), it rescans the last workspace every hour to every week, and shows a desktop notification only when warnings or errors appear that the previous scan did not have. Without the app, run `gutcheck new --notify` from cron or a systemd timer: it prints only new findings and notifies through `notify-send`. Only finding ids are stored between scans (`seen.json`).
 
 The tray icon toggles the window on click and has Show and Quit. Only one copy runs: launching GutCheck again shows the existing window. If your desktop has no system tray (some GNOME setups need a tray extension), GutCheck never hides its window, so it can't get lost.
 
