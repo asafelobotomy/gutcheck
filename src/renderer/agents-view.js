@@ -55,6 +55,9 @@ async function openAgents() {
       h('div', {}, cmd),
       h('label', { class: 'frow chk' }, allow, ' Let agents plan and apply fixes (--allow-actions). Each change is still a single-use plan, the Read-only switch still stops it, and everything is recorded in History. Off: agents can only read.'),
       list,
+      h('div', { class: 'plan safe' }, h('div', { class: 'phead' }, h('b', {}, 'Usage and health')),
+        h('div', { class: 'muted' }, 'Which skills, plugins and MCP servers you actually use, and whether each server works. Asks first.'),
+        h('div', { class: 'mbtns left' }, h('button', { onclick: () => { close(); openUsage(); } }, 'Check usage…'))),
       st.cleanupPeriodDays !== undefined ? Object.assign(cleanupRow(), { className: 'plan safe cleanup-row' }) : '', // append() would print null
       h('div', { class: 'mbtns' }, h('button', { class: 'primary', onclick: () => close() }, 'Close')));
     render();

@@ -48,6 +48,9 @@ const ACTION_CATALOG = {
   'clean-clutter': { about: 'Move detected clutter to the trash (caches are deleted)', params: { paths: 'array of clutter paths from gutcheck_clutter' } },
   'tests-run': { about: 'Run the tests with coverage, or mutation testing (runs the project\'s own code; dangerous, needs the repo name)', params: { kind: '"coverage" or "mutation"', stack: 'optional: "rust", "python", "node" or "go" (from gutcheck_tests runnable)', root: 'optional: the stack\'s folder, e.g. "wizard"' } },
   'gitignore-append': { about: 'Append known-safe rules to .gitignore', params: { entries: 'array of rules from a clutter finding' } },
+  'permissions-prune': { about: 'Remove permission rules from .claude/settings.local.json (shown redacted, backed up outside the repo)', params: { hashes: 'array of rule hashes from an AI agents finding' } },
+  'split-instructions': { about: 'Move the largest sections of an instruction file into docs/agents/ with pointers (every line kept)', params: { file: '"CLAUDE.md", ".claude/CLAUDE.md" or "AGENTS.md"' } },
+  'lsp-setup': { about: 'Install or turn on a Claude Code LSP plugin and its language server', params: { plugin: 'plugin name from an AI agents finding, e.g. "rust-analyzer-lsp"' } },
 };
 
 // opts: { allowActions: bool, env } . Without allowActions every plan is refused, whatever the app's switch says.
@@ -281,9 +284,21 @@ function createEngine(opts = {}) {
     return { ok: true, file: policy.baselineFile, rules: driftReport(results, b), repos: results.filter((r) => r.drift).map((r) => ({ name: r.name, missing: r.drift.failed.map((f) => f.id), passed: r.drift.passed, checked: r.drift.checked })).sort((a, b2) => b2.missing.length - a.missing.length) };
   }
 
+  // Opt-in agent usage check: reads transcript tool names; live (the caller's explicit consent) also
+  // runs `claude mcp list`, which starts every configured MCP server once. Recorded in History.
+  async function agentUsage({ live = false, onProgress } = {}) {
+    const s = await ensure({ onProgress });
+    if (!s.ok) return s;
+    const { scanUsage } = require('./agent-usage');
+    const bin = require('./agent-connect').claudeBin();
+    const r = await scanUsage({ repos: [...known.values()].filter((x) => !x.error).map((x) => ({ path: x.path, name: x.name })), live: live && !!bin, bin, runner: require('./exec').run });
+    if (live && bin) appendAudit(auditFile, { ok: true, repo: 'Agent setup', title: `Started ${(r.servers || []).length} MCP servers to check them (claude mcp list)`, via: opts.via || 'cli' });
+    return { ok: true, ...r, note: live && !bin ? 'Claude Code was not found, so servers were not checked.' : undefined };
+  }
+
   const history = ({ limit = 50 } = {}) => ({ ok: true, entries: readAudit(auditFile, Math.max(1, Math.min(500, limit))) });
 
-  return { scan, repos, findings, repoDetail, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
+  return { scan, repos, findings, repoDetail, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
 }
 
 module.exports = { createEngine, dataDir, ACTION_CATALOG };

@@ -298,3 +298,21 @@ test('a finding can be ignored with a reason, and the Baseline view offers to cr
   assert.match(t.$('#detail').textContent, /No baseline yet/);
   assert.ok(t.$$('#detail button').some((x) => x.textContent === 'Create a starting baseline'));
 });
+
+test('agent usage asks before reading transcripts, starts servers only when ticked, and offers fixes', async () => {
+  const t = await boot();
+  const asked = [];
+  t.w.api.agentUsage = async (live) => { asked.push(live); return { ok: true, sessions: 12, inventory: { plugins: 3, servers: 2, skills: 4 }, servers: live ? [{ name: 'gh', status: 'working' }] : null, items: [{ id: 'usage-plugin-x', category: 'AI agents', severity: 'info', title: 'Plugin x was not used in 28 days', detail: '12 sessions checked', fix: { type: 'plugin-disable', label: 'Turn off…', plugin: 'x@m' } }] }; };
+  t.w.api.planAgentFix = async (fix) => { asked.push(fix); return { ok: false, error: 'stop here' }; };
+  click(t.$('#background')); await tick();
+  click(t.$$('.modal button').find((b) => b.textContent === 'Connect an AI agent…')); await tick();
+  click(t.$$('.modal button').find((b) => b.textContent === 'Check usage…')); await tick();
+  assert.match(t.$('.modal .mh').textContent, /Check what your agents use/);
+  assert.match(t.$('.modal').textContent, /No text is stored or shown/);
+  click(t.$$('.modal button').find((b) => b.textContent === 'Check')); await tick(30);
+  assert.deepEqual(asked, [false], 'servers are not started unless ticked');
+  assert.match(t.$('.modal').textContent, /12 sessions in the last 28 days/);
+  click(t.$$('.modal button').find((b) => b.textContent === 'Turn off…')); await tick();
+  assert.deepEqual(asked[1], { type: 'plugin-disable', label: 'Turn off…', plugin: 'x@m' });
+  assert.equal(t.$$('.overlay').length, 0, 'the results close when a fix starts');
+});

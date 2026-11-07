@@ -13,6 +13,7 @@ const path = require('node:path');
 const { git } = require('./exec');
 const { plural, list } = require('./util');
 const R = require('./quality/rules');
+const { scanContext, checkContext } = require('./agent-context');
 
 const DOCS = 'https://code.claude.com/docs/en/';
 const REFS = {
@@ -95,6 +96,7 @@ async function scanAgents(dir, { home = os.homedir() } = {}) {
     claudeMd: claudeMd == null ? null : { lines: lineCount(claudeMd), importsAgents: /^\s*@\.?\/?AGENTS\.md\b/m.test(claudeMd), link: claudeIsLink },
     agentsMd: agentsMd == null ? null : { lines: lineCount(agentsMd) },
     other, localSettings, mcp, history,
+    context: await scanContext(dir, { home }),
   };
 }
 
@@ -109,8 +111,10 @@ function checkAgents(s) {
     add('agent-local-settings-tracked', 'warn', '.claude/settings.local.json is committed', 'It holds personal permissions and preferences (sometimes paths or tokens) and is meant to stay on your machine. Remove it from git (git rm --cached) and ignore it.', { ref: REFS.localSettings });
   else if (a.localSettings === 'unignored')
     add('agent-local-settings-unignored', 'info', '.claude/settings.local.json is not ignored', 'Personal agent settings could be committed by accident. Add .claude/settings.local.json to .gitignore.', { ref: REFS.localSettings });
+  const ctx = checkContext(s);
   for (const [key, label] of [['claudeMd', 'CLAUDE.md'], ['agentsMd', 'AGENTS.md']]) {
     const f = a[key];
+    if (ctx.some((c) => c.id === `agent-context-${label.replace('.', '-').toLowerCase()}`)) continue; // the size finding says more
     if (f && !f.link && f.lines > INSTRUCTION_MAX_LINES)
       add(`agent-${key === 'claudeMd' ? 'claude' : 'agents'}-md-long`, 'info', `${label} is ${f.lines} lines`, `It is loaded into every agent session. Keep it under about ${INSTRUCTION_MAX_LINES} lines: longer files cost context and are followed less reliably. Move topic- or path-specific parts into separate rule files.`, { ref: REFS.memory });
   }
@@ -120,7 +124,7 @@ function checkAgents(s) {
     add('agent-instructions-other-tool', 'info', `Agent rules only for ${[...new Set(a.other.map((o) => o.tool))].join(', ')}`, `${list(a.other.map((o) => o.path), 4)}. Other agents (Claude Code, Codex and others) do not read these. Move the shared rules into AGENTS.md, which most agents read.`, { ref: REFS.agentsSpec });
   if (a.history && !a.claudeMd && !a.agentsMd)
     add('agent-no-instructions', 'info', 'Agents work here without project instructions', 'Claude Code has sessions for this repo but there is no CLAUDE.md or AGENTS.md, so each session rediscovers how to build, test and lint it. Run /init in Claude Code, or write an AGENTS.md.', { ref: REFS.memory });
-  return out;
+  return [...out, ...ctx];
 }
 
 // Report steps for the per-repo findings (phases as in report.js: 0 secrets, 3 project files, 7 housekeeping).
@@ -135,6 +139,9 @@ function agentFix(id) {
     'agent-instructions-other-tool': { phase: 3, rank: 14, why: 'Only one agent reads these rules.', cmds: [], note: 'Copy the shared rules into AGENTS.md. Keep the tool-specific file only for tool-specific settings.', ref: REFS.agentsSpec },
     'agent-no-instructions': { phase: 3, rank: 15, why: 'Every agent session has to rediscover how to build and test the project.', cmds: [], note: 'Write a short AGENTS.md (or run /init in Claude Code): how to install, build, test and lint, and the project conventions. Use only facts from the repo.', ref: REFS.memory },
   };
+  if (id.startsWith('agent-context-')) return { phase: 3, rank: 12, why: 'Every agent session pays for this file before doing anything.', cmds: [], note: 'Keep a core file of 4 to 12 KB: build, test, layout and the rules that apply everywhere. Move each large section named above into docs/agents/<topic>.md and leave a one-line pointer saying when to read it (not an @-import, which would load it anyway). Keep every original line, and ask the owner before changing guidance.', ref: REFS.memory };
+  if (id.startsWith('agent-lsp-')) return { phase: 7, rank: 6, why: 'A language server lets the agent look up definitions and errors instead of reading whole files.', cmds: [], note: 'Install the plugin in Claude Code (/plugin, or the command in the finding) and the language server itself with the system package manager. Ask the owner first.', ref: DOCS + 'plugins-reference#lsp-servers' };
+  if (id.startsWith('agent-permissions-')) return { phase: id === 'agent-permissions-secret' ? 0 : 7, rank: 5, why: id === 'agent-permissions-secret' ? 'A credential may be stored in a permission rule.' : 'Old one-off rules clutter the permission list.', cmds: [], note: 'Use GutCheck\'s "Remove…" fix (it shows only the redacted shapes) or remove the rules with /permissions in Claude Code. Never print the rule values. If a rule held a real credential, rotate it.', ref: DOCS + 'settings#permission-settings' };
   return steps[id] || null;
 }
 
@@ -265,6 +272,8 @@ async function agentAdvice(repos = [], opts = {}) {
   if (plugins.length >= PLUGINS_MANY)
     add('agent-plugins', 'info', `${plural(plugins.length, 'Claude Code plugin')} enabled`, `${list(plugins, 8)}. Each adds skills, agents and MCP servers to every session, which costs context and memory. Turn off the ones you do not use (set them to false under enabledPlugins).`, { ref: REFS.plugins });
 
+  // 5. Stale backup and temp files in agent config folders (including GutCheck's own .gutcheck.bak).
+  out.push(...require('./agent-tidy').configAdvice(home, opts.dataDir || require('./paths').dataDir(), opts.now));
   return out;
 }
 

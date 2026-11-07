@@ -6,6 +6,14 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ### Added
 
+- Agent context: how much CLAUDE.md, `.claude/CLAUDE.md` and AGENTS.md load into every session (KB and tokens, with `@`-imports and the largest sections), and a **Split** fix that keeps a core file and moves the largest sections to `docs/agents/` with pointers, keeping every line.
+- LSP plugins: Claude Code's official LSP plugins missing or turned off for a repo's main languages, or their language server not on PATH, with a **Set up** fix (`claude plugin install` or `enable`, plus `npm`, `rustup`, `go`, `gem`, `dotnet` or `pacman` through `run0` for the server).
+- Permission rules: one-off and token-like rules in `.claude/settings.local.json`, shown only as redacted shapes and hashes, with a **Remove** fix that backs up the file in GutCheck's data folder.
+- Stale agent config files (GutCheck's own `.gutcheck.bak` after a week, temp files left by interrupted writes, GutCheck's old backups) with a **Move to trash** fix.
+- **Agent usage and health** (Settings > AI agents > Check usage, or `gutcheck agents usage`): opt-in; reads only tool names from 28 days of transcripts, and with a second consent runs `claude mcp list` to test each MCP server. Unused plugins, skills and servers, failing or signed-out servers, and permission rules that never matched get fixes (turn off, remove, sign in).
+
+### Added
+
 - **Fix all issues** on each repo: every fix in one plan. A short wizard asks the choices only you can make (commit message, merge or close a PR, description, installs, test runs); then one review lists every step in coding order (pull, `.gitignore`, your commit, dependencies, new files, clean-up, push, GitHub settings, test runs), worst issues first within a step. Any step can be unticked. Also `gutcheck fix <repo> all`, and `{ repo, all: true, answers }` in `gutcheck_plan`.
 - The review dialog numbers the steps and has a tick box on each when there are several.
 

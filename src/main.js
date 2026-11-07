@@ -196,7 +196,7 @@ handle('background:set', (_e, patch) => {
 });
 
 // Settings > AI agents: connect GutCheck's MCP server to installed coding agents (plan, review, apply).
-const agents = createAgentConnect({ launch: { env: process.env, execPath: process.execPath, isPackaged: app.isPackaged, appPath: app.getAppPath(), dataDir: app.getPath('userData'), version: app.getVersion() }, audit });
+const agents = createAgentConnect({ launch: { env: process.env, execPath: process.execPath, isPackaged: app.isPackaged, appPath: app.getAppPath(), dataDir: app.getPath('userData'), version: app.getVersion() }, audit, trash: (f) => shell.trashItem(f) });
 const agentAllow = (v) => (typeof v === 'boolean' ? v : !!loadSettings().agentAllowActions);
 handle('agents:status', (_e, { allowActions } = {}) => ({ ...agents.status(agentAllow(allowActions)), allowActions: agentAllow(allowActions) }));
 handle('agents:plan', (_e, { id, allowActions, remove } = {}) => {
@@ -205,6 +205,8 @@ handle('agents:plan', (_e, { id, allowActions, remove } = {}) => {
   return agents.plan(String(id || ''), { allowActions: agentAllow(allowActions), remove: remove === true });
 });
 handle('agents:cleanup', (_e, { days } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.planCleanup(Number(days))));
+handle('agents:fix', (_e, { fix } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.planFix(fix && typeof fix === 'object' ? fix : {}, [...known.values()].filter((r) => !r.error))));
+handle('agents:usage', (_e, { live } = {}) => agents.usageScan({ live: live === true && !loadSettings().readOnly, repos: [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name })) }));
 handle('agents:apply', (_e, { token } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.apply(String(token || ''))));
 handle('agents:copy', (_e, { id, allowActions } = {}) => {
   const c = agents.status(agentAllow(allowActions)).clients.find((x) => x.id === id);

@@ -67,7 +67,7 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
     onBegin: () => {}, onRepo: (cb) => { onRepo = cb; },
   };
   const ctx = dom.getInternalVMContext();
-  for (const f of ['metrics.js', 'fix-all.js', 'app.js', 'modals.js', 'fixall-view.js', 'overview-view.js', 'clutter-view.js', 'quality-view.js', 'tests-view.js', 'dashboard.js', 'agents-view.js', 'policy-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
+  for (const f of ['metrics.js', 'fix-all.js', 'app.js', 'modals.js', 'fixall-view.js', 'overview-view.js', 'clutter-view.js', 'quality-view.js', 'tests-view.js', 'dashboard.js', 'agents-view.js', 'policy-view.js', 'usage-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
   await tick();
   return { dom, w, doc: w.document, calls, $: (s) => w.document.querySelector(s), $$: (s) => [...w.document.querySelectorAll(s)], run: (code) => new vm.Script(code).runInContext(ctx) };
 }

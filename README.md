@@ -35,7 +35,7 @@ A desktop dashboard that gives you a health check across every GitHub project in
 - **Dependency automation**: a workflow that auto-merges Dependabot or Renovate PRs without checking the update type (so majors merge unreviewed), and Dependabot updates that are not grouped once five or more of their PRs are open at once. The Dependabot file GutCheck adds groups minor and patch updates and waits seven days before proposing a new release (`cooldown`); security updates are never delayed
 - **Releases**: the newest version tag (`v1.2.3` or `1.2.3`, pre-releases ignored) compared with the version in `package.json`, `Cargo.toml` or `pyproject.toml` (behind a release, or bumped and never tagged once pushed; GitHub's latest release counts, so a tag CI made but you have not fetched is not reported), five or more commits on a release older than 90 days, and a versioned changelog that skips the newest release
 - **Repo settings**: missing remote, unprotected default branch (branch protection or an active ruleset both count), auto-delete of merged branches, inactivity. Private repos on a free plan are not told to protect their branch: GitHub only offers that on a paid plan or public repos (checked once per owner with a read-only call). A failed GitHub "Dependabot Updates" run is a warning, not a broken build
-- **AI coding agents** (when Claude Code, Claude Desktop, Cursor, Codex CLI, Gemini CLI or Copilot is installed): per repo, a committed `.claude/settings.local.json`, credentials written into `.mcp.json`, CLAUDE.md or AGENTS.md over 200 lines, CLAUDE.md and AGENTS.md drifting apart, rules only one tool reads, and repos agents work in without instructions. For the machine: how much session history is kept, how much of it is older than 7 and 14 days, and the `cleanupPeriodDays` value that would clear it (set it from the advice or **Settings > AI agents**, previewed like any other change), the KDE file indexer watching agent folders, no cap on parallel subagents on a small machine, and many enabled plugins. Transcripts are only measured, never opened, and no setting value appears in a finding.
+- **AI coding agents** (when Claude Code, Claude Desktop, Cursor, Codex CLI, Gemini CLI or Copilot is installed): per repo, a committed `.claude/settings.local.json`, credentials written into `.mcp.json`, how much CLAUDE.md, `.claude/CLAUDE.md` and AGENTS.md load into every session (in KB and tokens, following their `@`-imports, with the largest sections named; over 12 KB is a note, over 40 KB a warning), CLAUDE.md and AGENTS.md drifting apart, rules only one tool reads, repos agents work in without instructions, Claude Code LSP plugins missing or turned off for the repo's main languages (or their language server not on PATH), and one-off or token-like permission rules in `.claude/settings.local.json` (shown only as a redacted shape such as `Bash(curl … [97 chars, token-like])` and a short hash, never the value). Stale backup and temp files in agent config folders, including GutCheck's own `.gutcheck.bak` copies after a week, are listed too. For the machine: how much session history is kept, how much of it is older than 7 and 14 days, and the `cleanupPeriodDays` value that would clear it (set it from the advice or **Settings > AI agents**, previewed like any other change), the KDE file indexer watching agent folders, no cap on parallel subagents on a small machine, and many enabled plugins. Transcripts are only measured, never opened, unless you run the opt-in usage check below; no setting value appears in a finding.
 - **Workspace**: loose files, projects without git (code, or folders of notes), copies and duplicate clones, naming, missing global git email or gitignore, plain-text credential storage, and disk used by dependency folders of projects untouched for 90 days
 
 Where the advice comes from (GitHub docs, OpenSSF Scorecard, git documentation and community conventions) is listed in [docs/sources.md](docs/sources.md). The Copy for LLM report links the source next to each fix.
@@ -70,6 +70,7 @@ Everything is done from the repo view, or in bulk from the workspace overview ("
 | Files | add LICENSE, README, .gitignore, SECURITY, CONTRIBUTING, CODE_OF_CONDUCT, PR template, issue template, CODEOWNERS, .editorconfig, .gitattributes, dependabot.yml (grouped, with a cooldown), a Node CI workflow for npm projects with a lockfile, on the repo's default branch (optionally committed) |
 | Tests | run coverage or mutation testing (executes the project's code, so you type the repo name) |
 | Findings | ignore with a reason, for one repo or all of them (GutCheck's own settings, not the repo) |
+| AI agents | split an oversized instruction file (the largest sections move to `docs/agents/<topic>.md` with a pointer under each heading, big `@`-imports become pointers, every line is kept), remove chosen permission rules (backed up in GutCheck's data folder, not the repo), install or turn on an LSP plugin and its language server, move stale agent config files to the trash, turn off unused plugins, remove broken or unused MCP servers, sign in to one, remove unused skills |
 
 Safety rails: a **Read-only** switch in the header disables every action, every change is recorded in **History**, many actions show an undo command, and GutCheck never deletes repos, changes visibility, force-pushes or rewrites history.
 
@@ -202,6 +203,7 @@ gutcheck report my-repo                  # the Markdown fix plan
 gutcheck fix my-repo git-dirty message="Save work"         # preview the exact commands
 gutcheck fix my-repo git-dirty message="Save work" --yes   # run them
 gutcheck fix my-repo all                 # every fix for the repo, in run order, and the choices left to you
+gutcheck agents usage                    # skills, plugins and MCP servers nobody used (reads only tool names)
 gutcheck new --notify                    # only what is new since the last scan, as a desktop notification
 gutcheck ignore my-repo no-topics "internal tool"           # accept a finding, with the reason
 gutcheck baseline init && gutcheck drift                    # what every repo should have, and who differs
@@ -209,6 +211,15 @@ gutcheck --help
 ```
 
 The CLI and the server share the app's data folder, so they use the same settings (workspace folder, Read-only switch, quality settings), History and trends. Each CLI command scans again, but the MCP server keeps its scan between calls.
+
+## Agent usage and health
+
+**Settings > Connect an AI agent… > Check usage…** finds what your agents carry but do not use. It asks first, every time, and has two separate consents:
+
+1. **Usage** (always part of the check): reads the last 28 days of Claude Code session transcripts, but only tool names (`mcp__<server>__…`), the skill each Skill call names, typed `/commands`, and Bash commands to test permission rules against. No text is stored, shown or logged.
+2. **Health** (a separate tick box): runs `claude mcp list`, which starts or connects each configured MCP server once to see whether it works. Only each server's name, status and a redacted reason are kept, never its command line or URL. Every run is recorded in History, and Read-only mode turns it off.
+
+The result lists enabled plugins nothing used, skills (yours and each repo's) nobody invoked, MCP servers that fail, need you to sign in or were never used, and Bash permission rules that never matched a command. Each comes with its fix (turn off, remove, sign in, remove the rules), previewed like everything else. `gutcheck agents usage` prints the same; add `--live --yes` to check the servers.
 
 ## Ignoring findings
 
@@ -249,7 +260,7 @@ Each release's notes are in [CHANGELOG.md](CHANGELOG.md).
 - The only network access is through your own `gh` CLI. There is no telemetry, no updater and no other server. The UI is sandboxed with a strict Content Security Policy.
 - Scans run read-only `git` commands with hooks and `core.fsmonitor` disabled, so opening an untrusted repo does not run its code.
 - Actions are planned by the app, previewed, and then run exactly as previewed. They only target branches, PRs and runs found in the last scan, or (for clutter) items found by a fresh scan at plan time. Right before removing anything GutCheck checks it is still unchanged and not tracked by git.
-- Files GutCheck keeps on your machine, in its app data folder (`~/.config/GutCheck` on Linux): `settings.json` (workspace folder, read-only switch, tray and schedule options; written atomically, and a damaged copy is kept as `settings.json.bad`), `audit.log` (every change it made; trimmed to the latest 500 entries once it passes 1 MB), `trend.json` (scores and totals per scan), `seen.json` (finding ids from the last scan, for "new since last scan"), `ignores.json` and `baseline.json` (your own rules), `runs/` (output of coverage and mutation runs you started) and `mcp-app/` (the unpacked copy agents run). Nothing is uploaded.
+- Files GutCheck keeps on your machine, in its app data folder (`~/.config/GutCheck` on Linux): `settings.json` (workspace folder, read-only switch, tray and schedule options; written atomically, and a damaged copy is kept as `settings.json.bad`), `audit.log` (every change it made; trimmed to the latest 500 entries once it passes 1 MB), `trend.json` (scores and totals per scan), `seen.json` (finding ids from the last scan, for "new since last scan"), `ignores.json` and `baseline.json` (your own rules), `runs/` (output of coverage and mutation runs you started), `backups/` (files GutCheck rewrote, such as a settings.local.json before rules were removed; listed for clean-up after 30 days) and `mcp-app/` (the unpacked copy agents run). Nothing is uploaded.
 
 ## Develop
 

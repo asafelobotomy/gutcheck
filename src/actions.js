@@ -334,6 +334,10 @@ const ACTIONS = {
 };
 
 
+// AI agent actions live in actions-agent.js; their plan errors read like this file's.
+const AGENT = require('./actions-agent');
+for (const t of ['permissions-prune', 'split-instructions', 'lsp-setup']) ACTIONS[t] = AGENT[t];
+
 async function plan(repo, action, ctx = {}) {
   ctx = defaultCtx(ctx);
   try {
@@ -358,7 +362,7 @@ async function plan(repo, action, ctx = {}) {
       confirmName: RISK[risk] >= RISK.danger ? repo.name : null,
     };
   } catch (e) {
-    if (e instanceof PlanError) return { ok: false, error: e.message };
+    if (e instanceof PlanError || e instanceof AGENT.PlanError) return { ok: false, error: e.message };
     return { ok: false, error: 'Could not plan action: ' + (e && e.message) };
   }
 }

@@ -83,6 +83,21 @@ async function apply(p, ctx = {}) {
         results.push({ text: s.display, ok: false, out: String(e.message) });
         return { ok: false, results };
       }
+    } else if (s.kind === 'replace') {
+      // Rewrite a file in the repo only if it is byte for byte what was previewed; keep a backup first
+      // when the plan names one (outside the repo, in GutCheck's data folder).
+      try {
+        assertInside(io, s.root, s.path);
+        const cur = io.readFileSync(s.path, 'utf8');
+        if (require('node:crypto').createHash('sha256').update(cur).digest('hex') !== s.expect) throw new Error('Changed since the preview. Rescan and review it again.');
+        if (s.backup) { io.mkdirSync(path.dirname(s.backup), { recursive: true, mode: 0o700 }); io.writeFileSync(s.backup, cur, { mode: 0o600 }); }
+        io.writeFileSync(s.path + '.gutcheck-tmp', s.content);
+        io.renameSync(s.path + '.gutcheck-tmp', s.path);
+        results.push({ text: s.display, ok: true, out: '' });
+      } catch (e) {
+        results.push({ text: s.display, ok: false, out: String(e.message) });
+        return { ok: false, results };
+      }
     } else if (s.kind === 'mkdir') {
       // Only GutCheck's own run folder (layer-3 test runs), never inside a repo.
       try { io.mkdirSync(s.path, { recursive: true, mode: 0o700 }); results.push({ text: s.display, ok: true, out: '' }); } catch (e) { results.push({ text: s.display, ok: false, out: String(e.message) }); return { ok: false, results }; }

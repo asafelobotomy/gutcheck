@@ -35,6 +35,9 @@ Usage: gutcheck <command> [options]
   ignored                       every ignored finding and why
   drift                         compare every repo with your baseline (baseline.json)
   baseline init                 create a starting baseline.json to edit
+  agents usage [--live --yes]   which skills, plugins and MCP servers your agents use (reads only tool
+                                names from Claude Code's transcripts); --live --yes also starts each
+                                MCP server once to see whether it works
   history                       changes GutCheck has made
   mcp [--allow-actions]         run as an MCP server on stdio (read-only unless --allow-actions)
 
@@ -42,7 +45,7 @@ Options: --root <folder>  --deep  --json  --yes  --confirm <name>  --help  --ver
 `;
 
 // key=value pairs for fix: numbers and booleans are converted, a,b,c becomes a list for list params.
-const LIST_PARAMS = new Set(['branches', 'paths', 'entries']);
+const LIST_PARAMS = new Set(['branches', 'paths', 'entries', 'hashes']);
 function parseValue(k, v) {
   if (LIST_PARAMS.has(k)) return v.split(',').map((x) => x.trim()).filter(Boolean);
   if (v === 'true' || v === 'false') return v === 'true';
@@ -165,6 +168,17 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
       out(`Baseline: ${r.file}\n`);
       for (const x of r.rules) out(`  ${x.missing.length ? '!' : '✓'} ${x.label.padEnd(34)} ${x.ok} ok${x.missing.length ? `, missing in ${x.missing.join(', ')}` : ''}`);
     });
+    case 'agents': {
+      if (rest[0] !== 'usage') { err('gutcheck: usage: gutcheck agents usage [--live --yes]'); return 1; }
+      if (f.live && !f.yes) { err('gutcheck: --live starts every configured MCP server (runs their code). Add --yes to agree.'); return 1; }
+      return done(await engine.agentUsage({ live: !!(f.live && f.yes) }), (r) => {
+        out(`${r.sessions} sessions in the last 28 days; ${r.inventory.plugins} plugins, ${r.inventory.servers} MCP servers, ${r.inventory.skills} skills.`);
+        for (const s of r.servers || []) out(`  ${s.status === 'working' ? '✓' : s.status === 'needs-auth' ? '!' : '✖'} ${s.name}: ${s.status}${s.reason ? ` (${s.reason})` : ''}`);
+        for (const x of r.items) out(`${icon[x.severity]} ${x.title}\n    ${x.detail}${x.fix ? `\n    Fix in the app (Settings > AI agents > Check usage) or: ${x.fix.type === 'permissions-prune' ? `gutcheck fix ${x.repo} permissions-prune hashes=${x.fix.hashes.join(',')}` : x.fix.label}` : ''}`);
+        if (!r.items.length) out('Everything you have set up was used, and nothing is broken.');
+        if (r.note) out(r.note);
+      });
+    }
     case 'repo': return done(await engine.repoDetail({ repo: rest[0] }));
     case 'report': { const r = await engine.report({ repo: rest[0] }); if (!r.ok) return done(r); out(r.text); return 0; }
     case 'clutter': return done(await engine.clutter({ repos: rest }));

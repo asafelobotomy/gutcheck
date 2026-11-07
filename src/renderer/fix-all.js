@@ -16,11 +16,12 @@
   const STEP = {
     pull: 0, 'gitignore-append': 1, 'commit-all': 2, 'npm-install': 3, 'add-file': 4,
     'delete-merged': 5, 'worktree-prune': 5, push: 6,
+    'split-instructions': 4, 'permissions-prune': 5,
     'run-rerun': 7, 'pr-close': 8, 'pr-merge': 8, 'repo-edit': 9, 'security-enable': 9, 'protect-branch': 10,
-    'tests-run': 11,
+    'lsp-setup': 11, 'tests-run': 12,
   };
   const step = (a) => (a.type === 'add-file' && a.template === 'gitignore' ? 1 : STEP[a.type] ?? 9);
-  const AUTO = new Set(['add-file', 'run-rerun', 'pull', 'push', 'delete-merged', 'security-enable', 'protect-branch', 'gitignore-append', 'worktree-prune', 'repo-edit']);
+  const AUTO = new Set(['add-file', 'run-rerun', 'pull', 'push', 'delete-merged', 'security-enable', 'protect-branch', 'gitignore-append', 'worktree-prune', 'repo-edit', 'permissions-prune']);
   const NOT_HERE = { 'claude-cleanup-days': 'a setting for this machine, not this repo' };
 
   const leave = (label = 'Leave it for now') => ({ label, action: null });
@@ -35,6 +36,8 @@
       case 'pr-close': return { ...base, pick: 0, choices: [{ label: 'Close it', action: fix }, leave('Leave it open')] };
       case 'repo-edit': return { ...base, pick: 0, choices: [{ label: 'Set a description', action: { type: 'repo-edit' }, fields: [{ name: 'description', label: 'One sentence about the project', required: true }] }, leave('Skip')] };
       case 'npm-install': return { ...base, pick: 1, choices: [{ label: `Run ${fix.label || 'the install'} (runs the packages' install scripts)`, action: { type: 'npm-install' } }, leave('Skip')] };
+      case 'split-instructions': return { ...base, pick: 0, choices: [{ label: `Split ${fix.file}: keep the core, move the largest sections to docs/agents/ (every line kept)`, action: fix }, leave()] };
+      case 'lsp-setup': return { ...base, pick: 1, choices: [{ label: 'Set it up (installs software)', action: fix }, leave('Skip')] };
       case 'tests-run': return { ...base, pick: 1, choices: [{ label: 'Run it (executes the project\'s code)', action: fix }, leave('Skip')] };
       default: return { ...base, pick: 0, choices: [{ label: fix.label || 'Do it', action: fix }, leave()] };
     }

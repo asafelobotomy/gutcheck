@@ -198,6 +198,26 @@ function createAgentConnect(opts = {}) {
     return { ok: true, token, title: p.title, display: p.display, preview: null, note: p.note, allowActions: false };
   }
 
+  // Machine-level fixes for agent setup (agent-tidy.js): stale config files, plugins, MCP servers, skills.
+  function planFix(fix, repos = []) {
+    const { planMachineFix } = require('./agent-tidy');
+    const p = planMachineFix(fix, { home, dataDir: (opts.launch && opts.launch.dataDir) || require('./paths').dataDir(env), bin: claudeBin(env, home, platform), repos, now: Date.now() });
+    if (p.error) return { ok: false, error: p.error };
+    const token = crypto.randomBytes(16).toString('hex');
+    plans.set(token, { ...p, client: { name: 'Agent setup', file: null }, expires: Date.now() + PLAN_TTL });
+    return { ok: true, token, title: p.title, display: p.display, preview: null, note: p.note || null, risk: p.risk };
+  }
+
+  // The opt-in usage check. live (a second consent) runs `claude mcp list`, which starts every server.
+  async function usageScan({ live = false, repos = [], onProgress } = {}) {
+    const { scanUsage } = require('./agent-usage');
+    const bin = claudeBin(env, home, platform);
+    if (live && !bin) return { ok: false, error: 'Claude Code was not found, so MCP servers cannot be checked.' };
+    const r = await scanUsage({ home, repos, live, bin, runner, onProgress });
+    if (live) audit({ repo: 'Agent setup', action: 'mcp-check', risk: 'caution', title: `Started ${r.servers ? r.servers.length : 0} MCP servers to check them (claude mcp list)`, ok: true, steps: [] });
+    return { ok: true, ...r };
+  }
+
   async function apply(token) {
     const p = plans.get(token);
     plans.delete(token); // single use
@@ -207,8 +227,20 @@ function createAgentConnect(opts = {}) {
     for (const s of p.steps) {
       if (s.kind === 'mkdir') {
         try { fs.mkdirSync(s.dir, { recursive: true, mode: 0o700 }); } catch (e) { results.push({ text: `create ${s.dir}`, ok: false, out: String(e.message) }); ok = false; break; }
+      } else if (s.kind === 'trash') {
+        // Re-checked at the last moment: unchanged since the preview, then recoverable removal.
+        try {
+          const st = fs.statSync(s.path);
+          if (s.mtime && st.mtimeMs !== s.mtime) throw new Error('Changed since the preview. Review it again.');
+          if (opts.trash) await opts.trash(s.path);
+          else { const t = await runner('gio', ['trash', '--', s.path]); if (!t.ok) throw new Error('Could not move to trash: ' + t.stderr.trim()); }
+          results.push({ text: `trash ${s.path.replace(home, '~')}`, ok: true, out: '' });
+        } catch (e) {
+          if (e && e.code === 'ENOENT') { results.push({ text: `trash ${s.path.replace(home, '~')}`, ok: true, out: 'already gone' }); continue; }
+          results.push({ text: `trash ${s.path.replace(home, '~')}`, ok: false, out: String(e.message) }); ok = false; break;
+        }
       } else if (s.kind === 'cmd') {
-        const r = await runner(s.argv[0], s.argv.slice(1), { cwd: s.cwd || home, timeout: 5 * 60 * 1000 });
+        const r = await runner(s.argv[0], s.argv.slice(1), { cwd: s.cwd || home, timeout: s.timeout || 5 * 60 * 1000 });
         results.push({ text: s.label || show(s.argv), ok: r.ok || !!s.optional, out: s.label ? '' : (r.stdout + r.stderr).trim().slice(0, 2000) });
         if (!r.ok && !s.optional) { ok = false; break; }
       } else {
@@ -226,7 +258,13 @@ function createAgentConnect(opts = {}) {
     return { ok, title: p.title, results, note: p.note || null };
   }
 
-  return { status, plan, planCleanup, apply };
+  return { status, plan, planCleanup, planFix, usageScan, apply };
 }
 
-module.exports = { createAgentConnect, serverCommand, clients, snippet, NAME };
+// The claude program (on PATH, or the copy bundled with Claude Desktop), or null.
+function claudeBin(env = process.env, home = os.homedir(), platform = process.platform) {
+  const c = clients(home, platform, env).find((x) => x.id === 'claude-code');
+  return c ? findBin(c, env, dirs(home, platform, env).appData) : null;
+}
+
+module.exports = { createAgentConnect, serverCommand, clients, snippet, claudeBin, NAME };
