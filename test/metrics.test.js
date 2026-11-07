@@ -62,6 +62,16 @@ test('groupFindings collapses numbered titles across repos, most severe first', 
   ]);
   assert.equal(g[0].sev, 'error');
   assert.equal(g[1].repos.length, 2);
+  assert.equal(g[1].title, 'PR #N stale for N days', 'numbers that differ per repo become N');
+});
+
+test('groupFindings keeps the real title when every repo in the group has the same one', () => {
+  const g = groupFindings([
+    repo('a', { findings: [f('w', 'warn', 'Actions security', '1 workflow without a permissions block'), f('l', 'error', 'Docs', 'Missing LICENSE')] }),
+    repo('b', { findings: [f('l', 'error', 'Docs', 'Missing LICENSE'), f('d', 'warn', 'Deps', '3 open Dependabot alerts')] }),
+    repo('c', { findings: [f('d', 'warn', 'Deps', '3 open Dependabot alerts')] }),
+  ]);
+  assert.deepEqual(g.map((x) => x.title).sort(), ['1 workflow without a permissions block', '3 open Dependabot alerts', 'Missing LICENSE']);
 });
 
 const { heatmap, snapshot, movers, delta } = require('../src/renderer/metrics');

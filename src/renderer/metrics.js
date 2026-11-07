@@ -15,13 +15,16 @@
   function groupFindings(repos) {
     const groups = new Map();
     for (const r of repos) for (const f of r.findings || []) {
-      const title = f.title.replace(/#?\d+/g, 'N');
-      const key = f.category + '|' + title;
-      const g = groups.get(key) || { title, sev: f.severity, cat: f.category, repos: [], fixes: [] };
+      const key = f.category + '|' + f.title.replace(/#?\d+/g, 'N');
+      const g = groups.get(key) || { title: f.title, titles: new Set(), sev: f.severity, cat: f.category, repos: [], fixes: [] };
+      g.titles.add(f.title);
       g.repos.push(r.name);
       g.fixes.push(f.fix ? { repo: r, action: f.fix } : null);
       groups.set(key, g);
     }
+    // One repo, or the same numbers everywhere: show the real title ("1 workflow without..."). Otherwise
+    // the numbers differ per repo and become N ("PR #N has merge conflicts").
+    for (const g of groups.values()) { if (g.titles.size > 1) g.title = g.title.replace(/(#?)\d+/g, '$1N'); delete g.titles; }
     return [...groups.values()].sort((a, b) => SEV_ORDER[a.sev] - SEV_ORDER[b.sev] || b.repos.length - a.repos.length);
   }
 

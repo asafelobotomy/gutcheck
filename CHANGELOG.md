@@ -4,6 +4,10 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Fixed
+
+- Workspace overview: a group whose repos share the same title shows it as is ("1 workflow without a permissions block", "PR #7 has merge conflicts") instead of replacing every number with N. Titles whose numbers differ per repo still read "PR #N ...".
+
 ## [0.24.1] - 2026-11-07
 
 ### Added
