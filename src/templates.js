@@ -28,10 +28,11 @@ SOFTWARE.
 // One block per ecosystem and folder (src-tauri/Cargo.toml, android/build.gradle...), plus GitHub Actions.
 // ctx.ecosystems comes from findEcosystems(); a bare list of root manifests still works.
 const ROOT_ECO = { 'package.json': 'npm', 'Cargo.toml': 'cargo', 'go.mod': 'gomod', 'pyproject.toml': 'pip', 'requirements.txt': 'pip' };
-const dependabot = (manifests, ecosystems) => {
+const dependabot = (manifests, ecosystems, hasWorkflows) => {
   const list = ecosystems && ecosystems.length ? ecosystems : [...new Set(manifests.map((m) => ROOT_ECO[m]).filter(Boolean))].map((eco) => ({ eco, dir: '/' }));
   const blocks = list.map((e) => `  - package-ecosystem: ${e.eco}\n    directory: ${e.dir}\n    schedule:\n      interval: weekly\n`);
-  blocks.push('  - package-ecosystem: github-actions\n    directory: /\n    schedule:\n      interval: weekly\n');
+  // Only with workflows to update: Dependabot errors out on a github-actions entry with nothing to read.
+  if (hasWorkflows !== false) blocks.push('  - package-ecosystem: github-actions\n    directory: /\n    schedule:\n      interval: weekly\n');
   return `version: 2\nupdates:\n${blocks.join('')}`;
 };
 
@@ -86,7 +87,7 @@ const TEMPLATES = {
     label: '.gitattributes',
     build: () => '# Normalise line endings in the repository; check out with the platform default.\n* text=auto\n# Windows scripts must keep CRLF.\n*.bat text eol=crlf\n*.cmd text eol=crlf\n',
   },
-  dependabot: { file: '.github/dependabot.yml', label: 'Dependabot config', build: (c) => dependabot(c.manifests || [], c.ecosystems) },
+  dependabot: { file: '.github/dependabot.yml', label: 'Dependabot config', build: (c) => dependabot(c.manifests || [], c.ecosystems, c.hasWorkflows) },
   'ci-node': {
     file: '.github/workflows/ci.yml',
     label: 'Node CI workflow',

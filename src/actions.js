@@ -265,7 +265,7 @@ const ACTIONS = {
       if (ctx.fs.existsSync(target)) fail(`${t.file} already exists.`);
       const author = (await readGit(ctx, ['config', 'user.name'], r.path)).stdout.trim() || 'Author';
       const manifests = (r.deps && r.deps.manifests) || [];
-      const content = t.build({ author, name: path.basename(r.path), manifests, ecosystems: findEcosystems(r.path), stacks: detectStacks(r.path), owner: r.remote && r.remote.owner, branch: (r.remote && r.remote.defaultBranch) || r.git.branch || 'main' });
+      const content = t.build({ author, name: path.basename(r.path), manifests, ecosystems: findEcosystems(r.path), stacks: detectStacks(r.path), owner: r.remote && r.remote.owner, hasWorkflows: !!r.hasWorkflows, branch: (r.remote && r.remote.defaultBranch) || r.git.branch || 'main' });
       const steps = [{ kind: 'write', root: r.path, path: target, content, display: `write ${t.file} (${content.length} bytes)`, preview: content.split('\n').slice(0, 14).join('\n') }];
       if (p.commit) steps.push(git(['add', '--', t.file], r.path), git(['commit', '-m', `Add ${t.label}`, '--', t.file], r.path));
       return { risk: p.commit ? 'caution' : 'safe', title: `Add ${t.file}${p.commit ? ' and commit it' : ''}`, steps, undo: p.commit ? 'git reset --soft HEAD~1 && git rm --cached ' + t.file : `rm ${t.file}` };

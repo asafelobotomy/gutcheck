@@ -207,6 +207,7 @@ test('templates: Dependabot covers every ecosystem and folder; CONTRIBUTING name
     const yml = TEMPLATES.dependabot.build({ manifests: [], ecosystems: eco });
     assert.match(yml, /package-ecosystem: cargo\n {4}directory: \/src-tauri/);
     assert.match(yml, /package-ecosystem: github-actions/);
+    assert.doesNotMatch(TEMPLATES.dependabot.build({ manifests: [], ecosystems: eco, hasWorkflows: false }), /github-actions/, 'no workflows: Dependabot would fail on a github-actions entry');
   } finally { rm(d); }
   const c = TEMPLATES.contributing.build({ name: 'x', stacks: [{ id: 'node', root: '.' }, { id: 'rust', root: 'src-tauri' }] });
   assert.match(c, /Run the tests: `npm test`, `cargo test` \(in src-tauri\/\)\./);
