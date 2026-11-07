@@ -68,6 +68,7 @@ function openExternal(url) {
 }
 
 handle('settings:get', () => loadSettings());
+handle('app:version', () => app.getVersion());
 
 handle('auth:status', async () => {
   const r = await run('gh', ['auth', 'status']);

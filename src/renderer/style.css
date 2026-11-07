@@ -141,3 +141,4 @@ div.warnbox { font-size: 12px; border-left: 3px solid var(--warn); color: var(--
 .modal h4 { margin: 14px 0 4px; font-size: 13px; }
 .modal .plans { max-height: 52vh; overflow: auto; }
 .finding.ignored { opacity: .7; border-left-color: var(--muted, #888); }
+.ver { font-size: .55em; font-weight: 400; color: var(--muted, #888); margin-left: .3em; }

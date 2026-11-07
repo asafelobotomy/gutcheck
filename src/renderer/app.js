@@ -356,6 +356,8 @@ $('readonly').addEventListener('change', async (e) => {
 });
 
 (async () => {
+  state.version = await window.api.version();
+  $('version').textContent = state.version ? 'v' + state.version : '';
   const s = await window.api.settings();
   if (s.root) $('root').value = s.root;
   $('deep').checked = !!s.deep;

@@ -44,7 +44,7 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
   const calls = [];
   let onRepo = () => {};
   w.api = {
-    settings: async () => settings, rate: async () => null, authStatus: async () => ({ ok: true }), pickDir: async () => '/w',
+    settings: async () => settings, version: async () => '9.9.9', rate: async () => null, authStatus: async () => ({ ok: true }), pickDir: async () => '/w',
     scan: async () => { repos.forEach((r, i) => onRepo({ res: r, done: i + 1, total: repos.length })); return { ok: true, count: repos.length }; },
     rescan: async () => ({ ok: false }),
     planActions: async (items) => { calls.push(['plan', items]); return items.map((i) => ({ ok: true, token: 't', repoName: 'gamma', title: 'Remove', risk: 'danger', display: [{ text: 'move to trash' }], warnings: [], undo: null, confirmName: 'gamma' })); },

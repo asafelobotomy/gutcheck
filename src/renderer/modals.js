@@ -133,7 +133,7 @@ const BACKGROUND_SPEC = {
 
 async function openBackgroundSettings() {
   const cur = await window.api.background();
-  const out = await askInputs(BACKGROUND_SPEC, cur);
+  const out = await askInputs({ ...BACKGROUND_SPEC, title: state.version ? `Settings · GutCheck ${state.version}` : BACKGROUND_SPEC.title }, cur);
   if (!out) return;
   const saved = await window.api.setBackground(out);
   if (saved.error) return toast(saved.error, 'bad');

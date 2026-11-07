@@ -228,7 +228,8 @@ test('Settings > AI agents: connect shows the exact command first, follows the a
   const t = await boot();
   click(t.$('#background'));
   await tick();
-  assert.equal(t.$('.modal .mh').textContent, 'Settings');
+  assert.equal(t.$('.modal .mh').textContent, 'Settings · GutCheck 9.9.9', 'the dialog names the running version');
+  assert.equal(t.$('#version').textContent, 'v9.9.9');
   click(t.$$('.modal button').find((b) => b.textContent === 'Connect an AI agent…'));
   await tick();
   assert.equal(t.$('.modal .mh').textContent, 'AI agents');

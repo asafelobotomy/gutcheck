@@ -1,7 +1,7 @@
 {
   "name": "gutcheck",
   "productName": "GutCheck",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "Workspace-wide GitHub health dashboard built on the gh CLI",
   "main": "src/entry.js",
   "bin": {
@@ -15,7 +15,8 @@
   "scripts": {
     "start": "electron . --no-sandbox",
     "test": "node --test test/*.test.js",
-    "dist": "electron-builder --linux AppImage"
+    "dist": "electron-builder --linux AppImage",
+    "bump": "node scripts/version.js bump"
   },
   "devDependencies": {
     "electron": "^45.2.3",

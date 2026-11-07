@@ -229,7 +229,7 @@ npm run dist   # build the AppImage into dist/
 
 ### Releasing
 
-Bump `version` in `package.json` and `package-lock.json` (both; a test checks they agree) and push to `main`. CI then runs the tests, builds the AppImage with a `SHA256SUMS.txt`, creates the tag `v<version>` at that commit and publishes a GitHub release with generated notes. Nothing is released if the tests or the build fail, if that version already has a release or tag, or on pull requests. Versions with a suffix (such as `1.0.0-beta.1`) are published as pre-releases.
+Note each change under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md) as you go. To release, run `npm run bump -- patch` (or `minor`, `major`, or an exact `1.2.3`): it turns Unreleased into a dated section for the new version and updates `package.json` and `package-lock.json` together. It refuses when Unreleased is empty. Commit and push to `main`. CI then runs the tests (which fail if the version has no changelog section, or the two package files disagree), builds the AppImage with a `SHA256SUMS.txt`, creates the tag `v<version>` at that commit and publishes a GitHub release whose notes are that changelog section plus GitHub's list of changes. `node scripts/version.js notes 0.23.0` prints any version's notes. The app shows its version in the header and in Settings; `gutcheck --version` prints it. Nothing is released if the tests or the build fail, if that version already has a release or tag, or on pull requests. Versions with a suffix (such as `1.0.0-beta.1`) are published as pre-releases.
 
 You can still release by pushing a tag yourself (`git tag v0.9.0 && git push origin v0.9.0`); the build fails if the tag does not match `package.json`.
 

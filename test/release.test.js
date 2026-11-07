@@ -71,3 +71,35 @@ test('release permissions stay minimal and actions stay pinned to SHAs', () => {
   for (const line of wf.split('\n').filter((l) => /^\s*-?\s*uses:/.test(l))) assert.match(line, /@[0-9a-f]{40}\b/, line);
   assert.match(releaseJob, /concurrency:\n {6}group: release\n {6}cancel-in-progress: false/, 'releases are serialised, never cancelled half way');
 });
+
+const os = require('node:os');
+const version = require('../scripts/version');
+
+test('CHANGELOG.md has a section for the version being released, and an Unreleased section', () => {
+  const log = read('CHANGELOG.md');
+  assert.ok(version.check(root));
+  assert.notEqual(version.section(log, 'Unreleased'), null);
+});
+
+test('version bump: next versions, changelog sections and compare links move, both package files agree', () => {
+  assert.deepEqual(['patch', 'minor', 'major', '2.0.0'].map((k) => version.next('1.4.2', k)), ['1.4.3', '1.5.0', '2.0.0', '2.0.0']);
+  assert.equal(version.next('1.5.0-rc.1', 'patch'), '1.5.0');
+  assert.throws(() => version.next('1.4.2', 'huge'));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gutcheck-ver-'));
+  try {
+    fs.writeFileSync(path.join(d, 'package.json'), '{\n  "name": "x",\n  "version": "1.4.2",\n  "dependencies": { "a": "1.0.0" }\n}\n');
+    fs.writeFileSync(path.join(d, 'package-lock.json'), JSON.stringify({ name: 'x', version: '1.4.2', lockfileVersion: 3, packages: { '': { name: 'x', version: '1.4.2' }, 'node_modules/a': { version: '1.0.0' } } }, null, 2));
+    const log = '# Changelog\n\n## [Unreleased]\n\n### Fixed\n\n- A bug.\n\n## [1.4.2] - 2026-01-01\n\n- Old.\n\n[Unreleased]: https://github.com/o/x/compare/v1.4.2...HEAD\n';
+    fs.writeFileSync(path.join(d, 'CHANGELOG.md'), log);
+    assert.equal(version.bump(d, 'minor', { today: '2026-02-03' }), '1.5.0');
+    const out = fs.readFileSync(path.join(d, 'CHANGELOG.md'), 'utf8');
+    assert.equal(version.section(out, 'Unreleased'), '');
+    assert.equal(version.section(out, '1.5.0'), '### Fixed\n\n- A bug.');
+    assert.match(out, /## \[1\.5\.0\] - 2026-02-03/);
+    assert.match(out, /^\[Unreleased\]: https:\/\/github\.com\/o\/x\/compare\/v1\.5\.0\.\.\.HEAD\n\[1\.5\.0\]: https:\/\/github\.com\/o\/x\/compare\/v1\.4\.2\.\.\.v1\.5\.0$/m);
+    const lock = JSON.parse(fs.readFileSync(path.join(d, 'package-lock.json'), 'utf8'));
+    assert.deepEqual([JSON.parse(fs.readFileSync(path.join(d, 'package.json'), 'utf8')).version, lock.version, lock.packages[''].version, lock.packages['node_modules/a'].version], ['1.5.0', '1.5.0', '1.5.0', '1.0.0'], 'dependency versions are untouched');
+    assert.throws(() => version.bump(d, 'patch'), /Nothing under/, 'an empty Unreleased cannot be released');
+    assert.throws(() => version.bump(d, '1.0.0'), /not newer/);
+  } finally { fs.rmSync(d, { recursive: true, force: true }); }
+});

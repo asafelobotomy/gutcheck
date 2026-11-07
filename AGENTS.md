@@ -28,4 +28,5 @@ GutCheck is an Electron app (plus a CLI and an MCP server) that checks the healt
 - Never put secret values, `.env` contents or settings values into findings, reports or logs.
 - Keep files under 400 lines; GutCheck checks itself.
 - Explain each new rule's source in `docs/sources.md`, and add a test for each false alarm you fix (`test/accuracy.test.js`).
-- Releasing: bump `version` in `package.json` and `package-lock.json` (a test checks they agree) and push to `main`; CI tags and publishes.
+- Changes go under `## [Unreleased]` in `CHANGELOG.md`.
+- Releasing: `npm run bump -- patch|minor|major` (moves Unreleased into a dated version and updates `package.json` and `package-lock.json`; tests check all three agree), commit, push to `main`. CI tags `v<version>` and publishes the release with that changelog section as its notes.
