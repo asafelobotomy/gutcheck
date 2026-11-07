@@ -4,6 +4,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [0.24.2] - 2026-11-07
+
 ### Fixed
 
 - Workspace overview: a group whose repos share the same title shows it as is ("1 workflow without a permissions block", "PR #7 has merge conflicts") instead of replacing every number with N. Titles whose numbers differ per repo still read "PR #N ...".
@@ -200,6 +202,7 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 - First release: health checks for every git repo in a folder.
 
-[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.24.1...HEAD
+[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.24.2...HEAD
+[0.24.2]: https://github.com/asafelobotomy/gutcheck/compare/v0.24.1...v0.24.2
 [0.24.1]: https://github.com/asafelobotomy/gutcheck/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.23.0...v0.24.0
