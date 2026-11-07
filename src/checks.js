@@ -28,7 +28,7 @@ function checkCI(s) {
       // version): a warning about that update, not a broken build.
       severity: r.workflowName === 'Dependabot Updates' ? 'warn' : 'error',
       title: `Failed: ${r.workflowName} on ${r.headBranch}`,
-      detail: `${r.displayTitle} (${daysAgo(r.createdAt)}d ago)${r.workflowName === 'Dependabot Updates' ? '. Dependabot could not make this update; its log says why (often a version conflict). It retries on its schedule.' : ''}`,
+      detail: `${r.displayTitle} (${daysAgo(r.createdAt)}d ago)${r.newerPending ? '. A newer run is queued or running: check it before fixing anything' : ''}${r.workflowName === 'Dependabot Updates' ? '. Dependabot could not make this update; its log says why (often a version conflict). It retries on its schedule.' : ''}`,
       url: r.url,
       // Dependabot's own runs are dynamic: GitHub cannot re-run them (gh run rerun fails). They retry on schedule.
       fix: r.workflowName === 'Dependabot Updates' ? undefined : { type: 'run-rerun', label: 'Re-run failed jobs', runId: r.databaseId, failedOnly: true },
@@ -41,6 +41,11 @@ function checkPRs(s) {
   const out = [];
   for (const pr of s.prs) {
     const age = daysAgo(pr.updatedAt);
+    // A Dependabot PR the default branch has overtaken: close it rather than rebase or repair it.
+    if (pr.superseded) {
+      out.push({ id: 'pr-superseded-' + pr.number, category: 'PRs', severity: 'info', title: `PR #${pr.number} is superseded`, detail: `${pr.title}. The default branch already has ${pr.superseded.map((u) => `${u.name} ${u.have}`).join(', ')}, so this Dependabot PR is no longer needed.`, url: pr.url, fix: { type: 'pr-close', label: 'Close…', number: pr.number } });
+      continue;
+    }
     if (pr.mergeable === 'CONFLICTING')
       out.push({ id: 'pr-conflict-' + pr.number, category: 'PRs', severity: 'error', title: `PR #${pr.number} has merge conflicts`, detail: pr.title, url: pr.url });
     if (pr.statusCheckRollup === 'FAILURE')

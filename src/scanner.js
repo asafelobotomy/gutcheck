@@ -6,6 +6,7 @@ const { evaluate } = require('./checks');
 const { collectHygiene } = require('./hygiene');
 const gh = require('./github');
 const { scanAgents } = require('./agents');
+const { lockVersions, superseded } = require('./dependabot-prs');
 
 const SKIP = new Set(HEAVY_DIRS); // dot-folders are skipped separately
 
@@ -204,6 +205,11 @@ async function finish(local, ghRes, opts) {
       remote.remote = { owner: ref.owner, name: ref.name, url: `https://github.com/${ref.owner}/${ref.name}`, isPublic: false, unreachable: true, description: 'unknown', defaultBranch: null };
       remote.ci.error = ghRes ? ghRes.error : 'GitHub data unavailable';
     }
+  }
+  // Dependabot PRs the default branch has already overtaken (checked against the local lockfiles).
+  if ((remote.prs || []).some((p) => p.updates && p.updates.length)) {
+    const versions = lockVersions(dir);
+    for (const p of remote.prs) p.superseded = superseded(p, versions);
   }
   const g = local.git;
   const base = (remote.remote && remote.remote.defaultBranch) || (g.branches.some((b) => b.name === 'main') ? 'main' : g.branches.some((b) => b.name === 'master') ? 'master' : null);

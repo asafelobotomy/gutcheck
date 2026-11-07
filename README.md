@@ -7,7 +7,7 @@ A desktop dashboard that gives you a health check across every GitHub project in
 ## What it checks
 
 - **CI**: failing workflow runs on the default branch
-- **Pull requests**: conflicts, failing checks, stale PRs, approved and mergeable PRs
+- **Pull requests**: conflicts, failing checks, stale PRs, approved and mergeable PRs. A Dependabot PR the default branch has already overtaken (every package it bumps is at or past its target in the lockfiles, same ecosystem) is reported as superseded, with a close instead of a rebase. A failed CI run says when a newer run is already queued
 - **Branches**: uncommitted or unpushed work, behind upstream, merged and stale branches
 - **Licence and docs**: LICENSE (an error only for public repos), README (and whether it says how to install or use the project), `.gitignore`, SECURITY, CONTRIBUTING, CODE_OF_CONDUCT, PR template. Files are found where GitHub looks (`.github/`, the root, `docs/`), and defaults from your account's `.github` repository count.
 - **Project setup**: CHANGELOG or GitHub releases for tagged versions, `.gitattributes`, `.editorconfig`, pinned Node/Python version, and for public repos CODEOWNERS, issue templates and topics

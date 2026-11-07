@@ -16,6 +16,7 @@ const MIN_GRAPHQL = 50;
 const cache = new Map(); // "owner/name" -> { at, snap }
 const rate = { core: null, graphql: null, limited: false };
 
+const { parseUpdates } = require('./dependabot-prs');
 const NAME_RE = /^[A-Za-z0-9._-]+$/;
 
 const FRAGMENT = `
@@ -34,7 +35,7 @@ fragment F on Repository {
   pullRequests(states: OPEN, first: 30, orderBy: { field: UPDATED_AT, direction: DESC }) {
     totalCount
     nodes {
-      number title url isDraft updatedAt mergeable reviewDecision headRefName
+      number title body url isDraft updatedAt mergeable reviewDecision headRefName
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
     }
   }
@@ -126,6 +127,8 @@ function toSnapshot(ref, n) {
     prs: ((n.pullRequests && n.pullRequests.nodes) || []).map((p) => ({
       number: p.number, title: p.title, url: p.url, isDraft: p.isDraft, updatedAt: p.updatedAt,
       mergeable: p.mergeable, reviewDecision: p.reviewDecision, headRefName: p.headRefName,
+      // Only the packages a Dependabot PR bumps are kept from its body, never the body itself.
+      updates: /^dependabot\//.test(p.headRefName || '') ? parseUpdates(p.title, p.body) : [],
       statusCheckRollup: rollup(p.commits && p.commits.nodes[0] && p.commits.nodes[0].commit.statusCheckRollup && p.commits.nodes[0].commit.statusCheckRollup.state),
     })),
     // Only admins can see protection rules; for everyone else "no rule visible" means unknown, not unprotected.
@@ -220,10 +223,12 @@ async function fetchFailedRunsUncached(ref, defaultBranch, cwd) {
   }
   const seen = new Set();
   const failed = [];
+  const pending = new Set(); // workflows with a newer run still queued or running (runs come newest first)
   for (const run_ of r.data) {
-    if (run_.status !== 'completed' || seen.has(run_.workflowName)) continue;
+    if (run_.status !== 'completed') { if (!seen.has(run_.workflowName)) pending.add(run_.workflowName); continue; }
+    if (seen.has(run_.workflowName)) continue;
     seen.add(run_.workflowName);
-    if (run_.conclusion === 'failure' || run_.conclusion === 'timed_out') failed.push(run_);
+    if (run_.conclusion === 'failure' || run_.conclusion === 'timed_out') failed.push({ ...run_, newerPending: pending.has(run_.workflowName) });
   }
   return { failed, error: null };
 }

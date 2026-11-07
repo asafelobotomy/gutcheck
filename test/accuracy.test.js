@@ -214,3 +214,27 @@ test('templates: Dependabot covers every ecosystem and folder; CONTRIBUTING name
   assert.match(TEMPLATES.codeowners.build({ owner: 'me' }), /^\* @me$/m);
   assert.doesNotMatch(TEMPLATES.editorconfig.build(), /indent/, 'no indentation rules that could contradict the code');
 });
+
+test('superseded Dependabot PRs: same ecosystem only, close instead of rebase; a failed run notes a newer one queued', () => {
+  const { parseUpdates, lockVersions, superseded } = require('../src/dependabot-prs');
+  const d = tmp();
+  try {
+    put(d, 'package-lock.json', JSON.stringify({ packages: { 'node_modules/tar': { version: '6.2.1' }, 'node_modules/electron': { version: '45.2.3' } } }));
+    put(d, 'src-tauri/Cargo.lock', '[[package]]\nname = "tar"\nversion = "0.4.46"\n\n[[package]]\nname = "zbus"\nversion = "5.17.0"\n');
+    const v = lockVersions(d);
+    const pr = (branch, title, body) => superseded({ headRefName: branch, updates: parseUpdates(title, body) }, v);
+    assert.deepEqual(pr('dependabot/cargo/src-tauri/tar-0.4.46', 'Bump tar from 0.4.38 to 0.4.46 in /src-tauri'), [{ name: 'tar', to: '0.4.46', have: '0.4.46' }]);
+    assert.equal(pr('dependabot/npm_and_yarn/tar-7.5.11', 'Bump tar from 6.2.1 to 7.5.11'), null, "npm's tar is a different package from Rust's");
+    assert.equal(pr('dependabot/cargo/zbus-6.2.1', 'Bump zbus from 5.17.0 to 6.2.1'), null, 'a real update is not superseded');
+    assert.deepEqual(pr('dependabot/npm_and_yarn/group-x', 'Bump the npm_and_yarn group with 1 update', 'Updates `electron` from 33.4.11 to 42.11.16').map((u) => u.have), ['45.2.3']);
+    assert.equal(pr('feature/x', 'Bump tar from 0.4.38 to 0.4.46'), null, 'only Dependabot branches');
+  } finally { rm(d); }
+  const s = base({ prs: [{ number: 9, title: 'Bump tar from 0.4.38 to 0.4.46', url: 'u', headRefName: 'dependabot/cargo/tar-0.4.46', mergeable: 'CONFLICTING', statusCheckRollup: 'FAILURE', updatedAt: new Date().toISOString(), superseded: [{ name: 'tar', to: '0.4.46', have: '0.4.46' }] }], protection: true });
+  const ids = evaluate(s).findings.map((f) => f.id);
+  assert.ok(ids.includes('pr-superseded-9'));
+  assert.ok(!ids.includes('pr-conflict-9') && !ids.includes('pr-ci-9'), 'one finding: close it');
+  const text = buildReport({ repos: [{ name: 'r', path: '/w/r', score: 90, grade: 'A', git: {}, remote: { owner: 'o', name: 'r', url: 'https://github.com/o/r', defaultBranch: 'main' }, prs: s.prs, findings: evaluate(s).findings }] });
+  assert.match(text, /gh pr close 9 -R o\/r --comment 'Superseded/);
+  const run = { databaseId: 3, workflowName: 'Build Android', headBranch: 'main', displayTitle: 't', createdAt: new Date().toISOString(), newerPending: true };
+  assert.match(evaluate(base({ ci: { failed: [run], error: null }, protection: true })).findings.find((f) => f.id === 'ci-failed-3').detail, /A newer run is queued or running/);
+});
