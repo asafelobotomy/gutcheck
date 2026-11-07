@@ -182,13 +182,29 @@ function clutterSection(c) {
   return `\n**Clutter detected** (${plural(c.items.length, 'item')}; none are tracked by git)\n${lines.join('\n')}${more}\n`;
 }
 
+// A command block. Every line is one command: control characters (a newline in a file name) are
+// flattened so nothing can start a new line, and the fence is longer than any run of backticks inside,
+// so no text can close it and pose as a step of its own.
+function fence(cmds) {
+  const body = cmds.map((c) => String(c).replace(/[\u0000-\u001f\u007f]/g, ' ')).join('\n');
+  const longest = Math.max(0, ...(body.match(/`+/g) || []).map((m) => m.length));
+  const f = '`'.repeat(Math.max(3, longest + 1));
+  return `${f}bash\n${body}\n${f}`;
+}
+
+// File names with control characters or backticks are not safe to paste into a shell: they are left
+// out of the commands (and the note says so), to be removed in GutCheck instead.
+const UNSAFE_NAME = /[\u0000-\u001f\u007f`]/;
+
 function clutterStep(c) {
   if (!c || !c.items || !c.items.length) return null;
   const hi = c.items.filter((i) => i.confidence === 'high');
   const rest = c.items.length - hi.length;
   const envs = c.items.filter((i) => i.category === 'env');
   const cmds = [];
-  for (const i of hi.slice(0, MAX_CLUTTER_LINES)) cmds.push(i.mode === 'delete' ? `rm -rf -- ${sq(i.path)}` : `gio trash -- ${sq(i.path)}`);
+  const listed = hi.slice(0, MAX_CLUTTER_LINES);
+  const unsafe = listed.filter((i) => UNSAFE_NAME.test(String(i.path))).length;
+  for (const i of listed) if (!UNSAFE_NAME.test(String(i.path))) cmds.push(i.mode === 'delete' ? `rm -rf -- ${sq(i.path)}` : `gio trash -- ${sq(i.path)}`);
   return {
     phase: 6, rank: 2,
     title: `Remove ${plural(c.items.length, 'clutter item')}`,
@@ -196,6 +212,7 @@ function clutterStep(c) {
     cmds,
     note: [
       `${hi.length > MAX_CLUTTER_LINES ? `The first ${MAX_CLUTTER_LINES} of ${hi.length}` : hi.length} high-confidence item${hi.length === 1 ? '' : 's'} are listed as commands (run from the repo root${hi.length > MAX_CLUTTER_LINES ? '; rescan for the rest' : ''}). ${rest ? `The other ${rest} (medium/low confidence) need a human decision: show the owner and ask before removing any.` : ''}`,
+      unsafe ? `${plural(unsafe, 'item')} with control characters or backticks in the name ${unsafe === 1 ? 'is' : 'are'} left out of the commands: remove ${unsafe === 1 ? 'it' : 'them'} with GutCheck's Clutter view instead.` : '',
       envs.length ? 'ENV FILES: never print, open, diff or paste their contents. Compare with checksums (sha256sum) if needed, and move to trash rather than deleting. Ask before removing any env file.' : '',
     ].filter(Boolean).join(' '),
     severity: 'warn',
@@ -231,7 +248,7 @@ function renderSteps(steps, level = 2) {
     out.push(`${st} Step ${n++} [${s.sev}] ${t(s.title, LEN.path)}`);
     if (s.detail) out.push(`Detail: ${t(s.detail, LEN.detail)}`);
     out.push(`Why: ${s.why}`);
-    if (s.cmds.length) out.push('```bash\n' + s.cmds.join('\n') + '\n```');
+    if (s.cmds.length) out.push(fence(s.cmds));
     if (s.note) out.push(`Note: ${s.note}`);
     if (s.ref) out.push(`Source: ${s.ref}`);
     out.push('');

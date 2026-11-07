@@ -171,8 +171,15 @@ test('gitignore-append only accepts allowlisted rules and skips existing ones', 
     const p = await plan(r, { type: 'gitignore-append', entries: ['.env', '.env.*', '__pycache__/'] });
     assert.ok(p.ok, p.error);
     assert.ok((await apply(p)).ok);
-    assert.equal(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8'), 'node_modules\n.env\n.env.*\n__pycache__/\n');
+    // ".env.*" brings its "!.env.example" exception, after it, so the template stays committable.
+    assert.equal(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8'), 'node_modules\n.env\n.env.*\n__pycache__/\n!.env.example\n');
     assert.equal((await plan(r, { type: 'gitignore-append', entries: ['.env'] })).ok, false); // nothing new
+    // An earlier "!.env.example" would be overridden by a later ".env.*": it is repeated after it.
+    put(dir, '.gitignore', '!.env.example\n');
+    const q = await plan(r, { type: 'gitignore-append', entries: ['.env', '.env.*', '!.env.example'] });
+    assert.ok((await apply(q)).ok);
+    assert.equal(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8'), '!.env.example\n.env\n.env.*\n!.env.example\n');
+    assert.match(require('../src/templates').TEMPLATES.gitignore.build({}), /\.env\.\*\n!\.env\.example\n/, 'the .gitignore template keeps .env.example too');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

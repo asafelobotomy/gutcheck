@@ -52,7 +52,7 @@ const TEMPLATES = {
   license: { file: 'LICENSE', label: 'MIT licence', build: (c) => MIT(c.author) },
   readme: { file: 'README.md', label: 'README', build: (c) => `# ${c.name}\n\nTODO: describe what this project does, how to install it and how to run it.\n` },
   // Common output and secrets, plus caches for the languages the repo uses.
-  gitignore: { file: '.gitignore', label: '.gitignore', build: (c) => 'node_modules/\ndist/\nbuild/\ntarget/\n.env\n.env.*\n*.log\n.DS_Store\n' + [...new Set(((c && c.stacks) || []).map((x) => IGNORE_BY_STACK[x.id]).filter(Boolean))].join('') },
+  gitignore: { file: '.gitignore', label: '.gitignore', build: (c) => 'node_modules/\ndist/\nbuild/\ntarget/\n.env\n.env.*\n!.env.example\n*.log\n.DS_Store\n' + [...new Set(((c && c.stacks) || []).map((x) => IGNORE_BY_STACK[x.id]).filter(Boolean))].join('') },
   security: {
     file: 'SECURITY.md',
     label: 'Security policy',

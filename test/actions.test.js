@@ -255,3 +255,28 @@ test('templates follow the repo\'s default branch', async () => {
     assert.match(c.steps[0].content, /branch from `trunk`/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('commit-all: the first file leaving the list after the preview is fine (its leading status space is kept)', async () => {
+  const p = await plan(ghRepo({ git: { ...ghRepo().git, dirty: 2 } }), { type: 'commit-all', message: 'x' }, { run: async () => ({ ok: true, stdout: ' M a\n M b\n', stderr: '' }) });
+  assert.ok(p.ok, p.error);
+  assert.ok(p.steps[0].args.includes('-uall'), 'files inside untracked folders are listed one by one');
+  const r = await apply(p, { run: async (cmd, args) => ({ ok: true, stdout: args.includes('status') ? ' M b\n' : '', stderr: '' }) });
+  assert.equal(r.results[0].ok, true, r.results[0].out);
+  const added = await apply(p, { run: async () => ({ ok: true, stdout: ' M b\n M c\n', stderr: '' }) });
+  assert.equal(added.results[0].ok, false, 'a file not in the preview still stops it');
+});
+
+test('commit-all refuses env files and keys, but not their templates or deletions', async () => {
+  const st = (s) => ({ run: async () => ({ ok: true, stdout: s, stderr: '' }) });
+  const repo = ghRepo({ git: { ...ghRepo().git, dirty: 3 } });
+  for (const bad of ['?? .env', ' M config/.env.local', '?? deploy/id_ed25519', 'A  certs/server.pem', '?? "odd name.key"', 'R  a.txt -> .netrc']) {
+    const p = await plan(repo, { type: 'commit-all', message: 'x' }, st(` M a.js\n${bad}\n`));
+    assert.equal(p.ok, false, bad);
+    assert.match(p.error, /look like secrets or keys/);
+    assert.ok(!/S=1/.test(p.error));
+  }
+  for (const fine of ['?? .env.example', '?? id_ed25519.pub', ' D .env', 'D  old.pem', '?? src/keyboard.js']) {
+    const p = await plan(repo, { type: 'commit-all', message: 'x' }, st(` M a.js\n${fine}\n`));
+    assert.ok(p.ok, `${fine}: ${p.error}`);
+  }
+});

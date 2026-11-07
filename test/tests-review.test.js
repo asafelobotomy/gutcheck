@@ -168,3 +168,41 @@ test('scanTests on a repo with no tests', async () => {
     assert.deepEqual(t.advice.map((a) => a.id), ['t-none']);
   } finally { rm(d); }
 });
+
+test('planning a test run executes nothing from the repo: no planted module, venv python or node_modules/.bin', async () => {
+  const d = repo();
+  try {
+    const marker = path.join(d, 'RAN');
+    const plant = `import pathlib; pathlib.Path(${JSON.stringify(marker)}).write_text("x")\n`;
+    put(d, 'pyproject.toml', '[tool.pytest.ini_options]\n');
+    put(d, 'conftest.py', '');
+    put(d, 'pytest.py', plant);
+    put(d, 'pytest_cov.py', plant);
+    put(d, 'mutmut.py', plant);
+    // A real run (not a mock), as the app does it.
+    const { execFile } = require('node:child_process');
+    const run = (cmd, args, o) => new Promise((res) => execFile(cmd, args, { cwd: o.cwd, timeout: o.timeout }, (e, stdout) => res({ ok: !e, stdout })));
+    const ctx = { runDir: () => path.join(d, '.runs'), run };
+    const r = { path: d, name: 'x' };
+    for (const kind of ['coverage', 'mutation']) await planTestRun(r, { kind, stack: 'python' }, ctx).catch(() => {});
+    assert.ok(!fs.existsSync(marker), 'a repo-root pytest.py / mutmut.py must not be imported while planning');
+
+    // A virtualenv: its python is the repo's file, so it is never run; its packages are found on disk.
+    put(d, '.venv/bin/python', `#!/bin/sh\necho x > ${JSON.stringify(marker)}\n`);
+    fs.chmodSync(path.join(d, '.venv/bin/python'), 0o755);
+    await assert.rejects(planTestRun(r, { kind: 'coverage', stack: 'python' }, ctx), /pytest and pytest-cov are needed in the \.venv virtualenv/);
+    put(d, '.venv/lib/python3.12/site-packages/pytest/__init__.py', '');
+    put(d, '.venv/lib/python3.12/site-packages/pytest_cov/__init__.py', '');
+    const p = await planTestRun(r, { kind: 'coverage', stack: 'python' }, ctx);
+    assert.equal(p.risk, 'danger');
+    assert.ok(!fs.existsSync(marker), 'the virtualenv python must not run while planning');
+
+    // Node: c8 in node_modules/.bin is looked up, not run.
+    put(d, 'package.json', JSON.stringify({ scripts: { test: 'mocha' } }));
+    put(d, 'node_modules/.bin/c8', `#!/bin/sh\necho x > ${JSON.stringify(marker)}\n`);
+    fs.chmodSync(path.join(d, 'node_modules/.bin/c8'), 0o755);
+    const n = await planTestRun(r, { kind: 'coverage', stack: 'node' }, ctx);
+    assert.ok(n.steps[1].args.includes('c8'));
+    assert.ok(!fs.existsSync(marker), 'node_modules/.bin/c8 must not run while planning');
+  } finally { rm(d); }
+});

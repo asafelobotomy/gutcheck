@@ -117,3 +117,33 @@ test('cli: fix <repo> all lists every step in order and the choices, and runs th
     assert.ok(fs.existsSync(path.join(d, 'wip.txt')) && /wip\.txt/.test(sh('status', '--porcelain')), 'the owner\'s own uncommitted work is left alone');
   } finally { for (const x of [root, data]) fs.rmSync(x, { recursive: true, force: true }); }
 });
+
+test('app: each repo with a dangerous plan needs its name typed, and the names go with the tokens', async () => {
+  const t = await boot({ repos: [] });
+  const sent = [];
+  const plans = [
+    { ok: true, token: 'a1', repoName: 'app', title: 'Remove clutter', risk: 'danger', display: [{ text: 'trash x' }], warnings: [], undo: null, confirmName: 'app' },
+    { ok: true, token: 'l1', repoName: 'lib', title: 'Run tests', risk: 'danger', display: [{ text: 'run the tests' }], warnings: [], undo: null, confirmName: 'lib' },
+    { ok: true, token: 's1', repoName: 'lib', title: 'Fetch', risk: 'safe', display: [{ text: 'git fetch' }], warnings: [], undo: null, confirmName: null },
+  ];
+  t.w.api.planActions = async () => plans;
+  t.w.api.applyActions = async (tokens, confirm) => { sent.push([tokens, confirm]); return []; };
+  const items = [{ repo: { path: '/w/app' }, action: { type: 'x' } }, { repo: { path: '/w/lib' }, action: { type: 'y' } }, { repo: { path: '/w/lib' }, action: { type: 'z' } }];
+  t.w.runActions(items, { ask: false }); // ends on the results dialog, which stays open here
+  await tick();
+  const inputs = t.$$('.modal input[type=text]');
+  assert.deepEqual(inputs.map((i) => i.placeholder), ['app', 'lib'], 'one name per repo with a dangerous plan; no generic CONFIRM');
+  const applyBtn = () => t.$$('.modal button').find((b) => /^Apply/.test(b.textContent));
+  const type = (el, v) => { el.value = v; el.dispatchEvent(new t.w.Event('input')); };
+  type(inputs[0], 'app');
+  assert.equal(applyBtn().disabled, true, 'lib still needs its name');
+  // Unticking lib's dangerous plan means lib's name is no longer needed.
+  const boxes = t.$$('.modal .phead input[type=checkbox]');
+  boxes[1].checked = false; boxes[1].dispatchEvent(new t.w.Event('change'));
+  assert.equal(applyBtn().disabled, false);
+  boxes[1].checked = true; boxes[1].dispatchEvent(new t.w.Event('change'));
+  assert.equal(applyBtn().disabled, true);
+  type(inputs[1], 'lib');
+  click(applyBtn()); await tick();
+  assert.deepEqual(sent, [[['a1', 'l1', 's1'], { a1: 'app', l1: 'lib' }]]);
+});

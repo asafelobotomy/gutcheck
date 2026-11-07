@@ -70,31 +70,41 @@ function askInputs(spec, values) {
   });
 }
 
+// The names typed for each confirmed list of plans: { token: repo name }, for applyActions.
+const planConfirm = new WeakMap();
+const confirmOf = (chosen) => planConfirm.get(chosen) || {};
+
 const RISK_LABEL = { safe: 'Safe', caution: 'Changes things', danger: 'Dangerous' };
 
 // Show the exact plan. Resolves to true if the user confirms.
 // Resolves to the plans to run (in order), or null. With several plans each has a tick box, so any
 // one can be left out. opts.lead: lines shown above the list (what was left out, and why).
+// Each repo with a dangerous plan needs its name typed; the names go with the plans to the main
+// process (planConfirm), which refuses a dangerous plan without its repo's name.
 function confirmPlans(plans, { lead = [] } = {}) {
   const danger = plans.some((p) => p.risk === 'danger');
-  const nameNeeded = plans.length === 1 ? plans[0].confirmName : danger ? 'CONFIRM' : null;
+  const names = [...new Set(plans.map((p) => p.confirmName).filter(Boolean))];
   const many = plans.length > 1;
   const picked = new Set(plans);
   return modal((box, close) => {
     const label = () => (many ? `Apply ${picked.size} change${picked.size === 1 ? '' : 's'}` : 'Apply');
     const ok = h('button', { class: danger ? 'danger' : 'primary' }, label());
-    let typed;
-    if (nameNeeded) {
-      typed = h('input', { type: 'text', placeholder: nameNeeded, spellcheck: 'false' });
-      ok.disabled = true;
-      typed.addEventListener('input', () => (ok.disabled = typed.value !== nameNeeded || !picked.size));
-    }
-    ok.addEventListener('click', () => close(plans.filter((p) => picked.has(p))));
+    const typed = new Map(names.map((n) => [n, h('input', { type: 'text', placeholder: n, spellcheck: 'false', 'aria-label': `Type ${n} to confirm` })]));
+    // Only the repos of plans still ticked need their name.
+    const ready = () => picked.size && [...picked].every((p) => !p.confirmName || typed.get(p.confirmName).value === p.confirmName);
+    const update = () => { ok.textContent = label(); ok.disabled = !ready(); };
+    for (const el of typed.values()) el.addEventListener('input', update);
+    ok.disabled = !ready();
+    ok.addEventListener('click', () => {
+      const chosen = plans.filter((p) => picked.has(p));
+      planConfirm.set(chosen, Object.fromEntries(chosen.filter((p) => p.confirmName).map((p) => [p.token, typed.get(p.confirmName).value])));
+      close(chosen);
+    });
     const tick = (p) => {
       if (!many) return null;
       const c = h('input', { type: 'checkbox', 'aria-label': `Include: ${p.title}` });
       c.checked = true;
-      c.addEventListener('change', () => { if (c.checked) picked.add(p); else picked.delete(p); ok.textContent = label(); ok.disabled = !picked.size || (typed && typed.value !== nameNeeded); });
+      c.addEventListener('change', () => { if (c.checked) picked.add(p); else picked.delete(p); update(); });
       return c;
     };
     box.classList.add('wide');
@@ -110,7 +120,7 @@ function confirmPlans(plans, { lead = [] } = {}) {
         ...p.display.map((d) => h('div', {}, h('code', {}, d.text), d.preview ? h('pre', { class: 'prev' }, d.preview) : null)),
         p.body ? h('details', {}, h('summary', {}, 'Request body'), h('pre', { class: 'prev' }, p.body)) : null,
         p.undo ? h('div', { class: 'muted' }, 'To undo: ', h('code', {}, p.undo)) : null))),
-      ...(nameNeeded ? [h('label', { class: 'frow' }, h('span', {}, `Type "${nameNeeded}" to confirm`), typed)] : []),
+      ...[...typed].map(([n, el]) => h('label', { class: 'frow' }, h('span', {}, `Type "${n}" to confirm`), el)),
       h('div', { class: 'mbtns' }, h('button', { onclick: () => close(false) }, 'Cancel'), ok));
   });
 }

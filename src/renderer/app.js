@@ -146,7 +146,7 @@ async function runActions(items, { ask = true, lead = [] } = {}) {
   if (bad.length) toast(`Could not plan ${bad.length} change${bad.length === 1 ? '' : 's'}:\n` + bad.map((p) => `${p.repoName || '?'}: ${p.error}`).join('\n'));
   const chosen = await confirmPlans(good, { lead });
   if (!chosen || !chosen.length) return;
-  const outs = await window.api.applyActions(chosen.map((p) => p.token));
+  const outs = await window.api.applyActions(chosen.map((p) => p.token), confirmOf(chosen));
   for (const o of outs) if (o.res) state.repos.set(o.res.path, o.res);
   const rate = outs.find((o) => o.rate)?.rate;
   if (rate) showRate(rate);

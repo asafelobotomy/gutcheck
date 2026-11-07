@@ -7,12 +7,33 @@
 const path = require('node:path');
 const { runDir } = require('../paths');
 const fs = require('node:fs');
+const os = require('node:os');
 const { INSTALL } = require('./stack');
 
 const COVERAGE_TIMEOUT_MS = 30 * 60 * 1000;
 const MUTATION_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 
-const ok = async (ctx, cmd, args, cwd) => (await ctx.run(cmd, args, { cwd, timeout: 60000 })).ok;
+// Planning must not execute the repo's code (only the approved apply step does). So a tool check runs
+// only the user's own binaries, from a neutral folder: cargo then reads no repo .cargo/config, and
+// python puts no repo module (a planted pytest.py) on sys.path. Repo-supplied binaries (a virtualenv's
+// python, node_modules/.bin) are looked up on disk, never run.
+const ok = async (ctx, cmd, args) => (await ctx.run(cmd, args, { cwd: os.tmpdir(), timeout: 60000 })).ok;
+const FIND_SPEC = 'import importlib.util as u, sys; sys.exit(0 if all(u.find_spec(m) for m in sys.argv[1:]) else 1)';
+// Python modules: in a virtualenv, by their folder or file in site-packages; else ask the user's python3.
+async function hasPyModules(ctx, dir, s, mods) {
+  if (!s.venv) return ok(ctx, 'python3', ['-c', FIND_SPEC, ...mods]);
+  const venv = path.join(dir, s.venv);
+  const sites = [path.join(venv, 'Lib', 'site-packages')];
+  try { for (const n of fs.readdirSync(path.join(venv, 'lib'))) if (/^python\d/.test(n)) sites.push(path.join(venv, 'lib', n, 'site-packages')); } catch {}
+  return mods.every((m) => sites.some((sp) => fs.existsSync(path.join(sp, m)) || fs.existsSync(path.join(sp, m + '.py'))));
+}
+// A file under node_modules, from the test root up to the repo root (where npm and npx would find it).
+function inNodeModules(cwd, top, rel) {
+  for (let d = cwd; ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, 'node_modules', rel))) return true;
+    if (d === top || path.dirname(d) === d || !d.startsWith(top)) return false;
+  }
+}
 const pythonOf = (dir, s) => (s.venv ? path.join(dir, s.venv, 'bin', 'python') : 'python3');
 const cmd = (cmd, args, cwd, display, extra = {}) => ({ kind: 'cmd', cmd, args, cwd, display, ...extra });
 
@@ -20,13 +41,13 @@ const cmd = (cmd, args, cwd, display, extra = {}) => ({ kind: 'cmd', cmd, args, 
 const PLANS = {
   coverage: {
     async rust(r, s, ctx, out, cwd) {
-      if (!(await ok(ctx, 'cargo', ['llvm-cov', '--version'], cwd))) throw new Error(`cargo-llvm-cov is not installed. Install it with:\n${INSTALL['cargo-llvm-cov']}`);
+      if (!(await ok(ctx, 'cargo', ['llvm-cov', '--version']))) throw new Error(`cargo-llvm-cov is not installed. Install it with:\n${INSTALL['cargo-llvm-cov']}`);
       const lcov = path.join(out, 'lcov.info');
       return { steps: [cmd('cargo', ['llvm-cov', '--workspace', '--lcov', '--output-path', lcov], cwd, `cargo llvm-cov --workspace --lcov --output-path ${lcov}`, { timeout: COVERAGE_TIMEOUT_MS })], note: 'Builds the project with coverage instrumentation, then runs every test.' };
     },
     async python(r, s, ctx, out, cwd) {
       const py = pythonOf(r.path, s);
-      if (!(await ok(ctx, py, ['-c', 'import pytest, pytest_cov'], cwd))) throw new Error(`pytest and pytest-cov are needed in ${s.venv ? `the ${s.venv} virtualenv` : 'your Python'}. Install with:\n${INSTALL['pytest-cov']}`);
+      if (!(await hasPyModules(ctx, r.path, s, ['pytest', 'pytest_cov']))) throw new Error(`pytest and pytest-cov are needed in ${s.venv ? `the ${s.venv} virtualenv` : 'your Python'}. Install with:\n${INSTALL['pytest-cov']}`);
       const xml = path.join(out, 'coverage.xml');
       const junit = path.join(out, 'junit.xml');
       return { steps: [cmd(py, ['-m', 'pytest', '-q', '-p', 'no:cacheprovider', '--cov=.', `--cov-report=xml:${xml}`, `--junitxml=${junit}`], cwd, `${s.venv ? s.venv + '/bin/python' : 'python3'} -m pytest -q -p no:cacheprovider --cov=. --cov-report=xml:${xml} --junitxml=${junit}`, { timeout: COVERAGE_TIMEOUT_MS, env: { COVERAGE_FILE: path.join(out, '.coverage') } })], note: 'Runs pytest with coverage. The coverage data file goes to GutCheck\'s run folder too.' };
@@ -36,10 +57,10 @@ const PLANS = {
       if (s.runner === 'node') return { steps: [cmd('node', ['--test', '--experimental-test-coverage', '--test-reporter=spec', '--test-reporter-destination=stdout', '--test-reporter=lcov', `--test-reporter-destination=${lcov}`, '--test-reporter=junit', `--test-reporter-destination=${path.join(out, 'junit.xml')}`], cwd, `node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=${lcov} (+ spec and JUnit reporters)`, { timeout: COVERAGE_TIMEOUT_MS })], note: 'Runs the built-in Node test runner with its own coverage.' };
       if (s.runner === 'jest') return { steps: [cmd('npx', ['--no-install', 'jest', '--coverage', '--coverageReporters=lcov', `--coverageDirectory=${out}`], cwd, `npx --no-install jest --coverage --coverageReporters=lcov --coverageDirectory=${out}`, { timeout: COVERAGE_TIMEOUT_MS })] };
       if (s.runner === 'vitest') {
-        if (!(await ok(ctx, 'node', ['-e', 'require.resolve("@vitest/coverage-v8")'], cwd))) throw new Error('vitest needs a coverage provider. Install with:\nnpm install --save-dev @vitest/coverage-v8');
+        if (!inNodeModules(cwd, r.path, path.join('@vitest', 'coverage-v8', 'package.json'))) throw new Error('vitest needs a coverage provider. Install with:\nnpm install --save-dev @vitest/coverage-v8');
         return { steps: [cmd('npx', ['--no-install', 'vitest', 'run', '--coverage', '--coverage.reporter=lcov', `--coverage.reportsDirectory=${out}`], cwd, `npx --no-install vitest run --coverage --coverage.reporter=lcov --coverage.reportsDirectory=${out}`, { timeout: COVERAGE_TIMEOUT_MS })] };
       }
-      if (!(await ok(ctx, 'npx', ['--no-install', 'c8', '--version'], cwd))) throw new Error('This test command has no coverage option GutCheck knows. Install c8 to measure it:\nnpm install --save-dev c8');
+      if (!inNodeModules(cwd, r.path, path.join('.bin', 'c8')) && !onPath('c8')) throw new Error('This test command has no coverage option GutCheck knows. Install c8 to measure it:\nnpm install --save-dev c8');
       return { steps: [cmd('npx', ['--no-install', 'c8', '--reporter=lcovonly', `--report-dir=${out}`, 'npm', 'test'], cwd, `npx --no-install c8 --reporter=lcovonly --report-dir=${out} npm test`, { timeout: COVERAGE_TIMEOUT_MS })] };
     },
     async go(r, s, ctx, out, cwd) {
@@ -49,12 +70,12 @@ const PLANS = {
   },
   mutation: {
     async rust(r, s, ctx, out, cwd) {
-      if (!(await ok(ctx, 'cargo', ['mutants', '--version'], cwd))) throw new Error(`cargo-mutants is not installed. Install it with:\n${INSTALL['cargo-mutants']}`);
+      if (!(await ok(ctx, 'cargo', ['mutants', '--version']))) throw new Error(`cargo-mutants is not installed. Install it with:\n${INSTALL['cargo-mutants']}`);
       return { steps: [cmd('cargo', ['mutants', '--output', out, '--timeout-multiplier', '3', '--no-shuffle'], cwd, `cargo mutants --output ${out} --timeout-multiplier 3`, { timeout: MUTATION_TIMEOUT_MS })], note: 'Changes the code one small bit at a time (in a copy) and runs the tests after each change. Can take a long time.' };
     },
     async python(r, s, ctx, out, cwd) {
       const py = pythonOf(r.path, s);
-      if (!(await ok(ctx, py, ['-m', 'mutmut', '--version'], cwd))) throw new Error(`mutmut is not installed in ${s.venv ? `the ${s.venv} virtualenv` : 'your Python'}. Install with:\n${INSTALL.mutmut}`);
+      if (!(await hasPyModules(ctx, r.path, s, ['mutmut']))) throw new Error(`mutmut is not installed in ${s.venv ? `the ${s.venv} virtualenv` : 'your Python'}. Install with:\n${INSTALL.mutmut}`);
       return { steps: [
         cmd(py, ['-m', 'mutmut', 'run'], cwd, `${s.venv ? s.venv + '/bin/python' : 'python3'} -m mutmut run`, { timeout: MUTATION_TIMEOUT_MS, okCodes: [0, 1, 2] }),
         cmd(py, ['-m', 'mutmut', 'results'], cwd, `${s.venv ? s.venv + '/bin/python' : 'python3'} -m mutmut results > ${path.join(out, 'mutmut-results.txt')}`, { saveOutput: path.join(out, 'mutmut-results.txt') }),

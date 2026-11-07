@@ -37,7 +37,7 @@ async function apply(p, ctx = {}) {
   for (const s of p.steps) {
     if (s.kind === 'check') {
       const r = await ctx.run(s.cmd, s.args, { cwd: s.cwd });
-      const now = r.ok ? r.stdout.trim() : null;
+      const now = r.ok ? r.stdout.trimEnd() : null; // not trim(): " M a" keeps its leading status space
       // subset: fewer lines than previewed is fine (a .gitignore added just before hides some), but
       // nothing that was not previewed may appear.
       const want = new Set(String(s.expect).split('\n'));

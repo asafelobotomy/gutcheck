@@ -149,7 +149,8 @@ const rescan = (dir) => scanRepo(dir, { deep: !!loadSettings().deep, policy: pol
 const service = createService({ known, settings: loadSettings, audit, trash: (f) => shell.trashItem(f), clipboard, rescan, trendStore, updateSettings });
 
 handle('action:plan', (_e, { items } = {}) => service.planActions(items));
-handle('action:apply', (_e, { tokens } = {}) => service.applyActions(tokens));
+// confirm: { token: the repo name the user typed } for each dangerous plan; the service checks it.
+handle('action:apply', (_e, { tokens, confirm } = {}) => service.applyActions(tokens, { confirm: confirm && typeof confirm === 'object' ? confirm : {} }));
 handle('clutter:scan', (_e, { dirs } = {}) => service.clutterScan(dirs));
 handle('trend:get', () => service.trend());
 handle('quality:scan', (_e, { dirs } = {}) => service.qualityScan(dirs));

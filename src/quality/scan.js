@@ -157,7 +157,9 @@ async function scanQuality(dir, rawSettings) {
       const m = c && R.MARKER_RE.exec(c);
       if (!m) return;
       markers[m[1]]++;
-      if (markers.items.length < 40 && !R.secretKinds(c, true).length) markers.items.push({ path: rel, line: i + 1, kind: m[1], text: snippet(c) });
+      // The comment text is shown in the app and the report, so a marker that looks like it holds a
+      // credential (any rule, generic included) keeps its place but never its text.
+      if (markers.items.length < 40) markers.items.push({ path: rel, line: i + 1, kind: m[1], text: R.secretKinds(c, false).length ? '(text hidden: it looks like it contains a credential)' : snippet(c) });
     });
   }
 

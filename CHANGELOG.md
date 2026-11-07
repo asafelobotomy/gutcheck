@@ -4,6 +4,19 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-11-07
+
+### Fixed
+
+- Code quality no longer shows the text of a TODO or FIXME comment that looks like it holds a credential, in the app, the report or MCP. The marker is still counted and located.
+- Planning a test run no longer executes anything from the repo. Tools are looked up on disk, or checked from a neutral folder, so a repo's own `pytest.py`, virtualenv `python` or `node_modules/.bin/c8` cannot run before you approve. Only the approved run executes project code.
+- "Copy for LLM": a clutter file name with a newline or backticks can no longer break out of a command block or add a step of its own. Such files are left out of the commands, and the report says why.
+- A dangerous change now needs its repo name in the main process too, not only in the review dialog. With several dangerous changes, you type the name of each repo concerned, instead of "CONFIRM".
+- When a change fails, the later changes for that repo are skipped (shown as skipped), so a failed pull is never followed by a commit and push. This applies in the app, `gutcheck fix <repo> all --yes` and MCP `gutcheck_apply`. Other repos carry on.
+- Commit all refuses env files, private keys and credential files (`.env`, `*.pem`, `*.key`, `id_ed25519`, `.netrc`, and similar) and says how to ignore them. It also lists each file inside a new folder, so one added there after the preview stops the commit.
+- Commit all no longer refuses when the first file in the preview was committed or reverted in the meantime.
+- The `.gitignore` GutCheck adds, and the env rules it appends, keep `.env.example` committable (`!.env.example` after `.env.*`).
+
 ## [0.26.0] - 2026-11-07
 
 ### Added
@@ -239,7 +252,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 - First release: health checks for every git repo in a folder.
 
-[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.26.1...HEAD
+[0.26.1]: https://github.com/asafelobotomy/gutcheck/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.24.2...v0.25.0
 [0.24.2]: https://github.com/asafelobotomy/gutcheck/compare/v0.24.1...v0.24.2

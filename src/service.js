@@ -76,27 +76,33 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
     return out;
   }
 
-  // opts.confirm (headless callers): { token: repo name } must name the repo for every danger plan.
-  // The app enforces the same rule in its review dialog, where the user types the name.
+  // opts.confirm: { token: repo name } must name the repo for every danger plan, from every caller:
+  // the app passes what the user typed in its review dialog, the CLI and MCP what the caller passed.
+  // Plans run in order, and a failed one stops the rest for the same repo (a failed pull must not be
+  // followed by a commit and push); other repos carry on. opts.failed (a Set of repo paths) carries
+  // that across calls that apply one token at a time.
   async function applyActions(tokens, opts = {}) {
     if (!Array.isArray(tokens)) return [];
     const out = [];
+    const failed = opts.failed instanceof Set ? opts.failed : new Set();
+    const note = (r, p) => { if (!r.ok && p) failed.add(p.repoPath); out.push(r); };
     for (const token of tokens) {
       const entry = plans.get(token);
       plans.delete(token); // single use
       if (!entry || entry.expires < Date.now()) { out.push({ ok: false, error: 'Plan expired. Please review it again.' }); continue; }
       const p = entry.plan;
-      if (opts.confirm && p.confirmName && opts.confirm[token] !== p.confirmName) { out.push({ ok: false, repoName: p.repoName, error: `This is a dangerous action: confirm it by passing the repo name "${p.confirmName}" for this token.` }); continue; }
-      if (!known.has(p.repoPath)) { out.push({ ok: false, repoName: p.repoName, error: 'This repo is no longer in the scanned workspace.' }); continue; }
-      if (settings().readOnly) { out.push({ ok: false, repoName: p.repoName, error: 'Read-only mode is on.' }); continue; }
-      if (busy.has(p.repoPath)) { out.push({ ok: false, repoName: p.repoName, error: 'Another action is running on this repo.' }); continue; }
+      if (failed.has(p.repoPath)) { out.push({ ok: false, skipped: true, repoName: p.repoName, title: p.title, error: 'Skipped: an earlier change to this repo failed, so the rest did not run.' }); continue; }
+      if (p.confirmName && !(opts.confirm && opts.confirm[token] === p.confirmName)) { note({ ok: false, repoName: p.repoName, title: p.title, error: `This is a dangerous action: confirm it by passing the repo name "${p.confirmName}" for this token.` }, p); continue; }
+      if (!known.has(p.repoPath)) { note({ ok: false, repoName: p.repoName, title: p.title, error: 'This repo is no longer in the scanned workspace.' }, p); continue; }
+      if (settings().readOnly) { note({ ok: false, repoName: p.repoName, title: p.title, error: 'Read-only mode is on.' }, p); continue; }
+      if (busy.has(p.repoPath)) { note({ ok: false, repoName: p.repoName, title: p.title, error: 'Another action is running on this repo.' }, p); continue; }
       busy.add(p.repoPath);
       try {
         const r = await actions.apply(p, { trash });
         audit({ repo: p.repoName, path: p.repoPath, action: p.type, risk: p.risk, title: p.title, ok: r.ok, steps: r.results.map((x) => ({ cmd: x.text, ok: x.ok })) });
         let res = null;
         try { res = await rescan(p.repoPath); if (known.has(p.repoPath)) known.set(p.repoPath, res); } catch {}
-        out.push({ ok: r.ok, repoName: p.repoName, title: p.title, results: r.results, res, rate: github.getRate() });
+        note({ ok: r.ok, repoName: p.repoName, title: p.title, results: r.results, res, rate: github.getRate() }, p);
       } finally {
         busy.delete(p.repoPath);
       }

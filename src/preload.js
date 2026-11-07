@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   scan: (root, deep) => ipcRenderer.invoke('scan:start', { root, deep }),
   rescan: (dir, deep) => ipcRenderer.invoke('scan:one', { dir, deep }),
   planActions: (items) => ipcRenderer.invoke('action:plan', { items }),
-  applyActions: (tokens) => ipcRenderer.invoke('action:apply', { tokens }),
+  applyActions: (tokens, confirm) => ipcRenderer.invoke('action:apply', { tokens, confirm }),
   clutterScan: (dirs) => ipcRenderer.invoke('clutter:scan', { dirs }),
   copyReport: (dir) => ipcRenderer.invoke('report:copy', { dir }),
   trend: () => ipcRenderer.invoke('trend:get'),

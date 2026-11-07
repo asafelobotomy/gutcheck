@@ -246,3 +246,17 @@ test('secrets: URL values are not credentials; test fixtures and browser keys in
     assert.deepEqual(q.loc.over.map((f) => f.path), ['web/index.html'], 'HTML under docs/ is documentation, not code to split');
   } finally { cleanup(dir); }
 });
+
+test('a TODO that holds a credential is counted and located, but its text never reaches the results', async () => {
+  const dir = repo();
+  try {
+    const val = 'Zq8vK2pLm9xR4tWabc123';
+    put(dir, 'a.js', `// TODO: rotate password = "${val}" before release\n// TODO: tidy this up\nconst a = 1;\n`);
+    const q = await scanQuality(dir);
+    assert.equal(q.markers.TODO, 2);
+    assert.deepEqual(q.markers.items.map((m) => m.line), [1, 2]);
+    assert.ok(!JSON.stringify(q).includes(val), 'the credential must not appear anywhere in the results');
+    assert.match(q.markers.items[0].text, /hidden/);
+    assert.equal(q.markers.items[1].text, 'TODO: tidy this up');
+  } finally { cleanup(dir); }
+});

@@ -33,11 +33,15 @@ test('plan then apply: tokens are single-use, audited, and results rescanned', a
     assert.ok(p.ok, p.error);
     assert.equal(p.confirmName, path.basename(dir));
     assert.equal(p.steps, undefined, 'steps must stay server-side');
-    const [r] = await svc.applyActions([p.token]);
+    const [refused] = await svc.applyActions([p.token]);
+    assert.match(refused.error, /dangerous action: confirm it/, 'a dangerous plan needs its repo name from every caller');
+    assert.deepEqual(trashed, []);
+    const [p2] = await svc.planActions([{ dir, action: { type: 'clean-clutter', paths: ['.env.bak'] } }]);
+    const [r] = await svc.applyActions([p2.token], { confirm: { [p2.token]: path.basename(dir) } });
     assert.ok(r.ok, JSON.stringify(r));
     assert.deepEqual(trashed, ['.env.bak']);
     assert.equal(audit.length, 1);
-    const [again] = await svc.applyActions([p.token]);
+    const [again] = await svc.applyActions([p2.token], { confirm: { [p2.token]: path.basename(dir) } });
     assert.equal(again.ok, false);
     assert.match(again.error, /expired/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -51,7 +55,7 @@ test('bad input, unknown repos and read-only mode are refused', async () => {
     assert.deepEqual(await svc.applyActions('nope'), []);
     const [p] = await svc.planActions([{ dir, action: { type: 'clean-clutter', paths: ['.env.bak'] } }]);
     s.readOnly = true;
-    const [r] = await svc.applyActions([p.token]);
+    const [r] = await svc.applyActions([p.token], { confirm: { [p.token]: path.basename(dir) } });
     assert.equal(r.ok, false);
     assert.match(r.error, /Read-only/);
     assert.equal((await svc.planActions([{ dir, action: { type: 'fetch' } }]))[0].ok, false);
@@ -67,7 +71,7 @@ test('a new workspace scan voids old plans, and a repo dropped from the workspac
     assert.match((await svc.applyActions([plan1.token]))[0].error, /expired/);
     const plan2 = (await svc.planActions([{ dir, action: { type: 'clean-clutter', paths: ['.env.bak'] } }]))[0];
     known.delete(dir);
-    assert.match((await svc.applyActions([plan2.token]))[0].error, /no longer in the scanned workspace/);
+    assert.match((await svc.applyActions([plan2.token], { confirm: { [plan2.token]: path.basename(dir) } }))[0].error, /no longer in the scanned workspace/);
     assert.deepEqual(trashed, []);
     assert.equal(known.has(dir), false, 'nothing puts the old repo back');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -137,4 +141,33 @@ test('a corrupt or missing trend file is treated as empty', async () => {
     assert.deepEqual(svc.trend(), []);
     svc.recordScan(s.root, [...known.values()]); // must not throw
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a failed change stops the later ones for the same repo, shared across one-token calls', async () => {
+  const { dir, svc, trashed, known } = await setup();
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'gutcheck-svc-bare-'));
+  try {
+    const name = path.basename(dir);
+    // A real upstream, so pull plans fine; it is then removed, so the pull fails when applied.
+    sh(bare, 'init', '-q', '--bare');
+    sh(dir, 'remote', 'add', 'origin', bare); sh(dir, 'push', '-q', '-u', 'origin', 'main');
+    known.set(dir, await scanRepo(dir, {}));
+    const breakUpstream = () => fs.rmSync(bare, { recursive: true, force: true });
+    const plans = await svc.planActions([{ dir, action: { type: 'pull' } }, { dir, action: { type: 'clean-clutter', paths: ['.env.bak'] } }]);
+    assert.ok(plans.every((p) => p.ok), JSON.stringify(plans));
+    breakUpstream();
+    const confirm = { [plans[1].token]: name };
+    const out = await svc.applyActions(plans.map((p) => p.token), { confirm });
+    assert.equal(out[0].ok, false);
+    assert.equal(out[1].skipped, true);
+    assert.match(out[1].error, /earlier change to this repo failed/);
+    assert.deepEqual(trashed, []);
+    // The same through separate calls that share a failed set (as the engine applies tokens).
+    const again = await svc.planActions([{ dir, action: { type: 'pull' } }, { dir, action: { type: 'clean-clutter', paths: ['.env.bak'] } }]);
+    const failed = new Set();
+    await svc.applyActions([again[0].token], { failed });
+    const [second] = await svc.applyActions([again[1].token], { confirm: { [again[1].token]: name }, failed });
+    assert.equal(second.skipped, true);
+    assert.deepEqual(trashed, []);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); }
 });

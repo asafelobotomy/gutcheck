@@ -42,6 +42,13 @@ const localBranch = (repo, b) => (repo.git.branches || []).find((x) => x.name ==
 const defaultBranch = (repo) => (repo.remote && repo.remote.defaultBranch) || null;
 
 // Each action: plan(repo, params, ctx) -> { risk, title, steps, undo?, warnings? }
+// The path in a `git status --short` line ("XY path", "R  old -> new", "\"quoted path\"").
+const statusPath = (l) => { const p = l.slice(3).split(' -> ').pop(); return p.startsWith('"') ? p.slice(1, -1) : p; };
+// Env files (not their templates), private keys and credential stores, by name only (never read).
+const SECRET_NAME = /^(?:\.env(?:\..+)?|\.netrc|\.pgpass|id_(?:rsa|dsa|ecdsa|ed25519)|.+\.(?:pem|key|p12|pfx|jks|keystore))$/i;
+const ENV_TEMPLATE = /^\.env\.(?:example|sample|template|dist|defaults)$/i;
+const looksSecret = (p) => { const b = p.split('/').pop(); return SECRET_NAME.test(b) && !ENV_TEMPLATE.test(b); };
+
 const ACTIONS = {
   fetch: { plan: (r) => ({ risk: 'safe', title: 'Fetch all remotes and prune deleted branches', steps: [git(['fetch', '--all', '--prune'], r.path)] }) },
 
@@ -130,10 +137,15 @@ const ACTIONS = {
       if (!msg) fail('A commit message is required.');
       if (r.git.dirty === 0) fail('Nothing to commit.');
       if (r.git.detached) fail('Detached HEAD.');
-      const st = (await readGit(ctx, ['status', '--short'], r.path)).stdout.trim();
+      // -uall lists each file inside an untracked folder, so one added there after the preview is caught.
+      // trimEnd, not trim: the first line's leading space is part of its status (" M a").
+      const st = (await readGit(ctx, ['status', '--short', '-uall'], r.path)).stdout.trimEnd();
+      // `git add -A` would commit a key or an env file as readily as code: refuse, and say how to fix it.
+      const secrets = st.split('\n').filter((l) => l && l[1] !== 'D' && l[0] !== 'D').map(statusPath).filter(looksSecret);
+      if (secrets.length) fail(`These files look like secrets or keys and would be committed:\n${secrets.slice(0, 10).join('\n')}${secrets.length > 10 ? `\n...and ${secrets.length - 10} more` : ''}\nAdd them to .gitignore (or move them out of the repo), then plan the commit again.`);
       // `git add -A` must stage exactly what was previewed: the check step refuses if anything changed since.
       // Fewer files is fine (a .gitignore added just before can hide some); any file not listed stops it.
-      const check = { kind: 'check', cmd: 'git', args: [...READONLY_GIT, 'status', '--short'], cwd: r.path, expect: st, subset: true, display: 'check no file outside the list below has changed' };
+      const check = { kind: 'check', cmd: 'git', args: [...READONLY_GIT, 'status', '--short', '-uall'], cwd: r.path, expect: st, subset: true, display: 'check no file outside the list below has changed' };
       return { risk: 'caution', title: `Commit all changes on ${r.git.branch}`, steps: [check, git(['add', '-A'], r.path), git(['commit', '-m', msg], r.path)], warnings: ['Files to be committed:\n' + st.split('\n').slice(0, 40).join('\n')], undo: 'git reset --soft HEAD~1' };
     },
   },
@@ -326,6 +338,9 @@ const ACTIONS = {
       try { cur = ctx.fs.readFileSync(target, 'utf8'); } catch {}
       const have = new Set(cur.split('\n').map((l) => l.trim()));
       const add = entries.filter((e) => !have.has(e));
+      // A new ".env.*" would re-ignore an earlier "!.env.example": the last matching rule wins, so the
+      // template's exception goes after it again.
+      if (add.includes('.env.*') && !add.includes('!.env.example')) add.push('!.env.example');
       if (!add.length) fail('.gitignore already has those rules.');
       const content = add.join('\n') + '\n';
       return { risk: 'safe', title: `Add ${add.length} rule${add.length > 1 ? 's' : ''} to .gitignore`, steps: [{ kind: 'append', root: r.path, path: target, content, display: `append to .gitignore: ${add.join('  ')}`, preview: content }], undo: 'Delete the added lines from .gitignore.' };

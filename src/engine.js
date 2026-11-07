@@ -253,10 +253,11 @@ function createEngine(opts = {}) {
     if (!allowActions) return { ok: false, error: OFF };
     if (!Array.isArray(tokens) || !tokens.length) return { ok: false, error: 'Pass tokens from gutcheck_plan.' };
     const res = [];
+    const failed = new Set(); // a failed plan stops the later ones for the same repo
     for (const t of tokens) {
-      if (typeof t === 'string' && t.startsWith('a:')) { const r = await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm })));
+      if (typeof t === 'string' && t.startsWith('a:')) { const r = await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm, failed })));
     }
-    return { ok: res.every((r) => r.ok), results: res.map((r) => ({ ok: r.ok, repo: r.repoName, title: r.title, error: r.error, steps: (r.results || []).map((x) => ({ cmd: x.text, ok: x.ok, output: x.out || undefined })) })) };
+    return { ok: res.every((r) => r.ok), results: res.map((r) => ({ ok: r.ok, ...(r.skipped ? { skipped: true } : {}), repo: r.repoName, title: r.title, error: r.error, steps: (r.results || []).map((x) => ({ cmd: x.text, ok: x.ok, output: x.out || undefined })) })) };
   }
 
   // Findings that were not there at the previous scan of this workspace (stored ids only).

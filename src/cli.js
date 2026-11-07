@@ -105,7 +105,7 @@ async function fixAll(engine, repo, f, out, err) {
   const confirm = Object.fromEntries(plans.filter((x) => x.confirmName).map((x) => [x.token, f.confirm]));
   if (Object.keys(confirm).length && f.confirm !== plans.find((x) => x.confirmName).confirmName) { err(`gutcheck: some steps are dangerous: add --confirm ${plans.find((x) => x.confirmName).confirmName}`); return 1; }
   const r = await engine.apply({ tokens: plans.map((x) => x.token), confirm });
-  for (const x of r.results) { out(`${x.ok ? 'ok    ' : 'FAILED'}  ${x.title || ''}`); if (x.error) err(`gutcheck: ${x.error}`); }
+  for (const x of r.results) { out(`${x.ok ? 'ok     ' : x.skipped ? 'SKIPPED' : 'FAILED '}  ${x.title || ''}`); if (x.error) err(`gutcheck: ${x.error}`); }
   return r.ok ? 0 : 1;
 }
 
