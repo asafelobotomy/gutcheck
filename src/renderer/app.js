@@ -118,7 +118,8 @@ function renderList() {
 /* ---------------------------------------------------------------- running actions */
 
 // items: [{ repo, action }]. Asks for inputs (single action only), previews, confirms, applies, refreshes.
-async function runActions(items, { ask = true } = {}) {
+// opts.ask: ask for inputs (one item only). opts.lead: lines shown at the top of the review dialog.
+async function runActions(items, { ask = true, lead = [] } = {}) {
   if (state.readOnly) return toast('Read-only mode is on. Untick "Read-only" in the header to make changes.', 'bad');
   if (ask && items.length === 1) {
     const a = items[0].action;
@@ -142,9 +143,10 @@ async function runActions(items, { ask = true } = {}) {
   const bad = plans.filter((p) => !p.ok);
   const good = plans.filter((p) => p.ok);
   if (bad.length && !good.length) return toast(bad.map((p) => (p.repoName ? p.repoName + ': ' : '') + p.error).join('\n'), 'bad');
-  if (bad.length) toast(`Skipping ${bad.length} repo(s):\n` + bad.map((p) => `${p.repoName || '?'}: ${p.error}`).join('\n'));
-  if (!(await confirmPlans(good))) return;
-  const outs = await window.api.applyActions(good.map((p) => p.token));
+  if (bad.length) toast(`Could not plan ${bad.length} change${bad.length === 1 ? '' : 's'}:\n` + bad.map((p) => `${p.repoName || '?'}: ${p.error}`).join('\n'));
+  const chosen = await confirmPlans(good, { lead });
+  if (!chosen || !chosen.length) return;
+  const outs = await window.api.applyActions(chosen.map((p) => p.token));
   for (const o of outs) if (o.res) state.repos.set(o.res.path, o.res);
   const rate = outs.find((o) => o.rate)?.rate;
   if (rate) showRate(rate);
@@ -250,7 +252,10 @@ function renderRepo() {
   if (!r) return renderOverview();
   if (r.error) return put(d, h('h2', {}, r.name), h('p', { class: 'b-err' }, r.error));
   const toolbar = h('div', { class: 'toolbar' });
-  const mk = (label, fn) => { const b = h('button', {}, label); b.addEventListener('click', () => fn(b)); toolbar.append(b); };
+  const mk = (label, fn) => { const b = h('button', {}, label); b.addEventListener('click', () => fn(b)); toolbar.append(b); return b; };
+  const all = FixAll.plan(r);
+  const fixable = all.actions.length + all.decisions.length;
+  if (fixable) mk(`Fix all issues (${fixable})…`, () => fixAllIssues(r, all)).classList.add('primary');
   mk('Rescan', async (b) => { b.disabled = true; await refreshOne(r.path); });
   mk('Fetch & prune', actOn(r, 'fetch'));
   mk('Open folder', () => window.api.openFolder(r.path));

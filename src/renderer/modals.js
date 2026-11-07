@@ -73,24 +73,37 @@ function askInputs(spec, values) {
 const RISK_LABEL = { safe: 'Safe', caution: 'Changes things', danger: 'Dangerous' };
 
 // Show the exact plan. Resolves to true if the user confirms.
-function confirmPlans(plans) {
+// Resolves to the plans to run (in order), or null. With several plans each has a tick box, so any
+// one can be left out. opts.lead: lines shown above the list (what was left out, and why).
+function confirmPlans(plans, { lead = [] } = {}) {
   const danger = plans.some((p) => p.risk === 'danger');
   const nameNeeded = plans.length === 1 ? plans[0].confirmName : danger ? 'CONFIRM' : null;
+  const many = plans.length > 1;
+  const picked = new Set(plans);
   return modal((box, close) => {
-    const ok = h('button', { class: danger ? 'danger' : 'primary' }, plans.length > 1 ? `Apply to ${plans.length} repos` : 'Apply');
+    const label = () => (many ? `Apply ${picked.size} change${picked.size === 1 ? '' : 's'}` : 'Apply');
+    const ok = h('button', { class: danger ? 'danger' : 'primary' }, label());
     let typed;
     if (nameNeeded) {
       typed = h('input', { type: 'text', placeholder: nameNeeded, spellcheck: 'false' });
       ok.disabled = true;
-      typed.addEventListener('input', () => (ok.disabled = typed.value !== nameNeeded));
+      typed.addEventListener('input', () => (ok.disabled = typed.value !== nameNeeded || !picked.size));
     }
-    ok.addEventListener('click', () => close(true));
+    ok.addEventListener('click', () => close(plans.filter((p) => picked.has(p))));
+    const tick = (p) => {
+      if (!many) return null;
+      const c = h('input', { type: 'checkbox', 'aria-label': `Include: ${p.title}` });
+      c.checked = true;
+      c.addEventListener('change', () => { if (c.checked) picked.add(p); else picked.delete(p); ok.textContent = label(); ok.disabled = !picked.size || (typed && typed.value !== nameNeeded); });
+      return c;
+    };
     box.classList.add('wide');
     box.append(
-      h('h3', { class: 'mh' }, plans.length > 1 ? `Review ${plans.length} changes` : 'Review change'),
-      h('p', { class: 'sub' }, 'These exact commands will run, and nothing else.'),
-      h('div', { class: 'plans' }, plans.map((p) => h('div', { class: 'plan ' + p.risk },
-        h('div', { class: 'phead' }, h('b', {}, p.repoName), h('span', { class: 'risk r-' + p.risk }, RISK_LABEL[p.risk])),
+      h('h3', { class: 'mh' }, many ? `Review ${plans.length} changes` : 'Review change'),
+      h('p', { class: 'sub' }, many ? 'These exact commands will run, in this order, and nothing else. Untick any you do not want.' : 'These exact commands will run, and nothing else.'),
+      ...lead.map((l) => h('p', { class: 'muted lead' }, l)),
+      h('div', { class: 'plans' }, plans.map((p, i) => h('div', { class: 'plan ' + p.risk },
+        h('div', { class: 'phead' }, tick(p), h('b', {}, many ? `${i + 1}. ${p.repoName}` : p.repoName), h('span', { class: 'risk r-' + p.risk }, RISK_LABEL[p.risk])),
         h('div', {}, p.title),
         p.note ? h('div', { class: 'muted' }, p.note) : null,
         ...p.warnings.map((w) => h('pre', { class: 'warnbox' }, w)),

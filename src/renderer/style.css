@@ -142,3 +142,5 @@ div.warnbox { font-size: 12px; border-left: 3px solid var(--warn); color: var(--
 .modal .plans { max-height: 52vh; overflow: auto; }
 .finding.ignored { opacity: .7; border-left-color: var(--muted, #888); }
 .ver { font-size: .55em; font-weight: 400; color: var(--muted, #888); margin-left: .3em; }
+.modal .lead { margin: 0 0 8px; font-size: 12px; } .phead input[type=checkbox] { margin-right: 6px; }
+.wcard { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; } .wcard > b { display: block; margin-bottom: 4px; } .wcard .frow.chk { margin-top: 8px; } .wfields { margin-top: 8px; }

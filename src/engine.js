@@ -13,6 +13,7 @@ const { appendAudit, readAudit } = require('./audit');
 const { expandHome } = require('./util');
 const { createPolicyStore, driftReport, repoKey } = require('./policy');
 const { createSeenStore } = require('./schedule');
+const FixAll = require('./renderer/fix-all');
 
 const OFF = 'Actions are turned off: start GutCheck with --allow-actions to plan and apply changes. Everything else works read-only.';
 
@@ -200,9 +201,26 @@ function createEngine(opts = {}) {
     if (!Array.isArray(items) || !items.length) return { ok: false, error: 'Pass items: [{ repo, action: { type, ... } } or { repo, finding }].' };
     const resolved = [];
     const errors = [];
+    const decisions = [];
     for (const it of items.slice(0, 200)) {
       const x = resolve(it && it.repo);
       if (x.error) { errors.push({ ok: false, error: x.error }); continue; }
+      // { repo, all: true, answers? }: every automatic fix in run order, plus the owner's answers to the
+      // decisions (answers: { "<finding id>": { choice: n, values: { message: "..." } } }). Unanswered
+      // decisions come back in `decisions` for the agent to ask the user.
+      if (it.all) {
+        const fa = FixAll.plan(x.repo);
+        const given = it.answers && typeof it.answers === 'object' ? it.answers : {};
+        const answers = fa.decisions.map((d) => {
+          const a = given[d.id];
+          const c = a && d.choices[a.choice];
+          return c && c.action ? { action: { ...c.action, ...(a.values && typeof a.values === 'object' ? a.values : {}) }, sev: (x.repo.findings.find((f) => f.id === d.id) || {}).severity } : null;
+        });
+        for (const action of FixAll.order(x.repo, fa.actions, answers).actions) resolved.push({ dir: x.repo.path, action });
+        const open = fa.decisions.filter((_, k) => !answers[k]);
+        if (open.length) decisions.push({ repo: x.repo.name, decisions: open.map((d) => ({ finding: d.id, title: d.title, choices: d.choices.map((c, k) => ({ choice: k, label: c.label, fields: c.fields && c.fields.map((f) => f.name) })) })) });
+        continue;
+      }
       let action = it.action;
       if (!action && it.finding) {
         const f = (x.repo.findings || []).find((y) => y.id === it.finding);
@@ -214,7 +232,7 @@ function createEngine(opts = {}) {
       resolved.push({ dir: x.repo.path, action });
     }
     const plans = resolved.length ? await service.planActions(resolved) : [];
-    return { ok: true, plans: [...plans.map((p) => (p.ok ? { ok: true, token: p.token, repo: p.repoName, title: p.title, risk: p.risk, commands: p.display.map((d) => d.text), warnings: p.warnings, undo: p.undo, note: p.note, confirmName: p.confirmName } : p)), ...errors] };
+    return { ok: true, plans: [...plans.map((p) => (p.ok ? { ok: true, token: p.token, repo: p.repoName, title: p.title, risk: p.risk, commands: p.display.map((d) => d.text), warnings: p.warnings, undo: p.undo, note: p.note, confirmName: p.confirmName } : p)), ...errors], ...(decisions.length ? { decisions } : {}) };
   }
 
   // Only plans returned by plan() can run. Danger plans need confirm: { <token>: '<repo name>' }.

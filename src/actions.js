@@ -132,7 +132,8 @@ const ACTIONS = {
       if (r.git.detached) fail('Detached HEAD.');
       const st = (await readGit(ctx, ['status', '--short'], r.path)).stdout.trim();
       // `git add -A` must stage exactly what was previewed: the check step refuses if anything changed since.
-      const check = { kind: 'check', cmd: 'git', args: [...READONLY_GIT, 'status', '--short'], cwd: r.path, expect: st, display: 'check the changed files are still the ones listed below' };
+      // Fewer files is fine (a .gitignore added just before can hide some); any file not listed stops it.
+      const check = { kind: 'check', cmd: 'git', args: [...READONLY_GIT, 'status', '--short'], cwd: r.path, expect: st, subset: true, display: 'check no file outside the list below has changed' };
       return { risk: 'caution', title: `Commit all changes on ${r.git.branch}`, steps: [check, git(['add', '-A'], r.path), git(['commit', '-m', msg], r.path)], warnings: ['Files to be committed:\n' + st.split('\n').slice(0, 40).join('\n')], undo: 'git reset --soft HEAD~1' };
     },
   },

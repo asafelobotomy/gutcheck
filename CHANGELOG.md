@@ -4,6 +4,16 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+
+- **Fix all issues** on each repo: every fix in one plan. A short wizard asks the choices only you can make (commit message, merge or close a PR, description, installs, test runs); then one review lists every step in coding order (pull, `.gitignore`, your commit, dependencies, new files, clean-up, push, GitHub settings, test runs), worst issues first within a step. Any step can be unticked. Also `gutcheck fix <repo> all`, and `{ repo, all: true, answers }` in `gutcheck_plan`.
+- The review dialog numbers the steps and has a tick box on each when there are several.
+
+### Changed
+
+- The `.gitignore` GutCheck adds also ignores the caches of the languages the repo uses (Python, Gradle, Node coverage).
+- Committing all changes still refuses if any file appeared since the preview, but goes ahead when there are fewer (for example after a `.gitignore` hid some).
+
 ## [0.25.0] - 2026-11-07
 
 ### Changed

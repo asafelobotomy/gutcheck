@@ -24,3 +24,11 @@ test('the template pins the same SHAs as this repo\'s own workflow', () => {
 test('dependabot template always keeps GitHub Actions pins fresh', () => {
   assert.match(TEMPLATES.dependabot.build({ manifests: ['package.json'] }), /package-ecosystem: github-actions/);
 });
+
+test('the .gitignore template adds caches for the languages the repo uses', () => {
+  const py = TEMPLATES.gitignore.build({ stacks: [{ id: 'python' }] });
+  assert.match(py, /^__pycache__\/$/m);
+  assert.match(py, /^\.pytest_cache\/$/m);
+  assert.doesNotMatch(TEMPLATES.gitignore.build({ stacks: [{ id: 'rust' }] }), /pycache/);
+  assert.match(TEMPLATES.gitignore.build(), /^\.env$/m, 'secrets are always ignored');
+});

@@ -54,7 +54,9 @@ All screenshots show a made-up demo workspace (`npm run screenshots` rebuilds th
 
 ## Actions
 
-Everything is done from the repo view, or in bulk from the workspace overview ("Fix all N"). Before anything runs, GutCheck shows the **exact commands** in a review dialog, and only those commands run. Dangerous actions make you type the repo name.
+Everything is done from the repo view, or in bulk from the workspace overview ("Fix all N").
+
+**Fix all issues** (on each repo) gathers every fix for that repo into one plan. Fixes that only you can choose come first, in a short wizard: a commit message for your uncommitted work, merging or closing a pull request, a description, installing packages or running the tests (those two start on "leave it", because they run the project's code). Then one review lists every step in the order a developer would do them: pull, `.gitignore` rules (so caches and `.env` files are not committed with your work), your commit, dependencies, new project files (each its own commit), local clean-up, push, then GitHub settings and pull requests, and test runs last. Within a step, worse issues go first. Untick anything you do not want; nothing runs until you press Apply. From the command line, `gutcheck fix <repo> all` shows the same plan and the choices left to you; agents use `gutcheck_plan` with `{ repo, all: true }`. Before anything runs, GutCheck shows the **exact commands** in a review dialog, and only those commands run. Dangerous actions make you type the repo name.
 
 | Area | Actions |
 |---|---|
@@ -199,6 +201,7 @@ gutcheck findings --severity warn        # warnings and errors, with the fix com
 gutcheck report my-repo                  # the Markdown fix plan
 gutcheck fix my-repo git-dirty message="Save work"         # preview the exact commands
 gutcheck fix my-repo git-dirty message="Save work" --yes   # run them
+gutcheck fix my-repo all                 # every fix for the repo, in run order, and the choices left to you
 gutcheck new --notify                    # only what is new since the last scan, as a desktop notification
 gutcheck ignore my-repo no-topics "internal tool"           # accept a finding, with the reason
 gutcheck baseline init && gutcheck drift                    # what every repo should have, and who differs

@@ -44,12 +44,15 @@ const dependabot = (manifests, ecosystems, hasWorkflows) => {
 const TEST_CMD = { node: 'npm test', python: 'pytest', rust: 'cargo test', go: 'go test ./...', gradle: './gradlew test' };
 const testLine = (c) => { const cmds = [...new Set((c.stacks || []).filter((s) => TEST_CMD[s.id]).map((s) => `\`${TEST_CMD[s.id]}\`${s.root && s.root !== '.' ? ` (in ${s.root}/)` : ''}`))]; return cmds.length ? `Run the tests: ${cmds.join(', ')}.` : 'Run the test suite.'; };
 
+const IGNORE_BY_STACK = { python: '__pycache__/\n*.py[cod]\n.pytest_cache/\n.venv/\n.coverage\nhtmlcov/\n', gradle: '.gradle/\nlocal.properties\n', node: 'coverage/\n' };
+
 // id -> { file, label, build(ctx) }   ctx: { author, name, manifests, branch }
 const branchOf = (c) => (c && typeof c.branch === 'string' && /^[A-Za-z0-9._/-]{1,100}$/.test(c.branch) ? c.branch : 'main');
 const TEMPLATES = {
   license: { file: 'LICENSE', label: 'MIT licence', build: (c) => MIT(c.author) },
   readme: { file: 'README.md', label: 'README', build: (c) => `# ${c.name}\n\nTODO: describe what this project does, how to install it and how to run it.\n` },
-  gitignore: { file: '.gitignore', label: '.gitignore', build: () => 'node_modules/\ndist/\nbuild/\ntarget/\n.env\n.env.*\n*.log\n.DS_Store\n' },
+  // Common output and secrets, plus caches for the languages the repo uses.
+  gitignore: { file: '.gitignore', label: '.gitignore', build: (c) => 'node_modules/\ndist/\nbuild/\ntarget/\n.env\n.env.*\n*.log\n.DS_Store\n' + [...new Set(((c && c.stacks) || []).map((x) => IGNORE_BY_STACK[x.id]).filter(Boolean))].join('') },
   security: {
     file: 'SECURITY.md',
     label: 'Security policy',

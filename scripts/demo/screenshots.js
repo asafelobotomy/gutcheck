@@ -109,6 +109,18 @@ async function main() {
     await js("document.querySelector('.overlay')?.remove()");
     await clickText('.toolbar button', 'New branch'); await shot2('new-branch.png');
     await js("document.querySelector('.overlay')?.remove()");
+    // Fix all on photo-sorter: the wizard (it has uncommitted work and a PR to decide), then the review.
+    await clickText('#repos li', 'photo-sorter'); await wait(300);
+    await clickText('.toolbar button', 'Fix all issues'); await shot2('fixall-wizard.png');
+    for (let k = 0; k < 8; k++) {
+      const more = await js("(() => { const i = document.querySelector('.modal .wfields input'); if (i) { i.value = 'Save work in progress'; i.dispatchEvent(new Event('input')); } const b = [...document.querySelectorAll('.modal button')].find((x) => x.textContent === 'Next' || x.textContent === 'Add to the plan'); if (!b) return false; b.click(); return true; })()");
+      if (!more) break;
+      await wait(400);
+    }
+    await wait(1500);
+    await shot2('fixall-review.png');
+    await js("document.querySelector('.modal .plans')?.scrollIntoView(false)");
+    await js("document.querySelector('.overlay')?.remove()");
   }
   fs.rmSync(demo.root, { recursive: true, force: true });
   app.quit();

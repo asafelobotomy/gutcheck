@@ -165,6 +165,12 @@ test('apply stops at the first failing step and uses the injected runner', async
   assert.equal(changed.ok, false);
   assert.equal(drift.length, 1);
   assert.match(changed.results[0].out, /changed since the preview/);
+  // Fewer files than previewed (a .gitignore added just before hides some) is fine; none at all is not.
+  const p2 = await plan(ghRepo({ git: { ...ghRepo().git, dirty: 2 } }), { type: 'commit-all', message: 'x' }, { run: async () => ({ ok: true, stdout: ' M a\n?? cache/', stderr: '' }) });
+  const fewer = await apply(p2, { run: async () => ({ ok: true, stdout: ' M a\n', stderr: '' }) });
+  assert.equal(fewer.results[0].ok, true);
+  const none = await apply(p2, { run: async () => ({ ok: true, stdout: '', stderr: '' }) });
+  assert.match(none.results[0].out, /Nothing is left to commit/);
   const prot = await plan(ghRepo(), { type: 'protect-branch', preset: 'basic' });
   await apply(prot, { run: runner });
   assert.ok(calls.at(-1)[2].includes('required_pull_request_reviews'));

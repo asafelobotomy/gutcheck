@@ -37,8 +37,12 @@ async function apply(p, ctx = {}) {
   for (const s of p.steps) {
     if (s.kind === 'check') {
       const r = await ctx.run(s.cmd, s.args, { cwd: s.cwd });
-      const same = r.ok && r.stdout.trim() === s.expect;
-      results.push({ text: s.display, ok: same, out: same ? '' : 'The files changed since the preview. Rescan and review it again.' });
+      const now = r.ok ? r.stdout.trim() : null;
+      // subset: fewer lines than previewed is fine (a .gitignore added just before hides some), but
+      // nothing that was not previewed may appear.
+      const want = new Set(String(s.expect).split('\n'));
+      const same = now != null && (s.subset ? now !== '' && now.split('\n').every((l) => want.has(l)) : now === s.expect);
+      results.push({ text: s.display, ok: same, out: same ? '' : now === '' && s.subset ? 'Nothing is left to commit.' : 'The files changed since the preview. Rescan and review it again.' });
       if (!same) return { ok: false, results };
     } else if (s.kind === 'write') {
       try {

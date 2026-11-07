@@ -26,6 +26,8 @@ Usage: gutcheck <command> [options]
   fix <repo> <finding|action> [key=value...]
                                 plan a fix and show the exact commands; add --yes to run them
                                 (and --confirm <repo name> for dangerous ones)
+  fix <repo> all                every automatic fix for the repo in run order, and the choices
+                                only you can make (commit message, PRs...) with how to make them
   ignore <repo> <finding> <reason...>
                                 accept a finding: it leaves the score and report, shown with the
                                 reason (--all for every repo, a trailing * matches a prefix)
@@ -81,6 +83,27 @@ function printFindings(r, out) {
     if (f.detail) out(`      ${String(f.detail).slice(0, 300)}`);
   }
   out(`\n${r.total} finding(s)${r.total > r.findings.length ? `, first ${r.findings.length} shown (--limit)` : ''}.`);
+}
+
+// gutcheck fix <repo> all: every automatic fix in run order; --yes runs them (each plan in turn).
+async function fixAll(engine, repo, f, out, err) {
+  const p = await engine.plan({ items: [{ repo, all: true }] });
+  if (!p.ok) { err(`gutcheck: ${p.error}`); return 1; }
+  const plans = p.plans.filter((x) => x.ok);
+  for (const x of p.plans.filter((y) => !y.ok)) err(`gutcheck: ${x.error}`);
+  plans.forEach((x, i) => { out(`${i + 1}. ${x.title}  (risk: ${x.risk})`); x.commands.forEach((c) => out(`     $ ${c}`)); });
+  for (const d of (p.decisions || []).flatMap((r) => r.decisions)) {
+    out(`\nYour call: ${d.title}`);
+    for (const c of d.choices) out(`  - ${c.label}${c.fields ? ` (needs ${c.fields.join(', ')})` : ''}`);
+    out(`  Run it yourself: gutcheck fix ${repo} ${d.finding}${d.choices[0].fields ? d.choices[0].fields.map((k) => ` ${k}="..."`).join('') : ''}`);
+  }
+  if (!plans.length) { out('Nothing to fix automatically.'); return 0; }
+  if (!f.yes) { out('\nNothing was run. Add --yes to run exactly these commands, in this order.'); return 0; }
+  const confirm = Object.fromEntries(plans.filter((x) => x.confirmName).map((x) => [x.token, f.confirm]));
+  if (Object.keys(confirm).length && f.confirm !== plans.find((x) => x.confirmName).confirmName) { err(`gutcheck: some steps are dangerous: add --confirm ${plans.find((x) => x.confirmName).confirmName}`); return 1; }
+  const r = await engine.apply({ tokens: plans.map((x) => x.token), confirm });
+  for (const x of r.results) { out(`${x.ok ? 'ok    ' : 'FAILED'}  ${x.title || ''}`); if (x.error) err(`gutcheck: ${x.error}`); }
+  return r.ok ? 0 : 1;
 }
 
 async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (s) => process.stderr.write(s + '\n'), env = process.env } = {}) {
@@ -151,6 +174,7 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
     case 'fix': {
       const [repo, what, ...kv] = rest;
       if (!repo || !what) { err('gutcheck: usage: gutcheck fix <repo> <finding-id | action-type> [key=value...]'); return 1; }
+      if (what === 'all') return fixAll(engine, repo, f, out, err);
       const isAction = Object.prototype.hasOwnProperty.call(engine.actions().actions, what);
       const params = Object.fromEntries(kv.map((p) => p.split(/=(.*)/s)).filter(([k]) => k).map(([k, v]) => [k, parseValue(k, v ?? '')]));
       const p = await engine.plan({ items: [isAction ? { repo, action: { type: what, ...params } } : { repo, finding: what, params }] });
