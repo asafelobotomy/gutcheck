@@ -1,7 +1,7 @@
 {
   "name": "gutcheck",
   "productName": "GutCheck",
-  "version": "0.24.0",
+  "version": "0.24.1",
   "description": "Workspace-wide GitHub health dashboard built on the gh CLI",
   "main": "src/entry.js",
   "bin": {

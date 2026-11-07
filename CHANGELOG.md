@@ -4,6 +4,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-11-07
+
 ### Added
 
 - README: Ko-fi button, badges, feature summary and screenshots of a made-up demo workspace; `npm run screenshots` rebuilds them.
@@ -194,5 +196,6 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 - First release: health checks for every git repo in a folder.
 
-[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.24.1...HEAD
+[0.24.1]: https://github.com/asafelobotomy/gutcheck/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.23.0...v0.24.0
