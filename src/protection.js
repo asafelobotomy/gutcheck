@@ -1,6 +1,12 @@
 // Branch-protection presets offered by the 'protect-branch' action (and quoted in reports).
 
 const PROTECTION = {
+  // For people who push straight to the default branch (solo projects, release-on-push): it stops a
+  // force-push or deletion wiping history, without requiring pull requests. Admins included.
+  minimal: {
+    label: 'Minimal: block force-pushes and deletion, keep direct pushes (no pull request needed)',
+    body: { required_status_checks: null, enforce_admins: true, required_pull_request_reviews: null, restrictions: null, allow_force_pushes: false, allow_deletions: false },
+  },
   basic: {
     label: 'Basic: require a pull request, block force-pushes and deletion (no approvals needed)',
     body: { required_status_checks: null, enforce_admins: false, required_pull_request_reviews: { required_approving_review_count: 0 }, restrictions: null, allow_force_pushes: false, allow_deletions: false },

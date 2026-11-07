@@ -72,6 +72,11 @@ function fixFor(f, r) {
   if (id === 'git-no-upstream') return { phase: 1, rank: 4, why: 'Branch is not tracking a remote.', cmds: [`git push -u origin ${sq(g.branch || 'HEAD')}`] };
 
   if (id.startsWith('ci-failed-')) return { phase: 2, rank: 0, why: run ? `Workflow "${t(run.workflowName)}" failed on ${t(run.headBranch)}.` : 'A CI run failed.', cmds: [`gh run view ${num}${R} --log-failed`, '# fix the cause in the code, commit, push; or if it was a flaky failure:', `gh run rerun ${num} --failed${R}`], note: run && run.url ? `Run URL: ${t(run.url, LEN.path)}` : undefined };
+  if (id.startsWith('pr-conflict-')) {
+    // Dependabot rebases its own PRs when asked; merging by hand would only be overwritten.
+    const pr = (r.prs || []).find((p) => String(p.number) === num);
+    if (pr && /^dependabot\//.test(pr.headRefName || '')) return { phase: 2, rank: 1, why: 'Dependabot\'s PR is out of date with the default branch.', cmds: [`gh pr comment ${num}${R} --body '@dependabot rebase'`], note: 'Dependabot rebases and re-runs the checks; merge it once they pass. If it says it cannot, close the PR and Dependabot opens a fresh one.' };
+  }
   if (id.startsWith('pr-conflict-')) return { phase: 2, rank: 1, why: 'The PR cannot merge until conflicts are resolved.', cmds: [`gh pr checkout ${num}${R}`, `git fetch origin && git merge ${sq('origin/' + def)}`, '# resolve conflicts, run the tests', 'git commit && git push'] };
   if (id.startsWith('pr-ci-')) return { phase: 2, rank: 2, why: 'Checks are failing on the PR.', cmds: [`gh pr checks ${num}${R}`, `gh pr checkout ${num}${R}`, '# fix, commit, push'] };
   if (id.startsWith('pr-ready-')) return { phase: 2, rank: 4, why: 'Approved, mergeable and passing.', cmds: [`gh pr merge ${num} --squash --delete-branch${R}`], note: 'Confirm with the owner before merging.' };
@@ -111,7 +116,7 @@ function fixFor(f, r) {
   }
 
   if (id === 'no-remote') return { phase: 7, rank: 0, why: 'Not backed up anywhere.', cmds: ['gh repo create <name> --private --source . --remote origin --push'], note: 'Ask the owner whether it should be private or public before creating it.' };
-  if (id === 'no-protection') return { phase: 7, rank: 1, why: 'Anyone with write access can force-push to, or delete, the default branch.', cmds: slug ? [`echo '${JSON.stringify(PROTECTION.basic.body)}' | gh api -X PUT ${sq(`repos/${slug}/branches/${def}/protection`)} -H 'Accept: application/vnd.github+json' --input -`] : [], note: 'Needs admin rights; private repos on a free plan will get an error. A ruleset (Settings > Rules) does the same job and can cover several branches. Requiring PRs blocks direct pushes, so ask the owner how they work first.', ref: REFS.rulesets };
+  if (id === 'no-protection') return { phase: 7, rank: 1, why: 'Anyone with write access can force-push to, or delete, the default branch.', cmds: slug ? [`echo '${JSON.stringify(PROTECTION.minimal.body)}' | gh api -X PUT ${sq(`repos/${slug}/branches/${def}/protection`)} -H 'Accept: application/vnd.github+json' --input -`] : [], note: 'Needs admin rights; private repos on a free plan will get an error. A ruleset (Settings > Rules) does the same job and can cover several branches. This minimal rule keeps direct pushes working. Requiring pull requests (the Basic or Strict preset) blocks direct pushes and push-to-release flows, so ask the owner how they work first.', ref: REFS.rulesets };
   if (id === 'no-license') return { phase: 3, rank: 0, why: r.remote && r.remote.isPublic ? 'Public code without a licence cannot legally be reused.' : 'Needed only once the code is shared.', cmds: [], note: 'Ask the owner which licence they want (MIT is a common permissive choice) and add it as LICENSE at the top level.', ref: REFS.license };
   if (id === 'inactive') return { phase: 7, rank: 2, why: 'No pushes for a year.', cmds: slug ? [`gh repo archive ${slug}   # only if the project is finished, ask first`] : [] };
   if (id === 'many-issues') return { phase: 7, rank: 3, why: 'Lots of open issues.', cmds: slug ? [`gh issue list${R} --state open --limit 50`] : [], note: 'Triage with the owner.' };

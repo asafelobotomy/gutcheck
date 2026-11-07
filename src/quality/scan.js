@@ -22,6 +22,9 @@ const MAX_KEPT = 200; // findings of one kind kept per repo (counts stay exact)
 const CANDIDATE_MIN = 3; // a literal repeated this often deserves a name
 const CANDIDATE_MIN_VALUE = 10; // single digits are indices and counts, not worth a name
 const DOCS_DIR_RE = /(^|\/)docs?\//; // HTML under docs/ is documentation (often saved pages), not code to split
+// Round numbers (200, 500, 1000, 200000) are picked independently all the time, so sharing one with a
+// constant is a coincidence, not a duplicate. Distinctive values (86400000, 4242) are worth pointing at.
+const roundNumber = (v) => { const a = Math.abs(v); if (!Number.isInteger(a) || a < 100) return false; const digits = String(a).replace(/0+$/, ''); return digits.length <= 1 || (digits.length <= 2 && a % 100 === 0); };
 const REUSE_MIN = 100; // smaller values (3, 5, 30...) collide by accident, so only larger ones count as "the same constant"
 
 // Validate user settings (they come from disk and from the UI): an invalid field falls back to
@@ -160,7 +163,7 @@ async function scanQuality(dir, rawSettings) {
 
   // Constants: literals that repeat a constant the repo already defines, and literals worth naming.
   const defByValue = new Map();
-  for (const d of defs) if (Math.abs(d.value) > REUSE_MIN) defByValue.set(String(d.value), [...(defByValue.get(String(d.value)) || []), d]);
+  for (const d of defs) if (Math.abs(d.value) > REUSE_MIN && !roundNumber(d.value)) defByValue.set(String(d.value), [...(defByValue.get(String(d.value)) || []), d]);
   const reuse = [];
   const candidatesOut = [];
   for (const [key, v] of values) {

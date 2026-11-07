@@ -34,7 +34,7 @@ const ACTION_CATALOG = {
   'pr-close': { about: 'Close a pull request', params: { number: 'PR number' } },
   'pr-ready': { about: 'Mark a draft pull request ready for review', params: { number: 'PR number' } },
   'run-rerun': { about: 'Re-run a failed CI run', params: { runId: 'run id from the scan', failedOnly: 'true to re-run only failed jobs' } },
-  'protect-branch': { about: 'Protect the default branch', params: { preset: '"basic" or "strict"' } },
+  'protect-branch': { about: 'Protect the default branch', params: { preset: '"minimal" (no force-push or deletion, direct pushes allowed), "basic" (PR required) or "strict"' } },
   'unprotect-branch': { about: 'Remove protection from the default branch', params: {} },
   'security-enable': { about: 'Turn on a GitHub security feature', params: { feature: '"alerts", "security-fixes", "secret-scanning", "push-protection", "code-scanning" or "private-reporting"' } },
   'worktree-prune': { about: 'Prune worktrees whose folders are gone', params: {} },

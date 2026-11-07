@@ -101,7 +101,7 @@ test('magic numbers, constants reuse, candidates; tests and strings excluded', a
   const dir = repo();
   try {
     put(dir, 'src/constants.js', 'export const CACHE_TTL_MS = 86400000;\nexport const PAGE = 25;\n');
-    put(dir, 'src/a.js', 'const day = 86400000;\nsetTimeout(f, 4242);\nsetTimeout(g, 4242);\nsetTimeout(h, 4242);\nconst s = "9999";\n// 8888\n');
+    put(dir, 'src/a.js', 'expire(cache, 86400000);\nsetTimeout(f, 4242);\nsetTimeout(g, 4242);\nsetTimeout(h, 4242);\nconst s = "9999";\n// 8888\n');
     // Python follows ruff's PLR2004: only compared values are magic (x = 640 is not).
     put(dir, 'src/b.py', 'LIMIT = 500\nif x > 750: pass\nif y >= 750: pass\nif 750 == z: pass\nw = 640\nr = s[:80]\nf(limit=300)\n');
     put(dir, 'test/a.test.js', 'expect(f()).toBe(31337);\n');

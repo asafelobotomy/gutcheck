@@ -35,7 +35,7 @@ const INPUTS = {
   'repo-edit': { title: 'Edit repository settings', fields: [{ name: 'description', label: 'Description', type: 'text' }, { name: 'deleteBranchOnMerge', label: 'Automatically delete branches after they are merged', type: 'checkbox' }] },
   'pr-merge': { title: 'Merge pull request', fields: [{ name: 'method', label: 'Method', type: 'select', options: [['squash', 'Squash and merge'], ['merge', 'Merge commit'], ['rebase', 'Rebase and merge']] }, { name: 'deleteBranch', label: 'Delete the branch afterwards', type: 'checkbox' }] },
   'pr-create': { title: 'Open pull request', fields: [{ name: 'title', label: 'Title (leave empty to use the commit messages)', type: 'text' }] },
-  'protect-branch': { title: 'Protect default branch', fields: [{ name: 'preset', label: 'Preset', type: 'select', options: [['basic', 'Basic: PR required, no force-push or deletion'], ['strict', 'Strict: also 1 approval, admins included']] }] },
+  'protect-branch': { title: 'Protect default branch', fields: [{ name: 'preset', label: 'Preset', type: 'select', options: [['minimal', 'Minimal: no force-push or deletion, direct pushes still allowed'], ['basic', 'Basic: PR required, no force-push or deletion'], ['strict', 'Strict: also 1 approval, admins included']] }] },
   'merge-branch': { title: 'Merge into current branch', fields: [{ name: 'mode', label: 'Mode', type: 'select', options: [['ff', 'Fast-forward only'], ['no-ff', 'Always create a merge commit']] }] },
   'add-file': { title: 'Add file', fields: [{ name: 'commit', label: 'Also commit the new file', type: 'checkbox' }] },
 };

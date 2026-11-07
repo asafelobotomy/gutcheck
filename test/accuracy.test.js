@@ -157,3 +157,27 @@ test('unpinned actions: the report gives the exact command to resolve each actio
     'gh api repos/dtolnay/rust-toolchain/commits/stable --jq .sha   # dtolnay/rust-toolchain@stable',
   ]);
 });
+
+test('magic numbers: named declarations of any case, unit factors, and round-number coincidences', () => {
+  const R = require('../src/quality/rules');
+  const vals = (l) => R.magicNumbers(l).map((m) => m.value);
+  assert.deepEqual(vals('const MiB = 1024;'), [], 'a declaration names its value, whatever the case');
+  assert.deepEqual(vals('const BIG_FILE = 5 * 1024 * 1024;'), []);
+  assert.deepEqual(vals('const kb = bytes / 1024'), [], 'a unit conversion');
+  assert.deepEqual(vals('setTimeout(retry, 30 * 1000)'), [30], 'the unit is fine, the 30 still needs a name');
+  assert.deepEqual(vals('const x = compute(37)'), [37]);
+});
+
+test('reports: Dependabot conflicts ask Dependabot to rebase; protection keeps direct pushes', () => {
+  const { PROTECTION } = require('../src/protection');
+  assert.equal(PROTECTION.minimal.body.required_pull_request_reviews, null);
+  assert.deepEqual([PROTECTION.minimal.body.allow_force_pushes, PROTECTION.minimal.body.allow_deletions, PROTECTION.minimal.body.enforce_admins], [false, false, true]);
+  const r = { name: 'r', path: '/w/r', score: 80, grade: 'B', git: {}, remote: { owner: 'o', name: 'r', url: 'https://github.com/o/r', defaultBranch: 'main' }, prs: [{ number: 1, title: 'Bump x', headRefName: 'dependabot/npm_and_yarn/x', mergeable: 'CONFLICTING' }],
+    findings: [{ id: 'pr-conflict-1', category: 'PRs', severity: 'error', title: 'PR #1 has merge conflicts', detail: '' }, { id: 'no-protection', category: 'Repo', severity: 'warn', title: 'Default branch main is unprotected', detail: '' }] };
+  const text = buildReport({ repos: [r] });
+  assert.match(text, /gh pr comment 1 -R o\/r --body '@dependabot rebase'/);
+  assert.doesNotMatch(text, /gh pr checkout 1/);
+  assert.match(text, /"required_pull_request_reviews":null/);
+  const human = { ...r, prs: [{ ...r.prs[0], headRefName: 'feature/x' }] };
+  assert.match(buildReport({ repos: [human] }), /gh pr checkout 1/);
+});

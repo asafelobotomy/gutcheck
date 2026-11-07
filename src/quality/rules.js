@@ -73,6 +73,12 @@ function debugKind(line, ext) {
 // Numbers on a code line that look like magic numbers. Returns [{ value, text }].
 // name=, name: (object property or keyword argument), name: type = (a typed parameter default), and
 // d["key"] = (a string-keyed assignment: the key names the value).
+// const MiB = 1024; / let pageSize = 50 / const BIG = 5 * 1024 * 1024: a declaration whose whole value is
+// literal arithmetic gives the number a name, whatever the name's case.
+const NAMED_DECL_RE = /^\s*(?:export\s+)?(?:(?:const|let|var|val|final|static|readonly|pub|private|public|protected|int|long|double|float)\s+)+[A-Za-z_$][\w$]*\s*(?::\s*[\w$.<>[\]| ]+?)?\s*=\s*[-+\d._eExXa-fA-F\s*/()]+[;,]?\s*$/;
+// Unit factors: 1024 (bytes), 1000/60/3600/24 (time) in a product or quotient with another number or a
+// value: `5 * 1024 * 1024`, `bytes / 1024`, `secs * 1000`. The product is the meaningful number.
+const UNIT_FACTORS = new Set([24, 60, 1000, 1024, 3600, 86400, 1048576, 1073741824]);
 const NAMED_ARG_RE = /(?:[({,*]\s*[A-Za-z_$][\w$]*\s*(?::\s*[\w$.[\]| ]+?\s*)?[:=]|\[\s*(?:""|''|``)\s*\]\s*=)\s*-?$/;
 const HTTP_CONTEXT_RE = /status|http|response|\bres\.|\breply\b|abort\(|HTTPException|raise_for|\bcode\b|statusCode|\bok\b/i;
 
@@ -82,7 +88,7 @@ const COMPARED_AFTER_RE = /^\s*(?:[<>]=?|[=!]==?)/;
 
 // opts.comparisonsOnly: Python follows ruff's PLR2004 (magic values are only those compared against).
 function magicNumbers(line, opts = {}) {
-  if (SKIP_LINE_RE.test(line) || DECL_RE.test(line)) return [];
+  if (SKIP_LINE_RE.test(line) || DECL_RE.test(line) || NAMED_DECL_RE.test(line)) return [];
   const found = [...line.matchAll(NUM_RE)];
   if (!found.length || found.length >= DENSE_LINE) return [];
   const out = [];
@@ -96,6 +102,7 @@ function magicNumbers(line, opts = {}) {
     // the number is, and HTTP status codes are a vocabulary of their own (404 reads better than a name).
     if (NAMED_ARG_RE.test(before)) continue;
     if (Number.isInteger(value) && value >= 100 && value <= 599 && HTTP_CONTEXT_RE.test(line)) continue;
+    if (UNIT_FACTORS.has(value) && (/[*/]\s*$/.test(before) || /^\s*[*/]/.test(line.slice(m.index + m[0].length)))) continue;
     if (opts.comparisonsOnly && !(COMPARED_BEFORE_RE.test(before) || COMPARED_AFTER_RE.test(line.slice(m.index + m[0].length)))) continue;
     out.push({ value, text: m[0] });
   }

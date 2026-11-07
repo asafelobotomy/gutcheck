@@ -1,0 +1,30 @@
+name: Bug report
+description: Something GutCheck reports wrongly, or an action that misbehaves
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The finding, view or action, and what you expected instead. A false alarm is a bug too.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to see it
+      description: The kind of repo it happens in (language, layout), and the steps. Please do not paste secrets, .env contents or private repo names.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: GutCheck version
+      description: From the release you downloaded, or `GutCheck.AppImage --cli --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options: [App, Command line, MCP server (agent), Copy for LLM report]

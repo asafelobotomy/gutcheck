@@ -220,7 +220,7 @@ function settingsPanel(r) {
   return [h('h3', {}, 'Repository settings'),
     h('div', { class: 'muted' }, `Default branch protection: ${prot} · Dependabot alerts: ${r.remote.alertsEnabled === false ? 'off' : r.remote.alertsEnabled ? 'on' : 'unknown'} · Your permission: ${r.remote.viewerPermission || 'unknown'}`),
     h('div', { class: 'toolbar' },
-      btn('Protect default branch…', act('protect-branch', { preset: 'basic' })),
+      btn('Protect default branch…', act('protect-branch', { preset: 'minimal' })),
       r.protection === true ? btn('Remove protection', act('unprotect-branch', {}), 'dng') : null,
       btn('Enable Dependabot alerts', act('security-enable', { feature: 'alerts' })),
       btn('Enable security updates', act('security-enable', { feature: 'security-fixes' })),
@@ -279,40 +279,6 @@ async function refreshOne(dir) {
   if (gen !== state.gen) return; // a workspace scan started meanwhile
   if (out.ok) { state.repos.set(dir, out.res); showRate(out.rate); } else toast(out.error || 'Rescan failed.', 'bad');
   renderStats(); renderList(); renderMain();
-}
-
-/* ---------------------------------------------------------------- overview + history */
-
-const BULKABLE = new Set(['add-file', 'run-rerun', 'pull', 'push', 'delete-merged', 'security-enable', 'fetch', 'npm-install', 'worktree-prune']);
-
-// Workspace-wide recommendations: group identical findings across repos, biggest impact first.
-function renderOverview() {
-  state.view = 'overview'; state.selected = null;
-  const list = Metrics.groupFindings([...state.repos.values()].filter((r) => !r.error));
-  put($('detail'), 
-    h('h2', {}, 'Workspace overview'),
-    state.repos.size ? h('div', { class: 'toolbar' }, copyButton(null, 'the whole workspace')) : null,
-    list.length ? h('p', { class: 'sub' }, 'Recommendations grouped across all repositories, most severe first. "Fix all" previews every command before anything runs.') : h('p', { class: 'empty' }, state.repos.size ? 'Nothing to recommend.' : 'Choose a workspace folder and press Scan.'),
-    ...list.map((g) => {
-      const bulk = g.fixes.every((f) => f && BULKABLE.has(f.action.type)) && g.fixes.length > 1;
-      return h('div', { class: 'rec' }, h('span', { class: 'n ' + sevClass(g.sev) }, g.repos.length),
-        h('div', { class: 'grow' }, h('div', {}, `${g.title}  `, h('span', { class: 'pill' }, g.cat)), h('div', { class: 'repos' }, g.repos.join(', '))),
-        bulk ? btn(`Fix all ${g.fixes.length}…`, () => runActions(g.fixes, { ask: false })) : null);
-    }));
-}
-
-async function renderHistory() {
-  state.view = 'history'; state.selected = null;
-  renderList();
-  const entries = await window.api.audit();
-  if (state.view !== 'history') return; // the user moved on while it loaded
-  put($('detail'), 
-    h('h2', {}, 'Action history'),
-    h('p', { class: 'sub' }, 'Everything GutCheck has changed on this machine (newest first). Stored locally in the app data folder.'),
-    entries.length ? null : h('p', { class: 'empty' }, 'Nothing yet.'),
-    ...entries.map((e) => h('div', { class: 'finding ' + (e.ok ? '' : 'error') },
-      h('div', { class: 't' }, h('b', {}, `${e.ok ? '✓' : '✗'} ${e.repo}: ${e.title}`),
-        h('span', {}, new Date(e.ts).toLocaleString() + ' · ' + (e.steps || []).map((s) => s.cmd).join('  ;  '))))));
 }
 
 function renderMain() {
@@ -380,7 +346,7 @@ $('browse').addEventListener('click', async () => { const d = await window.api.p
 $('q').addEventListener('input', renderList);
 $('sort').addEventListener('change', renderList);
 $('overview').addEventListener('click', () => { renderOverview(); renderList(); });
-$('history').addEventListener('click', renderHistory);
+$('history').addEventListener('click', () => renderHistory()); // defined in overview-view.js, loaded after this file
 $('readonly').addEventListener('change', async (e) => {
   state.readOnly = e.target.checked;
   await window.api.setSettings({ readOnly: state.readOnly });

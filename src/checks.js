@@ -136,7 +136,7 @@ function checkRepoSettings(s) {
   }
   if (s.remote.archived) out.push({ id: 'archived', category: 'Repo', severity: 'info', title: 'Repository is archived', detail: 'Read-only on GitHub.' });
   if (s.protection === false && !s.remote.archived && !s.remote.protectionUnavailable)
-    out.push({ id: 'no-protection', category: 'Repo', severity: s.remote.isPublic ? 'warn' : 'info', title: `Default branch ${s.remote.defaultBranch} is unprotected`, detail: 'No branch protection rule or active ruleset. At minimum block force-pushes and deletion; ideally require PRs and status checks.', fix: { type: 'protect-branch', label: 'Protect…', preset: 'basic' } });
+    out.push({ id: 'no-protection', category: 'Repo', severity: s.remote.isPublic ? 'warn' : 'info', title: `Default branch ${s.remote.defaultBranch} is unprotected`, detail: 'No branch protection rule or active ruleset. At minimum block force-pushes and deletion (that keeps direct pushes working); require pull requests too if others contribute.', fix: { type: 'protect-branch', label: 'Protect…', preset: 'minimal' } });
   if (s.remote.deleteBranchOnMerge === false && !s.remote.archived && s.remote.viewerPermission === 'ADMIN')
     out.push({ id: 'no-auto-delete', category: 'Repo', severity: 'info', title: 'Merged branches are not deleted automatically', detail: 'Head branches pile up after every merged PR.', fix: { type: 'repo-edit', label: 'Turn on auto-delete…', deleteBranchOnMerge: true } });
   if (s.remote.openIssues > 25) out.push({ id: 'many-issues', category: 'Repo', severity: 'info', title: `${s.remote.openIssues} open issues`, detail: 'Consider triaging.' });
