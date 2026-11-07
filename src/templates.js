@@ -84,7 +84,7 @@ const TEMPLATES = {
   gitattributes: {
     file: '.gitattributes',
     label: '.gitattributes',
-    build: () => '# Normalise line endings in the repository; check out with the platform default.\n* text=auto\n',
+    build: () => '# Normalise line endings in the repository; check out with the platform default.\n* text=auto\n# Windows scripts must keep CRLF.\n*.bat text eol=crlf\n*.cmd text eol=crlf\n',
   },
   dependabot: { file: '.github/dependabot.yml', label: 'Dependabot config', build: (c) => dependabot(c.manifests || [], c.ecosystems) },
   'ci-node': {
