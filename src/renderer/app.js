@@ -172,7 +172,7 @@ function findingEl(r, f) {
   return h('div', { class: 'finding ' + f.severity },
     h('div', { class: 't' }, h('b', {}, f.title), h('span', {}, f.detail || '')),
     f.url ? btn('Open ↗', () => window.api.openUrl(f.url)) : null,
-    f.fix ? btn(f.fix.label, () => runActions([{ repo: r, action: f.fix }])) : null,
+    f.fix && f.fix.type === 'permissions-prune' ? btn('Review rules…', () => reviewRules(r, f.fix.hashes)) : f.fix ? btn(f.fix.label, () => runActions([{ repo: r, action: f.fix }])) : null,
     ignoreButton(r, f));
 }
 

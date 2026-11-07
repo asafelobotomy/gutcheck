@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('api', {
   agents: (allowActions) => ipcRenderer.invoke('agents:status', { allowActions }),
   planAgent: (id, allowActions, remove) => ipcRenderer.invoke('agents:plan', { id, allowActions, remove }),
   planCleanup: (days) => ipcRenderer.invoke('agents:cleanup', { days }),
+  agentRules: (dir) => ipcRenderer.invoke('agents:rules', { dir }),
+  revealRule: (dir, hash) => ipcRenderer.invoke('agents:reveal-rule', { dir, hash }),
   planAgentFix: (fix) => ipcRenderer.invoke('agents:fix', { fix }),
   agentUsage: (live) => ipcRenderer.invoke('agents:usage', { live }),
   applyAgent: (token) => ipcRenderer.invoke('agents:apply', { token }),

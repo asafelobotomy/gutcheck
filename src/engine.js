@@ -76,6 +76,10 @@ function createEngine(opts = {}) {
   const policy = createPolicyStore(dir);
   const seen = createSeenStore(path.join(dir, 'seen.json'));
   let lastFresh = null; // new findings found by the last scan (null: nothing to compare with)
+  // Machine-level agent fixes (plugins, MCP servers, skills, stale config) plan and apply through
+  // agent-connect.js; their tokens carry an "a:" prefix so apply() can route them.
+  let agc = null;
+  const agentsCtl = () => (agc = agc || require('./agent-connect').createAgentConnect({ env, launch: { dataDir: dir }, audit: (e) => appendAudit(auditFile, { ...e, via: opts.via || 'cli' }) }));
   const service = createService({
     known, settings, audit: (e) => appendAudit(auditFile, { ...e, via: opts.via || 'cli' }),
     rescan: (d) => scanRepo(d, { deep: !!store.load().deep, policy: policy.load }), trendStore,
@@ -206,6 +210,12 @@ function createEngine(opts = {}) {
     const errors = [];
     const decisions = [];
     for (const it of items.slice(0, 200)) {
+      // { agentFix }: a machine-level fix from gutcheck_agent_usage or the workspace advice.
+      if (it && it.agentFix && typeof it.agentFix === 'object') {
+        const p = agentsCtl().planFix(it.agentFix, [...known.values()].filter((r) => !r.error));
+        errors.push(p.ok ? { ok: true, token: 'a:' + p.token, repo: 'Agent setup', title: p.title, risk: p.risk || 'caution', commands: p.display, note: p.note } : { ok: false, repoName: 'Agent setup', error: p.error });
+        continue;
+      }
       const x = resolve(it && it.repo);
       if (x.error) { errors.push({ ok: false, error: x.error }); continue; }
       // { repo, all: true, answers? }: every automatic fix in run order, plus the owner's answers to the
@@ -242,7 +252,10 @@ function createEngine(opts = {}) {
   async function apply({ tokens, confirm = {} } = {}) {
     if (!allowActions) return { ok: false, error: OFF };
     if (!Array.isArray(tokens) || !tokens.length) return { ok: false, error: 'Pass tokens from gutcheck_plan.' };
-    const res = await service.applyActions(tokens, { confirm });
+    const res = [];
+    for (const t of tokens) {
+      if (typeof t === 'string' && t.startsWith('a:')) { const r = await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm })));
+    }
     return { ok: res.every((r) => r.ok), results: res.map((r) => ({ ok: r.ok, repo: r.repoName, title: r.title, error: r.error, steps: (r.results || []).map((x) => ({ cmd: x.text, ok: x.ok, output: x.out || undefined })) })) };
   }
 

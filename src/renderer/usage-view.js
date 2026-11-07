@@ -14,6 +14,41 @@ async function runMachineFix(fix) {
   return r.ok;
 }
 
+// A repo's permission rules: redacted shapes, the flagged ones ticked. "Show" fetches one value from the
+// file for this dialog only (never saved, logged or reported); "Remove" plans removing the ticked rules.
+async function reviewRules(r, flagged = []) {
+  const res = await window.api.agentRules(r.path);
+  if (!res.ok) return toast(res.error, 'bad');
+  const picked = new Set(flagged);
+  const out = await modal((box, close) => {
+    box.classList.add('wide');
+    const go = h('button', { class: 'primary' });
+    const label = () => { go.textContent = `Remove ${picked.size} rule${picked.size === 1 ? '' : 's'}…`; go.disabled = !picked.size || state.readOnly; };
+    go.addEventListener('click', () => close([...picked]));
+    const rows = res.rules.map((x) => {
+      const tick = h('input', { type: 'checkbox', 'aria-label': `Remove rule #${x.hash}` });
+      tick.checked = picked.has(x.hash);
+      tick.addEventListener('change', () => { if (tick.checked) picked.add(x.hash); else picked.delete(x.hash); label(); });
+      const value = h('code', { class: 'rule-value' });
+      value.hidden = true;
+      const show = h('button', { class: 'sm' }, 'Show');
+      show.addEventListener('click', async () => {
+        if (!value.hidden) { value.hidden = true; value.textContent = ''; show.textContent = 'Show'; return; }
+        const v = await window.api.revealRule(r.path, x.hash);
+        if (!v.ok) return toast(v.error, 'bad');
+        value.textContent = v.value; value.hidden = false; show.textContent = 'Hide';
+      });
+      return h('div', { class: 'row' }, tick, h('div', { class: 'grow' }, h('b', {}, x.shape), ' ', h('span', { class: 'muted' }, `#${x.hash}${x.tokenLike ? ' · token-like' : x.oneOff ? ' · one-off' : ''}`), value), show);
+    });
+    label();
+    box.append(h('h3', { class: 'mh' }, `Permission rules in ${r.name}`),
+      h('p', { class: 'sub' }, '.claude/settings.local.json. Values stay hidden: Show reads one from the file for this window only; it is never saved, logged or put in a report.'),
+      rows.length ? h('div', { class: 'plans' }, rows) : h('p', { class: 'ok-msg' }, 'No rules.'),
+      h('div', { class: 'mbtns' }, h('button', { onclick: () => close(null) }, 'Cancel'), go));
+  });
+  if (out && out.length) return runActions([{ repo: r, action: { type: 'permissions-prune', hashes: out } }]);
+}
+
 // Two separate consents: reading transcripts (always, for this check), and starting MCP servers.
 function askUsageConsent() {
   return modal((box, close) => {

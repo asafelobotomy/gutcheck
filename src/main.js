@@ -205,6 +205,15 @@ handle('agents:plan', (_e, { id, allowActions, remove } = {}) => {
   return agents.plan(String(id || ''), { allowActions: agentAllow(allowActions), remove: remove === true });
 });
 handle('agents:cleanup', (_e, { days } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.planCleanup(Number(days))));
+// Permission rules of a scanned repo: shapes and hashes only. One value is returned on request, for the
+// app's own review dialog; it is never logged, saved, or sent anywhere else.
+const localRules = (dir) => { try { const c = JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'settings.local.json'), 'utf8')); return c && c.permissions && Array.isArray(c.permissions.allow) ? c.permissions.allow.filter((x) => typeof x === 'string') : []; } catch { return []; } };
+handle('agents:rules', (_e, { dir } = {}) => (known.has(dir) ? { ok: true, rules: localRules(dir).map(require('./agent-context').classifyRule) } : { ok: false, error: 'Unknown repo' }));
+handle('agents:reveal-rule', (_e, { dir, hash } = {}) => {
+  if (!known.has(dir)) return { ok: false, error: 'Unknown repo' };
+  const v = localRules(dir).find((x) => require('./agent-context').hashRule(x) === hash);
+  return v == null ? { ok: false, error: 'That rule is no longer in the file.' } : { ok: true, value: v };
+});
 handle('agents:fix', (_e, { fix } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.planFix(fix && typeof fix === 'object' ? fix : {}, [...known.values()].filter((r) => !r.error))));
 handle('agents:usage', (_e, { live } = {}) => agents.usageScan({ live: live === true && !loadSettings().readOnly, repos: [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name })) }));
 handle('agents:apply', (_e, { token } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.apply(String(token || ''))));

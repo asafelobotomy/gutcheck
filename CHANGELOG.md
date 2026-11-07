@@ -10,6 +10,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 - LSP plugins: Claude Code's official LSP plugins missing or turned off for a repo's main languages, or their language server not on PATH, with a **Set up** fix (`claude plugin install` or `enable`, plus `npm`, `rustup`, `go`, `gem`, `dotnet` or `pacman` through `run0` for the server).
 - Permission rules: one-off and token-like rules in `.claude/settings.local.json`, shown only as redacted shapes and hashes, with a **Remove** fix that backs up the file in GutCheck's data folder.
 - Stale agent config files (GutCheck's own `.gutcheck.bak` after a week, temp files left by interrupted writes, GutCheck's old backups) with a **Move to trash** fix.
+- **Review rules…** on permission findings: every rule in `.claude/settings.local.json` as a redacted shape; **Show** reads one value into that window only, on request (never saved, logged or reported); tick rules to remove them.
+- MCP: `gutcheck_agent_usage` (starting servers needs `--allow-actions`), and machine-level fixes through `gutcheck_plan` with `{ agentFix }` and `gutcheck_apply`.
 - **Agent usage and health** (Settings > AI agents > Check usage, or `gutcheck agents usage`): opt-in; reads only tool names from 28 days of transcripts, and with a second consent runs `claude mcp list` to test each MCP server. Unused plugins, skills and servers, failing or signed-out servers, and permission rules that never matched get fixes (turn off, remove, sign in).
 
 ### Added
