@@ -4,6 +4,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-07
+
 ### Added
 
 - Agent context: how much CLAUDE.md, `.claude/CLAUDE.md` and AGENTS.md load into every session (KB and tokens, with `@`-imports and the largest sections), and a **Split** fix that keeps a core file and moves the largest sections to `docs/agents/` with pointers, keeping every line.
@@ -237,7 +239,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 - First release: health checks for every git repo in a folder.
 
-[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.24.2...v0.25.0
 [0.24.2]: https://github.com/asafelobotomy/gutcheck/compare/v0.24.1...v0.24.2
 [0.24.1]: https://github.com/asafelobotomy/gutcheck/compare/v0.24.0...v0.24.1
