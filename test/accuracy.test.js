@@ -181,3 +181,35 @@ test('reports: Dependabot conflicts ask Dependabot to rebase; protection keeps d
   const human = { ...r, prs: [{ ...r.prs[0], headRefName: 'feature/x' }] };
   assert.match(buildReport({ repos: [human] }), /gh pr checkout 1/);
 });
+
+test('a failed Dependabot Updates run is not offered a re-run (GitHub cannot re-run dynamic runs)', () => {
+  const run = (workflowName) => ({ databaseId: 7, workflowName, headBranch: 'main', displayTitle: 'npm in / for x', createdAt: new Date().toISOString() });
+  const f = (w) => evaluate(base({ ci: { failed: [run(w)], error: null }, protection: true })).findings.find((x) => x.id === 'ci-failed-7');
+  assert.equal(f('Dependabot Updates').fix, undefined);
+  assert.match(f('Dependabot Updates').detail, /could not make this update/);
+  assert.equal(f('CI').fix.type, 'run-rerun');
+  const r = { name: 'r', path: '/w/r', score: 90, grade: 'A', git: {}, remote: { owner: 'o', name: 'r', url: 'https://github.com/o/r', defaultBranch: 'main' }, ci: { failed: [run('Dependabot Updates')] }, findings: [f('Dependabot Updates')] };
+  const text = buildReport({ repos: [r] });
+  assert.match(text, /gh run view 7 -R o\/r --log-failed {3}# why the update failed/);
+  assert.match(text, /Do not re-run it/);
+});
+
+test('templates: Dependabot covers every ecosystem and folder; CONTRIBUTING names the real test commands', () => {
+  const { TEMPLATES, findEcosystems } = require('../src/templates');
+  const d = tmp();
+  try {
+    put(d, 'package.json', '{}'); put(d, 'package-lock.json', '{}');
+    put(d, 'src-tauri/Cargo.toml', '[package]'); put(d, 'src-tauri/Cargo.lock', '');
+    put(d, 'android/build.gradle.kts', ''); put(d, 'requirements.txt', 'x');
+    put(d, 'node_modules/x/package.json', '{}'); put(d, 'node_modules/x/package-lock.json', '{}');
+    const eco = findEcosystems(d);
+    assert.deepEqual(eco.map((e) => `${e.eco}:${e.dir}`).sort(), ['cargo:/src-tauri', 'gradle:/android', 'npm:/', 'pip:/']);
+    const yml = TEMPLATES.dependabot.build({ manifests: [], ecosystems: eco });
+    assert.match(yml, /package-ecosystem: cargo\n {4}directory: \/src-tauri/);
+    assert.match(yml, /package-ecosystem: github-actions/);
+  } finally { rm(d); }
+  const c = TEMPLATES.contributing.build({ name: 'x', stacks: [{ id: 'node', root: '.' }, { id: 'rust', root: 'src-tauri' }] });
+  assert.match(c, /Run the tests: `npm test`, `cargo test` \(in src-tauri\/\)\./);
+  assert.match(TEMPLATES.codeowners.build({ owner: 'me' }), /^\* @me$/m);
+  assert.doesNotMatch(TEMPLATES.editorconfig.build(), /indent/, 'no indentation rules that could contradict the code');
+});

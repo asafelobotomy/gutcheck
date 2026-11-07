@@ -28,9 +28,10 @@ function checkCI(s) {
       // version): a warning about that update, not a broken build.
       severity: r.workflowName === 'Dependabot Updates' ? 'warn' : 'error',
       title: `Failed: ${r.workflowName} on ${r.headBranch}`,
-      detail: `${r.displayTitle} (${daysAgo(r.createdAt)}d ago)`,
+      detail: `${r.displayTitle} (${daysAgo(r.createdAt)}d ago)${r.workflowName === 'Dependabot Updates' ? '. Dependabot could not make this update; its log says why (often a version conflict). It retries on its schedule.' : ''}`,
       url: r.url,
-      fix: { type: 'run-rerun', label: 'Re-run failed jobs', runId: r.databaseId, failedOnly: true },
+      // Dependabot's own runs are dynamic: GitHub cannot re-run them (gh run rerun fails). They retry on schedule.
+      fix: r.workflowName === 'Dependabot Updates' ? undefined : { type: 'run-rerun', label: 'Re-run failed jobs', runId: r.databaseId, failedOnly: true },
     });
   }
   return out;

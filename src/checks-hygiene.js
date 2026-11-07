@@ -69,12 +69,12 @@ function checkProject(s) {
     add('readme-thin', 'info', p.readme.bytes < README_MIN_BYTES ? 'README is nearly empty' : 'README has no install or usage section', 'Say what the project does, how to install it and how to use it (Standard Readme / makeareadme).');
   const released = (s.hygiene.tags > 0) && !(s.remote && s.remote.latestRelease);
   if (released && !p.changelog) add('no-changelog', 'info', 'Tags but no changelog or GitHub releases', 'Users cannot see what changed between versions. Keep a CHANGELOG.md or publish GitHub releases with notes.');
-  if (!p.gitattributes) add('no-gitattributes', 'info', 'No .gitattributes', 'Line endings then depend on each contributor\'s settings. "* text=auto" normalises them for everyone.');
-  if (!p.editorconfig) add('no-editorconfig', 'info', 'No .editorconfig', 'Editors will not agree on indentation, charset or final newlines.');
+  if (!p.gitattributes) add('no-gitattributes', 'info', 'No .gitattributes', 'Line endings then depend on each contributor\'s settings. "* text=auto" normalises them for everyone.', { fix: { type: 'add-file', label: 'Add .gitattributes', template: 'gitattributes' } });
+  if (!p.editorconfig) add('no-editorconfig', 'info', 'No .editorconfig', 'Editors will not agree on charset, line endings or final newlines.', { fix: { type: 'add-file', label: 'Add .editorconfig', template: 'editorconfig' } });
   if (p.runtime && !p.runtime.pinned) add('no-runtime-pin', 'info', `${p.runtime.kind} version not pinned`, p.runtime.kind === 'Node' ? 'Add .nvmrc (or "engines" in package.json) so everyone and CI use the same Node.' : 'Add .python-version or requires-python in pyproject.toml.');
   if (pub) {
-    if (s.hasWorkflows && !p.codeowners) add('no-codeowners', 'info', 'No CODEOWNERS file', 'Nobody is automatically asked to review changes, including changes to workflows.');
-    if (s.remote.hasIssues && !p.issueTemplates) add('no-issue-templates', 'info', 'No issue templates', 'Templates in .github/ISSUE_TEMPLATE get you the details you need in bug reports.');
+    if (s.hasWorkflows && !p.codeowners) add('no-codeowners', 'info', 'No CODEOWNERS file', 'Nobody is automatically asked to review changes, including changes to workflows.', { fix: { type: 'add-file', label: 'Add CODEOWNERS', template: 'codeowners' } });
+    if (s.remote.hasIssues && !p.issueTemplates) add('no-issue-templates', 'info', 'No issue templates', 'Templates in .github/ISSUE_TEMPLATE get you the details you need in bug reports.', { fix: { type: 'add-file', label: 'Add bug report template', template: 'issue-template' } });
     if (s.remote.topics === 0) add('no-topics', 'info', 'No repository topics', 'Topics make the project discoverable on GitHub.');
   }
   return out;
