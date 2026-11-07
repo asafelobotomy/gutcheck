@@ -136,7 +136,7 @@ async function scanQuality(dir, rawSettings) {
       if (isTest) return;
       const dbg = R.debugKind(line, ext);
       if (dbg) { debugBy[dbg[1]]++; if (debug.length < MAX_KEPT) debug.push({ path: rel, line: i + 1, kind: dbg[0], severity: dbg[1] }); }
-      for (const m of R.magicNumbers(line)) {
+      for (const m of R.magicNumbers(line, { comparisonsOnly: ext === 'py' })) {
         fileMagic++;
         const key = String(m.value);
         const v = values.get(key) || { value: m.value, count: 0, files: new Set(), fam: spec.fam, uses: [] };

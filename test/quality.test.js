@@ -102,7 +102,8 @@ test('magic numbers, constants reuse, candidates; tests and strings excluded', a
   try {
     put(dir, 'src/constants.js', 'export const CACHE_TTL_MS = 86400000;\nexport const PAGE = 25;\n');
     put(dir, 'src/a.js', 'const day = 86400000;\nsetTimeout(f, 4242);\nsetTimeout(g, 4242);\nsetTimeout(h, 4242);\nconst s = "9999";\n// 8888\n');
-    put(dir, 'src/b.py', 'LIMIT = 500\nx = 750\ny = 750\nz = 750\n');
+    // Python follows ruff's PLR2004: only compared values are magic (x = 640 is not).
+    put(dir, 'src/b.py', 'LIMIT = 500\nif x > 750: pass\nif y >= 750: pass\nif 750 == z: pass\nw = 640\nr = s[:80]\nf(limit=300)\n');
     put(dir, 'test/a.test.js', 'expect(f()).toBe(31337);\n');
     const q = await scanQuality(dir);
     const files = Object.fromEntries(q.magic.files.map((f) => [f.path, f.count]));
@@ -117,6 +118,22 @@ test('magic numbers, constants reuse, candidates; tests and strings excluded', a
     assert.ok(q.advice.some((a) => a.id === 'q-constants-candidates'));
     assert.ok(!q.advice.some((a) => a.id === 'q-no-constants'));
   } finally { cleanup(dir); }
+});
+
+test('magic numbers: named contexts and HTTP status codes are not magic (ESLint/ruff conventions)', () => {
+  const R = require('../src/quality/rules');
+  const vals = (l, o) => R.magicNumbers(l, o).map((m) => m.value);
+  assert.deepEqual(vals('fetchPage({ retries: 7, timeout: 3000 })'), [], 'object properties name their values');
+  assert.deepEqual(vals('function f(a, limit = 50) {}'), [], 'default values');
+  assert.deepEqual(vals('def f(*, timeout: float = 30.0):'), [], 'typed defaults');
+  assert.deepEqual(vals('cfg[""] = 21'), [], 'string-keyed assignment');
+  assert.deepEqual(vals('const head = buf.slice(0)[3:]'), []);
+  assert.deepEqual(vals('if (res.status === 404) return'), [], 'HTTP status codes in an HTTP context');
+  assert.deepEqual(vals('raise HTTPException(status_code=403)'), []);
+  assert.deepEqual(vals('setTimeout(f, 4242)'), [4242], 'an unexplained call argument still counts');
+  assert.deepEqual(vals('total = price * 17'), [17]);
+  assert.deepEqual(vals('x = foo(37)', { comparisonsOnly: true }), []);
+  assert.deepEqual(vals('if n > 60:', { comparisonsOnly: true }), [60]);
 });
 
 test('no constants module is flagged when there are many bare numbers', async () => {

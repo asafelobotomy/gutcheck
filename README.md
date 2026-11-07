@@ -51,7 +51,14 @@ An **issue heatmap** shows repos against problem categories (darker means more i
 The **Code quality** view runs read-only checks on the source of every scanned repo (it respects `.gitignore` and skips `node_modules`, build output, lockfiles, minified and generated files):
 
 - **File length (LOC)**: files over your limit (HTML under `docs/` is treated as documentation and not flagged). The default is **400 lines**; change it, choose to count all lines or only code lines (no blanks or comments), and add ignore rules (`legacy/`, `*.generated.ts`, or part of a path) in the form at the top of the view. Settings are validated (20 to 20000) and saved.
-- **Magic numbers**: bare numeric literals in non-test code for JavaScript/TypeScript, Python, Go, Rust, Java, Kotlin, C/C++, C#, PHP, Swift, Ruby and shell. Strings, comments and regexes are ignored, as are `0, 1, 2, 10, 100, 0.5`, constant definitions (`MAX_X = 5`), array indices, imports and data tables.
+- **Magic numbers**: bare numeric literals in non-test code for JavaScript/TypeScript, Python, Go, Rust, Java, Kotlin, C/C++, C#, PHP, Swift, Ruby and shell. Strings, comments and regexes are ignored, as are `0, 1, 2, 10, 100, 0.5`, constant definitions (`MAX_X = 5`), array indices, imports and data tables. Numbers whose context names them are also skipped, following ESLint's `no-magic-numbers` options:
+  - keyword arguments and object properties (`limit=50`, `{ timeout: 30 }`)
+  - default values (`def f(timeout: float = 30.0)`)
+  - string-keyed assignments (`cfg["days"] = 7`)
+  - slice bounds (`s[:80]`)
+  - HTTP status codes in an HTTP context
+
+  Python follows ruff's [PLR2004](https://docs.astral.sh/ruff/rules/magic-value-comparison/): only numbers in comparisons (`if retries > 5`) count.
 - **Constants library**: finds constants modules and named constants, flags raw numbers that may repeat an existing constant (values above 100), lists numbers repeated three or more times without a name, and suggests creating a constants module when there are many bare numbers and none.
 - **Secrets**: AWS, GitHub, Slack, Google, Stripe and private-key signatures plus hardcoded `password = "..."` style credentials. Only the **file, line and kind** are recorded; the value never leaves the scanner and never appears in the UI, the report or the history. Matches in test files, and Google browser keys inside saved web pages, are listed separately as "key-like values" to check rather than counted as secrets, and a URL in a `token` field is not a credential.
 - **Other checks**: `TODO` / `FIXME` / `HACK` markers, `debugger` / `breakpoint()` leftovers and `console.log` noise, files of any type over 5 MB, and source without any tests.

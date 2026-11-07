@@ -47,6 +47,30 @@ test('layer 1: counts tests per language, inline Rust tests, focused/skipped/ass
   } finally { rm(d); }
 });
 
+test('layer 1 false alarms from a real review: environment-guard skips, stubbed fetch, sleeps in fakes, loops and strings', async () => {
+  const d = repo();
+  try {
+    put(d, 'package.json', JSON.stringify({ devDependencies: { '@playwright/test': '1' } }));
+    // Playwright guards: test.skip(condition, reason) runs the test unless the condition holds.
+    put(d, 'e2e/a.spec.ts', "test('renders', async () => {\n  test.skip(!ffmpegAvailable(), 'ffmpeg required');\n  expect(1).toBe(1);\n});\ntest.skip('broken for now', async () => {});\n");
+    // fetch inside a JS snippet a Python test runs is not a Python network call.
+    put(d, 'tests/test_guard_js.py', 'def test_guard():\n    out = run_js("""\nawait window.fetch(\'https://onlyfans.com/api\');\n""")\n    assert out\n');
+    put(d, 'web/api.test.ts', "vi.stubGlobal('fetch', vi.fn());\ntest('calls', async () => { await fetch('https://api.example.net/x'); expect(1).toBe(1) });\n");
+    put(d, 'tests/test_slow.py', [
+      'import time', '', 'def test_overlap():', '    def slow_thumb(src):', '        time.sleep(0.2)  # make overlap likely', '        return b""', '    assert run(slow_thumb)', '',
+      'def test_poll():', '    deadline = time.time() + 5', '    while busy() and time.time() < deadline:', '        time.sleep(0.1)', '    assert not busy()', '',
+      'def test_child():', '    script = "time.sleep(60)"', '    assert spawn(script)', '',
+      'def test_sleepy():', '    start()', '    time.sleep(0.5)', '    assert done()', '',
+      '@pytest.mark.skipif(sys.platform == "win32", reason="posix")', 'def test_posix():', '    assert True', '',
+      '@pytest.mark.skip(reason="flaky")', 'def test_off():', '    assert True', ''].join('\n'));
+    put(d, 'go/x_test.go', 'package x\nfunc TestA(t *testing.T) {\n\tif testing.Short() {\n\t\tt.Skip("slow")\n\t}\n}\nfunc TestB(t *testing.T) {\n\tt.Skip("broken")\n}\n');
+    const t = await reviewTests(d);
+    assert.deepEqual(t.skipped.map((x) => `${x.path}:${x.line}`).sort(), ['e2e/a.spec.ts:5', 'go/x_test.go:8', 'tests/test_slow.py:28'], 'only unconditional skips');
+    assert.deepEqual(t.network, [], 'Python file with JS fetch in a string, and a TS file that stubs fetch');
+    assert.deepEqual(t.sleeps.map((x) => `${x.path}:${x.line}`), ['tests/test_slow.py:21'], 'a fake, a polling loop and a string are fine; a bare sleep in the test body is not');
+  } finally { rm(d); }
+});
+
 test('layer 2: coverage, JUnit and mutation parsers', () => {
   assert.deepEqual(R.parseLcov('SF:/r/src/a.js\nLF:10\nLH:4\nend_of_record\nSF:src/b.js\nLF:0\nLH:0\nend_of_record\n', '/r'), [{ path: 'src/a.js', hit: 4, total: 10 }, { path: 'src/b.js', hit: 0, total: 0 }]);
   assert.deepEqual(R.parseCobertura('<coverage><class filename="m/a.py"><lines><line number="1" hits="1"/><line number="2" hits="0"/></lines></class><class filename="m/a.py"><lines><line number="3" hits="2"/></lines></class></coverage>', '/r'), [{ path: 'm/a.py', hit: 2, total: 3 }]);

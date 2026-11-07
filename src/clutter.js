@@ -44,6 +44,12 @@ const SPLIT_DIRS = [['test', 'tests', '__tests__', 'spec'], ['doc', 'docs'], ['s
 const MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|mp4|mov|webm|pdf)$/i;
 const ARCHIVE_RE = /\.(zip|tar|tgz|tar\.gz|7z|rar)$/i;
 
+const sameFile = async (a, b) => {
+  try {
+    const [x, y] = await Promise.all([fsp.lstat(a), fsp.lstat(b)]);
+    return x.size === y.size && x.size <= MAX_HASH_BYTES && (await sha(a, x.size)) === (await sha(b, y.size));
+  } catch { return false; }
+};
 const sha = async (p, size) => {
   if (size > MAX_HASH_BYTES) return null;
   try { return crypto.createHash('sha256').update(await fsp.readFile(p)).digest('hex'); } catch { return null; }
@@ -188,9 +194,16 @@ async function scanClutter(dir) {
         continue;
       }
       const rule = FILE_RULES.find((x) => x.re.test(e.name));
-      const copy = !rule && COPY_RE.exec(e.name);
+      let copy = !rule && COPY_RE.exec(e.name);
+      // A "copy" name is only a copy when the original sits beside it (fan_identity_copy.py with no
+      // fan_identity.py is a module about copying, not a duplicate).
+      if (copy && !fileNames.has(copy[1] + (copy[2] || ''))) copy = null;
       if (!rule && !copy) continue;
-      if (tracked.files.has(r)) { trackedClutter.push(r); continue; }
+      if (tracked.files.has(r)) {
+        // A committed copy that has diverged from its original is deliberate: only exact copies are clutter.
+        if (!copy || (await sameFile(path.join(abs, e.name), path.join(abs, copy[1] + (copy[2] || ''))))) trackedClutter.push(r);
+        continue;
+      }
       let st;
       try { st = await fsp.lstat(path.join(abs, e.name)); } catch { continue; }
       const origName = rule ? rule.base && rule.base(e.name) : copy[1] + (copy[2] || '');

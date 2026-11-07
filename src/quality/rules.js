@@ -71,7 +71,17 @@ function debugKind(line, ext) {
 }
 
 // Numbers on a code line that look like magic numbers. Returns [{ value, text }].
-function magicNumbers(line) {
+// name=, name: (object property or keyword argument), name: type = (a typed parameter default), and
+// d["key"] = (a string-keyed assignment: the key names the value).
+const NAMED_ARG_RE = /(?:[({,*]\s*[A-Za-z_$][\w$]*\s*(?::\s*[\w$.[\]| ]+?\s*)?[:=]|\[\s*(?:""|''|``)\s*\]\s*=)\s*-?$/;
+const HTTP_CONTEXT_RE = /status|http|response|\bres\.|\breply\b|abort\(|HTTPException|raise_for|\bcode\b|statusCode|\bok\b/i;
+
+// A number used as an operand of a comparison (x > 60, n == 3): the case ruff's PLR2004 flags for Python.
+const COMPARED_BEFORE_RE = /(?:[<>]=?|[=!]==?)\s*-?$/;
+const COMPARED_AFTER_RE = /^\s*(?:[<>]=?|[=!]==?)/;
+
+// opts.comparisonsOnly: Python follows ruff's PLR2004 (magic values are only those compared against).
+function magicNumbers(line, opts = {}) {
   if (SKIP_LINE_RE.test(line) || DECL_RE.test(line)) return [];
   const found = [...line.matchAll(NUM_RE)];
   if (!found.length || found.length >= DENSE_LINE) return [];
@@ -80,6 +90,13 @@ function magicNumbers(line) {
     const value = Number(m[0].replace(/_/g, ''));
     if (!Number.isFinite(value) || ALLOWED_NUMBERS.has(value)) continue;
     if (line[m.index - 1] === '[' && line[m.index + m[0].length] === ']') continue; // array index
+    if (/\[[^\]]*$/.test(line.slice(0, m.index)) && /^[^[]*\]/.test(line.slice(m.index)) && /\[[^\]]*:[^\]]*\]|\[[^\]]*:/.test(line.slice(line.lastIndexOf('[', m.index)))) continue; // slice bounds: raw[3:], s[:80]
+    const before = line.slice(0, m.index);
+    // Named by context: a keyword argument or object property (limit=50, { timeout: 30 }) says what
+    // the number is, and HTTP status codes are a vocabulary of their own (404 reads better than a name).
+    if (NAMED_ARG_RE.test(before)) continue;
+    if (Number.isInteger(value) && value >= 100 && value <= 599 && HTTP_CONTEXT_RE.test(line)) continue;
+    if (opts.comparisonsOnly && !(COMPARED_BEFORE_RE.test(before) || COMPARED_AFTER_RE.test(line.slice(m.index + m[0].length)))) continue;
     out.push({ value, text: m[0] });
   }
   return out;

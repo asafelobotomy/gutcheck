@@ -9,6 +9,7 @@ const path = require('node:path');
 const { git, run } = require('../exec');
 const { COMMAND_TIMEOUT_MS } = require('../util');
 const R = require('../quality/rules');
+const { LANGS, lex } = require('../quality/lexer');
 const { detectStacks, CI_TEST_RE, GENERIC_TEST_RE } = require('./stack');
 
 const MAX_FILES = 8000;
@@ -19,13 +20,15 @@ const MAX_KEPT = 30;
 const LANG = {
   js: { exts: ['js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'mts', 'cts'],
     test: /(?:^|[^.\w])(?:it|test)(?:\.(?:only|skip|todo|concurrent|each\([^)]*\)))*\s*\(/g,
-    skip: /\b(?:it|test|describe)\.(?:skip|todo)\s*\(|(?:^|[^.\w])x(?:it|describe|test)\s*\(/g,
+    // Unconditional only: test.skip('title', fn) or test.skip() / xit(...). Playwright's test.skip(cond, why)
+    // and vitest's skipIf are environment guards, not switched-off tests.
+    skip: /\b(?:it|test|describe)\.(?:skip|todo|fixme)\s*\(\s*(?:['"`]|\))|(?:^|[^.\w])x(?:it|describe|test)\s*\(/g,
     only: /\b(?:it|test|describe)\.only\s*\(|(?:^|[^.\w])f(?:it|describe)\s*\(/g,
     assert: /\bassert\b|\bexpect\s*\(|\.should\b|\bt\.(?:is|true|false|deepEqual|throws|pass)\b/,
     sleep: /\bawait\s+(?:sleep|delay|wait|setTimeoutP?)\s*\(\s*\d{3,}|new Promise\s*\(\s*\(?\w*\)?\s*=>\s*setTimeout\s*\([^)]*,\s*\d{3,}/g },
   py: { exts: ['py'],
     test: /^\s*(?:async\s+)?def\s+test\w*\s*\(/gm,
-    skip: /@(?:pytest\.mark\.(?:skip|xfail)|unittest\.skip\w*)\b/g,
+    skip: /@(?:pytest\.mark\.skip|unittest\.skip)\b(?!if|If|Unless)/g, // skipif / skipIf / skipUnless / importorskip are conditions
     only: null,
     assert: /\bassert\b|pytest\.raises|self\.assert\w+\(|\.assert_\w+\(/,
     sleep: /\btime\.sleep\s*\(\s*(?:[1-9]|0\.[1-9])/g },
@@ -55,9 +58,48 @@ const LANG = {
     sleep: /^\s*sleep\s+[1-9]/gm },
 };
 const LANG_BY_EXT = Object.fromEntries(Object.entries(LANG).flatMap(([k, v]) => v.exts.map((e) => [e, k])));
-const HELPER_ASSERT = /\b\w*(?:assert|check|verify|expect|ensure|must)\w*\s*[(!]/i;
+// Assertions by name, as tsDetect does (assert*/fail), widened to the helper names JS and Python suites use.
+const HELPER_ASSERT = /\b\w*(?:assert|check|verify|expect|ensure|must)\w*\s*[(!]|\bfail\s*\(/i;
 const SMOKE_NAME = /\b(?:fn|def|func|it|test)\s*\(?\s*['"`]?\w*(?:does_?not_?panic|no_?panic|does_?not_?crash|doesnt_?crash|smoke)\w*/i;
-const NETWORK_RE = /\b(?:fetch|axios\.\w+|requests\.\w+|httpx\.\w+|urllib\.request\.urlopen|reqwest::\w+|http\.Get|http\.Post)\s*\(\s*["'`]https?:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|example\.(?:com|org))/;
+// Real network calls, per language (a fetch( inside a Python file is JavaScript in a string).
+const NET_HOST = `\\s*\\(\\s*["'\`]https?:\\/\\/(?!localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\]|example\\.(?:com|org))`;
+const NETWORK_RE = {
+  js: new RegExp(`\\b(?:fetch|axios\\.\\w+|got|ky)${NET_HOST}`),
+  py: new RegExp(`\\b(?:requests\\.\\w+|httpx\\.\\w+|urllib\\.request\\.urlopen|aiohttp\\.\\w+)${NET_HOST}`),
+  rs: new RegExp(`\\breqwest::(?:blocking::)?\\w+${NET_HOST}`),
+  go: new RegExp(`\\bhttp\\.(?:Get|Post|Head)${NET_HOST}`),
+};
+// A file that stubs HTTP (nock, msw, vi.stubGlobal('fetch'), jest/vi mocks, responses, respx,
+// requests-mock, pytest-httpx, httpretty, vcrpy cassettes, Playwright routes, Go httptest) is not calling real servers.
+const STUBS_NETWORK = /\bnock\b|['"]msw(?:\/|['"])|setupServer\(|stubGlobal\(\s*['"]fetch|(?:global|globalThis|window)\.fetch\s*=|\b(?:jest|vi)\.(?:mock|spyOn)\(|mockResolvedValue|@?responses\.(?:activate|add|RequestsMock)|\brespx\b|requests_mock|httpx_mock|httpretty|use_cassette|mark\.vcr|page\.route\(|httptest\.NewServer|\b(?:fake|stub|mock)_?fetch\b/i;
+
+// Sleeps that are fine: inside a polling loop (waiting on a condition with a deadline, the catalogue's own
+// fix) or inside a helper, fake or thread defined in the test (simulating slow work on purpose).
+// Published detectors (tsDetect, PyNose) flag every sleep; this is GutCheck's deliberate precision choice.
+const LOOP_NEAR = /\b(?:while|for|loop|until|retry|retries|poll|deadline|wait_for|eventually)\b/;
+function sleepIsSmell(lines, i, lang) {
+  if (LOOP_NEAR.test(lines.slice(Math.max(0, i - 4), i + 1).join('\n'))) return false;
+  if (lang === 'py') {
+    const ind = (l) => l.match(/^\s*/)[0].length;
+    for (let j = i - 1, cur = ind(lines[i]); j >= 0; j--) {
+      const m = /^(\s*)(?:async\s+)?(def|class)\s+(\w+)/.exec(lines[j]);
+      if (m && m[1].length < cur) return m[2] === 'def' && /^test/.test(m[3]);
+    }
+    return true;
+  }
+  for (let j = i; j >= Math.max(0, i - 30); j--) {
+    const l = lines[j];
+    if (/(?:^|[^.\w])(?:it|test)(?:\.\w+)*\s*\(|^\s*func\s+Test|#\[(?:tokio::)?test/.test(l)) return true; // reached the test itself
+    if (/\bfunction\b|=>\s*\{?\s*$|\bgo\s+func\b|\bthread::spawn\b|\|\|\s*\{|\bmove\s*\|/.test(l) && j < i) return false; // a nested helper or thread
+  }
+  return true;
+}
+// Unconditional skip for languages whose skip is a statement (Go t.Skip, shell skip): not behind an if/guard.
+function skipIsUnconditional(lines, i) {
+  if (/\|\||&&/.test(lines[i])) return false;
+  for (let j = i - 1; j >= 0 && j >= i - 2; j--) { const l = lines[j].trim(); if (!l) continue; return !/^(?:if\b|then\b|\}?\s*else\b)|\bif\b.*[{:]$/.test(l); }
+  return true;
+}
 
 const count = (re, text) => (re ? (text.match(re) || []).length : 0);
 const lineOf = (text, idx) => text.slice(0, idx).split('\n').length;
@@ -122,15 +164,20 @@ async function reviewTests(dir) {
     }
     out.testCases += cases; b.testCases += cases;
     if (!cases) continue;
-    const at = (re, list, kind) => { if (!re) return; re.lastIndex = 0; let m; while ((m = re.exec(text)) && list.length < MAX_KEPT) list.push({ path: rel, line: lineOf(text, m.index), kind }); };
-    at(L.skip, out.skipped, 'skipped');
+    // Strings and comments blanked (quotes kept), so code inside a string (a script a test runs) or a
+    // commented-out line is not read as the test's own code. Network checks need the URL literals: raw text.
+    const spec = LANGS[ext];
+    const code = spec && spec.fam !== 'plain' ? lex(text, spec).code.join('\n') : text;
+    const textLines = code.split('\n');
+    const at = (re, list, kind, keep = () => true) => { if (!re) return; re.lastIndex = 0; let m; while ((m = re.exec(code)) && list.length < MAX_KEPT) { const ln = lineOf(code, m.index); if (keep(ln - 1)) list.push({ path: rel, line: ln, kind }); } };
+    at(L.skip, out.skipped, 'skipped', (i) => (lang === 'go' || lang === 'sh' ? skipIsUnconditional(textLines, i) : true));
     at(L.only, out.focused, 'focused');
-    at(L.sleep, out.sleeps, 'sleep');
+    at(L.sleep, out.sleeps, 'sleep', (i) => sleepIsSmell(textLines, i, lang));
     const body = isTest ? text : text.slice(text.indexOf('#[cfg(test)]'));
     // Project helpers count as assertions (check(...), verify_x(...), expectOk(...)), and so do tests
     // whose names say they only check that nothing crashes.
     if (!L.assert.test(body) && !HELPER_ASSERT.test(body) && !SMOKE_NAME.test(body) && out.noAssert.length < MAX_KEPT) out.noAssert.push({ path: rel, cases });
-    const net = NETWORK_RE.exec(text);
+    const net = NETWORK_RE[lang] && !STUBS_NETWORK.test(text) ? NETWORK_RE[lang].exec(text) : null;
     if (net && out.network.length < MAX_KEPT) out.network.push({ path: rel, line: lineOf(text, net.index) });
   }
   // Source files no test file is named after (and, for Rust, without inline tests). Largest first.
