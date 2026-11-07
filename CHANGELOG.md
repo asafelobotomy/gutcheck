@@ -4,6 +4,14 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+
+- README: Ko-fi button, badges, feature summary and screenshots of a made-up demo workspace; `npm run screenshots` rebuilds them.
+
+### Changed
+
+- README, CONTRIBUTING and AGENTS.md brought up to date: every MCP tool, protection preset, file template and data file is listed.
+
 ## [0.24.0] - 2026-11-07
 
 ### Added

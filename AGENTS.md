@@ -19,6 +19,7 @@ GutCheck is an Electron app (plus a CLI and an MCP server) that checks the healt
 - The user's rules: `policy.js` (ignores with reasons, baseline drift), `schedule.js` (new-since-last-scan, scheduled scans). Report steps for these are in `report-upkeep.js`.
 - Other scans: `clutter.js` (+ `clutter-rules.js`), `quality/`, `tests/`, `agents.js`, `history.js`.
 - Actions: `actions.js` plans, `apply.js` runs exactly the planned steps.
+- `scripts/version.js`: changelog sections, `npm run bump`, release notes. `scripts/demo/`: the made-up workspace and Electron capture behind `npm run screenshots` (README images in `docs/images/`).
 - `src/renderer/`: plain DOM scripts loaded in order by `index.html`, sharing globals. `test/helpers/dom.js` loads them in the same order in jsdom.
 
 ## Rules

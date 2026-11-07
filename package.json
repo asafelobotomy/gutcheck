@@ -16,7 +16,8 @@
     "start": "electron . --no-sandbox",
     "test": "node --test test/*.test.js",
     "dist": "electron-builder --linux AppImage",
-    "bump": "node scripts/version.js bump"
+    "bump": "node scripts/version.js bump",
+    "screenshots": "electron scripts/demo/screenshots.js --no-sandbox"
   },
   "devDependencies": {
     "electron": "^45.2.3",

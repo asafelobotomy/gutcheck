@@ -1,8 +1,25 @@
-# GutCheck
-
 <p align="center"><img src="src/assets/logo.svg" width="128" alt="GutCheck logo: a check mark made of intestine"></p>
 
-A desktop dashboard that gives you a health check across every GitHub project in a folder. It is built on the [`gh` CLI](https://cli.github.com) and `git`, so it uses your existing GitHub login and never handles tokens itself.
+<h1 align="center">GutCheck</h1>
+
+<p align="center"><a href="https://ko-fi.com/U5R225QZH3"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support me on Ko-fi"></a></p>
+
+<p align="center">
+  <a href="https://github.com/asafelobotomy/gutcheck/releases/latest"><img src="https://img.shields.io/github/v/release/asafelobotomy/gutcheck" alt="Latest release"></a>
+  <a href="https://github.com/asafelobotomy/gutcheck/actions/workflows/build.yml"><img src="https://github.com/asafelobotomy/gutcheck/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/asafelobotomy/gutcheck" alt="MIT licence"></a>
+</p>
+
+A desktop dashboard that gives you a health check across every GitHub project in a folder. It is built on the [`gh` CLI](https://cli.github.com) and `git`, so it uses your existing GitHub login and never handles tokens itself. It also runs as a command line and as an MCP server, so AI coding agents can use the same checks and fixes.
+
+![The GutCheck dashboard: health grades, KPI cards and the repos that need attention](docs/images/dashboard.png)
+
+- **One scan, every repo**: CI, pull requests, branches, docs, Actions security, dependencies, releases, settings, clutter, code quality, tests and AI agent setup, with a grade for each repo.
+- **Fixes you can see first**: every change shows the exact commands before it runs, and only those run.
+- **Your own rules**: ignore a finding with a reason, and declare a baseline every repo should meet.
+- **Local and private**: no account, no server, no telemetry. GitHub data comes through your own `gh` login.
+
+[What it checks](#what-it-checks) · [Screenshots](#screenshots) · [Actions](#actions) · [Command line and MCP](#command-line-and-mcp-server-for-ai-agents) · [Install](#install) · [Changelog](CHANGELOG.md)
 
 ## What it checks
 
@@ -23,7 +40,17 @@ A desktop dashboard that gives you a health check across every GitHub project in
 
 Where the advice comes from (GitHub docs, OpenSSF Scorecard, git documentation and community conventions) is listed in [docs/sources.md](docs/sources.md). The Copy for LLM report links the source next to each fix.
 
-Each repo gets a grade (A to D). A workspace overview groups the same issue across repos into ranked recommendations.
+Each repo gets a grade (A to D); ignored findings do not count. A workspace overview groups the same issue across repos into ranked recommendations.
+
+## Screenshots
+
+All screenshots show a made-up demo workspace (`npm run screenshots` rebuilds them).
+
+| A repo and its findings | Every change is reviewed first |
+|---|---|
+| ![A repo view: failed CI, missing files and Dependabot alerts, each with a fix and an Ignore button](docs/images/repo.png) | ![The review dialog: the exact file GutCheck will write and how to undo it](docs/images/review.png) |
+| **The same issue across repos** | **Baseline drift** |
+| ![The workspace overview: recommendations grouped across repos, with Fix all](docs/images/overview.png) | ![The Baseline view: each rule and the repos missing it](docs/images/baseline.png) |
 
 ## Actions
 
@@ -35,10 +62,12 @@ Everything is done from the repo view, or in bulk from the workspace overview ("
 | Commits | commit all changes (with a preview of the files) |
 | Pull requests | open, merge (squash / merge / rebase, optionally delete the branch), close, mark ready |
 | CI | re-run failed jobs |
-| Protection and security | protect the default branch (Basic or Strict preset), remove protection, enable Dependabot alerts, security updates, secret scanning |
+| Protection and security | protect the default branch (Minimal: no force-push or deletion; Basic: also PRs required; Strict: also an approval, admins included), remove protection, enable Dependabot alerts, security updates, secret scanning, push protection, CodeQL default setup, private vulnerability reporting |
 | Repo settings | edit description, auto-delete merged branches, archive |
 | Clutter | move detected clutter to the trash (regenerable caches are deleted), append known-safe rules to `.gitignore` |
-| Files | add LICENSE, README, .gitignore, SECURITY, CONTRIBUTING, CODE_OF_CONDUCT, PR template, dependabot.yml, a Node CI workflow for npm projects with a lockfile, on the repo's default branch (optionally committed) |
+| Files | add LICENSE, README, .gitignore, SECURITY, CONTRIBUTING, CODE_OF_CONDUCT, PR template, issue template, CODEOWNERS, .editorconfig, .gitattributes, dependabot.yml (grouped, with a cooldown), a Node CI workflow for npm projects with a lockfile, on the repo's default branch (optionally committed) |
+| Tests | run coverage or mutation testing (executes the project's code, so you type the repo name) |
+| Findings | ignore with a reason, for one repo or all of them (GutCheck's own settings, not the repo) |
 
 Safety rails: a **Read-only** switch in the header disables every action, every change is recorded in **History**, many actions show an undo command, and GutCheck never deletes repos, changes visibility, force-pushes or rewrites history.
 
@@ -75,7 +104,7 @@ Results feed the Dashboard (cards, largest files, lines per language, magic numb
 
 The **Tests** view reviews each repo's tests in three layers.
 
-1. **Reading the test code** (nothing runs). Gutcheck finds the test stacks: Rust (cargo, including `#[cfg(test)]` tests inside source files), Python (pytest/unittest), JavaScript/TypeScript (node:test, vitest, jest, mocha), Go, Kotlin/Java (Gradle) and shell (bats or test scripts). Then it reports:
+1. **Reading the test code** (nothing runs). GutCheck finds the test stacks: Rust (cargo, including `#[cfg(test)]` tests inside source files), Python (pytest/unittest), JavaScript/TypeScript (node:test, vitest, jest, mocha), Go, Kotlin/Java (Gradle) and shell (bats or test scripts). Then it reports:
    - tests CI never runs (per stack)
    - focused tests (`.only`), which hide every other test
    - skipped tests
@@ -84,7 +113,7 @@ The **Tests** view reviews each repo's tests in three layers.
    - the largest source files with no test named after them, and little test code for the size of the project
 
    With [ruff](https://docs.astral.sh/ruff/rules/#flake8-pytest-style-pt) installed, its pytest-style rules are added.
-2. **Reading results that already exist** (nothing runs): coverage (lcov, Cobertura XML, Go cover profiles, JaCoCo/Kover XML), JUnit XML (failures, skips, slowest tests) and mutation reports (cargo-mutants, Stryker, mutmut). Gutcheck looks in the usual places in the repo and in its own run folder.
+2. **Reading results that already exist** (nothing runs): coverage (lcov, Cobertura XML, Go cover profiles, JaCoCo/Kover XML), JUnit XML (failures, skips, slowest tests) and mutation reports (cargo-mutants, Stryker, mutmut). GutCheck looks in the usual places in the repo and in its own run folder.
 3. **Running them** (opt-in, per repo). Run buttons start one of these:
    - coverage: `cargo llvm-cov`, `pytest --cov`, Node's built-in coverage (or jest, vitest or c8) and `go test -coverprofile`
    - mutation testing: `cargo mutants`, `mutmut` and Stryker
@@ -150,6 +179,7 @@ From a source checkout, use `node /path/to/gutcheck/src/cli.js mcp` as the comma
 | `gutcheck_repo` | One repo in full: branches, PRs, failed CI runs, findings |
 | `gutcheck_report` | The "Copy for LLM" fix plan in Markdown, for one repo or the workspace |
 | `gutcheck_clutter`, `gutcheck_quality` | The clutter and code-quality scans |
+| `gutcheck_tests` | The test review: missing, skipped and assertion-free tests, CI gaps, coverage and mutation results, and what can be run |
 | `gutcheck_workspace` | Workspace and machine advice, including AI agent settings |
 | `gutcheck_actions` | Every action and its parameters |
 | `gutcheck_plan` | Turn `{ repo, finding }` (the finding's own fix) or `{ repo, action }` into exact commands, with a single-use token. Changes nothing. |
@@ -205,7 +235,9 @@ chmod +x GutCheck-*.AppImage
 ./GutCheck-*.AppImage
 ```
 
-Requires `gh` and `git` on your `PATH`, and `gh auth login` completed.
+Requires `gh` and `git` on your `PATH`, and `gh auth login` completed. To check the download, run `sha256sum -c SHA256SUMS.txt` next to the AppImage (the file is attached to every release).
+
+Each release's notes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## API usage and privacy
 
@@ -214,7 +246,7 @@ Requires `gh` and `git` on your `PATH`, and `gh auth login` completed.
 - The only network access is through your own `gh` CLI. There is no telemetry, no updater and no other server. The UI is sandboxed with a strict Content Security Policy.
 - Scans run read-only `git` commands with hooks and `core.fsmonitor` disabled, so opening an untrusted repo does not run its code.
 - Actions are planned by the app, previewed, and then run exactly as previewed. They only target branches, PRs and runs found in the last scan, or (for clutter) items found by a fresh scan at plan time. Right before removing anything GutCheck checks it is still unchanged and not tracked by git.
-- Files GutCheck keeps on your machine, in its app data folder: `settings.json` (workspace folder, read-only switch, tray options; written atomically, and a damaged copy is kept as `settings.json.bad`), `audit.log` (every change it made; trimmed to the latest 500 entries once it passes 1 MB) and `trend.json` (scores and totals per scan). Nothing is uploaded.
+- Files GutCheck keeps on your machine, in its app data folder (`~/.config/GutCheck` on Linux): `settings.json` (workspace folder, read-only switch, tray and schedule options; written atomically, and a damaged copy is kept as `settings.json.bad`), `audit.log` (every change it made; trimmed to the latest 500 entries once it passes 1 MB), `trend.json` (scores and totals per scan), `seen.json` (finding ids from the last scan, for "new since last scan"), `ignores.json` and `baseline.json` (your own rules), `runs/` (output of coverage and mutation runs you started) and `mcp-app/` (the unpacked copy agents run). Nothing is uploaded.
 
 ## Develop
 
@@ -223,7 +255,10 @@ npm install
 npm start      # run the app
 npm test       # unit tests
 npm run dist   # build the AppImage into dist/
+npm run screenshots   # rebuild docs/images from a made-up demo workspace (needs a desktop session)
 ```
+
+[AGENTS.md](AGENTS.md) describes the layout and the rules every change follows (read-only scans, plan, preview, apply, files under 400 lines). [CONTRIBUTING.md](CONTRIBUTING.md) covers pull requests, and [docs/sources.md](docs/sources.md) where each check comes from.
 
 `package.json` has an `overrides` entry that lifts only the vulnerable `minimatch` versions (7.0.0 to 11.0.3, a glob-pattern DoS in build tooling) to a patched 11.x. Older majors that `glob` and `asar` need are left alone, because they are not affected and 11.x is not API-compatible with them. Remove it once `electron-builder` updates; `npm audit` should stay at 0 and `npm ls minimatch` should show nothing invalid.
 
@@ -233,6 +268,10 @@ Note each change under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md) as you 
 
 You can still release by pushing a tag yourself (`git tag v0.9.0 && git push origin v0.9.0`); the build fails if the tag does not match `package.json`.
 
+## Support
+
+GutCheck is free. If it saves you time, you can [buy me a coffee on Ko-fi](https://ko-fi.com/U5R225QZH3).
+
 ## Licence
 
-MIT
+[MIT](LICENSE)

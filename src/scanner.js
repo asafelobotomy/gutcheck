@@ -262,4 +262,4 @@ async function scanAll(dirs, opts = {}, onResult = () => {}) {
   return results;
 }
 
-module.exports = { discover, scanRepo, scanAll, parseGithubRemote };
+module.exports = { discover, scanRepo, scanAll, parseGithubRemote, collectLocal };
