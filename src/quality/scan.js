@@ -123,7 +123,8 @@ async function scanQuality(dir, rawSettings) {
     const entry = { path: rel, lines: total, code, lang: spec.lang, test: isTest, measured };
     res.largest.push(entry);
     // Saved or generated HTML pages kept as documentation are not code to split up.
-    if (measured > cfg.maxLines && !(spec.lang === 'HTML' && DOCS_DIR_RE.test(rel))) res.over.push(entry);
+    // Stylesheets and markup are not code to split by responsibility; saved HTML under docs/ is documentation.
+    if (measured > cfg.maxLines && spec.lang !== 'CSS' && !(spec.lang === 'HTML' && DOCS_DIR_RE.test(rel))) res.over.push(entry);
 
     if (R.CONST_FILE_RE.test(rel) && !isTest) constantsFiles.push(rel);
     if (spec.fam === 'plain') continue;

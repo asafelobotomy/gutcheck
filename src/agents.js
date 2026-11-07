@@ -156,10 +156,10 @@ function detectApps(home) {
 // Sizes only, with a file budget so a huge folder cannot stall the scan. Returns KiB.
 // Sizes only (and file dates, to see what a shorter cleanup period would clear), with a file
 // budget so a huge folder cannot stall the scan. Returns KiB: total and by age.
-async function folderKiB(dir, budget, now = Date.now()) {
-  const out = { kib: 0, older: Object.fromEntries(CLEANUP_CHOICES.map((d) => [d, 0])) };
+async function folderKiB(dir, budget, now = Date.now(), choices = CLEANUP_CHOICES) {
+  const out = { kib: 0, older: Object.fromEntries(choices.map((d) => [d, 0])) };
   let bytes = 0;
-  const older = Object.fromEntries(CLEANUP_CHOICES.map((d) => [d, 0]));
+  const older = Object.fromEntries(choices.map((d) => [d, 0]));
   const walk = async (d) => {
     let ents;
     try { ents = await fsp.readdir(d, { withFileTypes: true }); } catch { return; }
@@ -171,14 +171,14 @@ async function folderKiB(dir, budget, now = Date.now()) {
         try {
           const st = await fsp.stat(p);
           bytes += st.size;
-          for (const days of CLEANUP_CHOICES) if (now - st.mtimeMs > days * DAY_MS) older[days] += st.size;
+          for (const days of choices) if (now - st.mtimeMs > days * DAY_MS) older[days] += st.size;
         } catch {}
       }
     }
   };
   await walk(dir);
   out.kib = Math.round(bytes / 1024);
-  for (const d of CLEANUP_CHOICES) out.older[d] = Math.round(older[d] / 1024);
+  for (const d of choices) out.older[d] = Math.round(older[d] / 1024);
   return out;
 }
 
@@ -216,19 +216,22 @@ async function agentAdvice(repos = [], opts = {}) {
     const root = path.join(home, '.claude', 'projects');
     let ents = [];
     try { ents = (await fsp.readdir(root, { withFileTypes: true })).filter((e) => e.isDirectory()); } catch {}
+    const current = Number.isFinite(settings.cleanupPeriodDays) ? settings.cleanupPeriodDays : 30;
+    const choices = [...new Set([...CLEANUP_CHOICES, current])];
     const budget = { n: SIZE_BUDGET };
     const sizes = [];
-    for (const e of ents) sizes.push({ key: e.name, ...(await folderKiB(path.join(root, e.name), budget, opts.now)) });
+    for (const e of ents) sizes.push({ key: e.name, ...(await folderKiB(path.join(root, e.name), budget, opts.now, choices)) });
     const total = sizes.reduce((n, s) => n + s.kib, 0);
     if (total >= TRANSCRIPTS_INFO_KIB) {
       sizes.sort((x, y) => y.kib - x.kib);
-      const current = Number.isFinite(settings.cleanupPeriodDays) ? settings.cleanupPeriodDays : 30;
-      const older = Object.fromEntries(CLEANUP_CHOICES.map((d) => [d, sizes.reduce((n, s) => n + s.older[d], 0)]));
+      const older = Object.fromEntries(choices.map((d) => [d, sizes.reduce((n, s) => n + s.older[d], 0)]));
       // Suggest the longest period that clears at least a fifth of the history; 7 days otherwise.
       const days = CLEANUP_CHOICES.slice().reverse().find((d) => d < current && older[d] >= total / 5) || (current > 7 ? 7 : null);
+      // Already set short, but old sessions are still on disk: Claude Code clears them the next time it starts.
+      const stale = older[current] || 0;
       const ages = CLEANUP_CHOICES.filter((d) => d < current).map((d) => `${gb(older[d])} is older than ${d} days`).join(', ');
-      add('agent-transcripts', total >= TRANSCRIPTS_WARN_KIB ? 'warn' : 'info', `${gb(total)} of local agent session history`,
-        `${list(sizes.slice(0, 4).map((s) => `${projectLabel(s.key, repos)} (${gb(s.kib)})`), 4)}${budget.n <= 0 ? ' (measurement capped, real total is larger)' : ''}. Claude Code keeps sessions for ${current} days${Number.isFinite(settings.cleanupPeriodDays) ? ' (cleanupPeriodDays)' : ' (the default)'}${ages ? `; ${ages}` : ''}.${days ? ` Setting cleanupPeriodDays to ${days} clears about ${gb(older[days])} the next time Claude Code starts, and you can still resume anything newer.` : ' It is already short: the space is recent work.'} Claude Desktop's own sessions use desktopSessionCleanupPeriodDays.`,
+      add('agent-transcripts', total - stale >= TRANSCRIPTS_WARN_KIB || (total >= TRANSCRIPTS_WARN_KIB && !stale) ? 'warn' : 'info', `${gb(total)} of local agent session history`,
+        `${list(sizes.slice(0, 4).map((s) => `${projectLabel(s.key, repos)} (${gb(s.kib)})`), 4)}${budget.n <= 0 ? ' (measurement capped, real total is larger)' : ''}. Claude Code keeps sessions for ${current} days${Number.isFinite(settings.cleanupPeriodDays) ? ' (cleanupPeriodDays)' : ' (the default)'}${ages ? `; ${ages}` : ''}.${days ? ` Setting cleanupPeriodDays to ${days} clears about ${gb(older[days])} the next time Claude Code starts, and you can still resume anything newer.` : (stale >= 50 * 1024 ? ` It is already set that short: ${gb(stale)} of it is older than ${current} days and is cleared the next time Claude Code starts (it has not been started since the setting changed). After that, the rest is recent work.` : ' It is already set that short: the space is recent work.')} Claude Desktop's own sessions use desktopSessionCleanupPeriodDays.`,
         { ref: REFS.cleanup, note: 'Prefer the setting to deleting transcripts by hand: deletion cannot be undone and those sessions can no longer be resumed. Change ~/.claude/settings.json only with the user\'s approval, keeping its other keys.', fix: days ? { type: 'claude-cleanup-days', label: `Keep ${days} days`, days } : undefined, cmds: days ? [`# in ~/.claude/settings.json: "cleanupPeriodDays": ${days}`] : [] });
     }
   }

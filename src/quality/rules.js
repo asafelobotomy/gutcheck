@@ -17,7 +17,7 @@ const DEFINE_RE = new RegExp(`^\\s*#\\s*define\\s+([A-Z][A-Z0-9_]+)\\s+${NUM_VAL
 const CONST_FILE_RE = /(^|\/)(constants?|consts?|defaults|limits|settings|config)(\.[a-z]+)?$|(^|\/)constants?\//i;
 const TEST_RE = /(^|\/)(tests?|__tests__|specs?|e2e|fixtures?|__mocks__|testdata)\/|\.(test|spec)\.[a-z]+$|_test\.(go|py)$|(^|\/)test_[^/]+\.py$/i;
 const GENERATED_RE = /@generated|DO NOT EDIT|auto-?generated|Code generated/i;
-const SKIP_SEGMENTS = new Set([...HEAVY_DIRS, '.git', '.venv', 'venv', '.next', '.nuxt', '.svelte-kit', '.cxx', '.gradle', '__pycache__', 'coverage']);
+const SKIP_SEGMENTS = new Set([...HEAVY_DIRS, '.git', '.venv', 'venv', '.next', '.nuxt', '.svelte-kit', '.cxx', '.gradle', '__pycache__', 'coverage', 'addons', 'third_party', 'third-party', 'thirdparty']); // addons/ holds third-party plugins in Godot projects
 const SKIP_FILE_RE = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|poetry\.lock|go\.sum|composer\.lock|Gemfile\.lock)$|\.min\.(js|css)$|\.map$/;
 const CONFIG_EXT = new Set(['json', 'yml', 'yaml', 'toml', 'ini', 'cfg', 'conf', 'properties', 'tf', 'xml']);
 

@@ -24,7 +24,9 @@ function checkCI(s) {
     out.push({
       id: 'ci-failed-' + r.databaseId,
       category: 'CI',
-      severity: 'error',
+      // GitHub's own "Dependabot Updates" runs fail when one update cannot be made (a conflict, a yanked
+      // version): a warning about that update, not a broken build.
+      severity: r.workflowName === 'Dependabot Updates' ? 'warn' : 'error',
       title: `Failed: ${r.workflowName} on ${r.headBranch}`,
       detail: `${r.displayTitle} (${daysAgo(r.createdAt)}d ago)`,
       url: r.url,
@@ -106,9 +108,18 @@ function checkDeps(s) {
     out.push({ id: 'alerts-off', category: 'Dependencies', severity: 'warn', title: 'Dependabot alerts are disabled', detail: 'You will not be told about vulnerable dependencies.', fix: { type: 'security-enable', label: 'Enable alerts', feature: 'alerts' } });
   if (d.manifests && d.manifests.length && !s.files.dependabotConfig)
     out.push({ id: 'no-dependabot-config', category: 'Dependencies', severity: 'info', title: 'No Dependabot update config', detail: 'Automatic dependency update PRs are not set up.', fix: { type: 'add-file', label: 'Add dependabot.yml', template: 'dependabot' } });
-  if (s.alerts && s.alerts.length) {
-    const crit = s.alerts.filter((a) => ['critical', 'high'].includes(a.severity)).length;
-    out.push({ id: 'dependabot', category: 'Dependencies', severity: crit ? 'error' : 'warn', title: `${s.alerts.length} open Dependabot alert${s.alerts.length > 1 ? 's' : ''}`, detail: `${crit} high/critical`, url: s.remote.url + '/security/dependabot' });
+  const total = Math.max((s.alerts || []).length, s.alertsTotal || 0);
+  if (total) {
+    const by = (sev) => (s.alerts || []).filter((a) => a.severity === sev).length;
+    const crit = by('critical');
+    const high = by('high');
+    const counted = (s.alerts || []).length;
+    const parts = [['critical', crit], ['high', high], ['moderate', by('moderate')], ['low', by('low')]].filter(([, n]) => n).map(([k, n]) => `${n} ${k}`);
+    // Packages with the most open alerts, and where they live: what to fix first.
+    const pk = new Map();
+    for (const a of s.alerts || []) { if (!a.pkg) continue; const k = `${a.pkg}${a.manifest ? ` (${a.manifest})` : ''}`; pk.set(k, (pk.get(k) || 0) + 1); }
+    const top = [...pk.entries()].sort((x, y) => y[1] - x[1]).slice(0, 4).map(([k, n]) => `${k}${n > 1 ? ` x${n}` : ''}`);
+    out.push({ id: 'dependabot', category: 'Dependencies', severity: crit + high ? 'error' : 'warn', title: `${total} open Dependabot alert${total > 1 ? 's' : ''}`, detail: `${parts.join(', ')}${counted < total ? ` (severity counted for ${counted} of them)` : ''}.${top.length ? ` Most alerts: ${top.join(', ')}.` : ''}`, url: s.remote.url + '/security/dependabot' });
   }
   return out;
 }
@@ -124,7 +135,7 @@ function checkRepoSettings(s) {
     return out;
   }
   if (s.remote.archived) out.push({ id: 'archived', category: 'Repo', severity: 'info', title: 'Repository is archived', detail: 'Read-only on GitHub.' });
-  if (s.protection === false && !s.remote.archived)
+  if (s.protection === false && !s.remote.archived && !s.remote.protectionUnavailable)
     out.push({ id: 'no-protection', category: 'Repo', severity: s.remote.isPublic ? 'warn' : 'info', title: `Default branch ${s.remote.defaultBranch} is unprotected`, detail: 'No branch protection rule or active ruleset. At minimum block force-pushes and deletion; ideally require PRs and status checks.', fix: { type: 'protect-branch', label: 'Protect…', preset: 'basic' } });
   if (s.remote.deleteBranchOnMerge === false && !s.remote.archived && s.remote.viewerPermission === 'ADMIN')
     out.push({ id: 'no-auto-delete', category: 'Repo', severity: 'info', title: 'Merged branches are not deleted automatically', detail: 'Head branches pile up after every merged PR.', fix: { type: 'repo-edit', label: 'Turn on auto-delete…', deleteBranchOnMerge: true } });

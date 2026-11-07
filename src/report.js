@@ -87,7 +87,19 @@ function fixFor(f, r) {
     return { phase: 4, rank: 0, why: 'Builds are not reproducible without a lockfile.', cmds: cmd ? [cmd, 'git add -A && git commit -m "Add lockfile"'] : [] };
   }
   if (id === 'deps-not-installed') return { phase: 4, rank: 1, why: 'node_modules is missing.', cmds: [install], note: 'This runs the project\'s install scripts; fine for your own project, check first for unknown ones.' };
-  if (id === 'dependabot') return { phase: 4, rank: 2, why: 'Known-vulnerable dependencies.', cmds: ['npm audit   # or the equivalent for this ecosystem', 'npm audit fix', '# run the tests'], note: r.remote && r.remote.url ? `Details: ${r.remote.url}/security/dependabot` : undefined };
+  if (id === 'dependabot') {
+    // Commands per ecosystem actually present, and the fixed versions GitHub names, most severe first.
+    const eco = new Set(((r.alerts || []).map((a) => a.ecosystem)).filter(Boolean));
+    const man = (r.deps && r.deps.manifests) || [];
+    const cmds = [];
+    if (eco.has('npm') || man.includes('package.json')) cmds.push('npm audit   # then: npm audit fix   (take major bumps one at a time)');
+    if (eco.has('rust') || man.includes('Cargo.toml')) cmds.push('cargo update -p <crate>   # to the fixed version below; then: cargo test', 'cargo audit   # needs cargo-audit');
+    if (eco.has('pip') || man.includes('requirements.txt')) cmds.push('pip-audit   # needs pip-audit');
+    if (eco.has('go') || man.includes('go.mod')) cmds.push('govulncheck ./...   # needs govulncheck');
+    const rank = { critical: 0, high: 1, moderate: 2, low: 3 };
+    const fixes = [...new Map((r.alerts || []).filter((a) => a.pkg && a.patched).sort((a, b) => (rank[a.severity] ?? 9) - (rank[b.severity] ?? 9)).map((a) => [`${a.pkg}|${a.manifest}`, a])).values()].slice(0, 10);
+    return { phase: 4, rank: 2, why: 'Known-vulnerable dependencies.', cmds: [...cmds, '# run the tests after each update'], note: `${fixes.length ? `Fixed versions, worst first: ${fixes.map((a) => `${t(a.pkg, LEN.short)} -> ${t(a.patched, LEN.short)} (${a.severity}${a.manifest ? ', ' + t(a.manifest, LEN.short) : ''})`).join('; ')}. ` : ''}Dependabot security updates can open these PRs for you.${r.remote && r.remote.url ? ` Details: ${r.remote.url}/security/dependabot` : ''}` };
+  }
   if (id === 'deps-outdated') return { phase: 4, rank: 3, why: 'Outdated packages.', cmds: ['npm outdated', 'npm update', '# run the tests; take major-version bumps one at a time'] };
   if (id === 'alerts-off') return { phase: 4, rank: 4, why: 'You will not hear about vulnerable dependencies.', cmds: slug ? [`gh api -X PUT repos/${slug}/vulnerability-alerts`] : [] };
   if (id === 'no-dependabot-config') return { phase: 4, rank: 5, why: 'No automatic update PRs.', cmds: [], note: 'Add .github/dependabot.yml with a weekly schedule for each ecosystem in use.' };
@@ -142,7 +154,7 @@ function snapshot(r) {
   L.push(`- Branches: ${(g.branches || []).length} local, ${(g.remoteBranches || []).length} remote, ${(g.mergedBranches || []).length} merged`);
   const hy = r.hygiene;
   if (hy) L.push(`- Housekeeping: git data ${hy.storage.packKiB >= 1048576 ? (hy.storage.packKiB / 1048576).toFixed(1) + ' GB' : Math.round(hy.storage.packKiB / 1024) + ' MB'}, ${hy.stashes} stash${hy.stashes === 1 ? '' : 'es'}, ${hy.tags} tag${hy.tags === 1 ? '' : 's'}, ${hy.workflows ? hy.workflows.files : 0} workflow file${hy.workflows && hy.workflows.files === 1 ? '' : 's'}`);
-  L.push(`- Open PRs: ${(r.prs || []).length}; failing CI runs: ${((r.ci && r.ci.failed) || []).length}; Dependabot alerts: ${(r.alerts || []).length}`);
+  L.push(`- Open PRs: ${(r.prs || []).length}; failing CI runs: ${((r.ci && r.ci.failed) || []).length}; Dependabot alerts: ${Math.max((r.alerts || []).length, r.alertsTotal || 0)}`);
   if (r.deps && r.deps.manifests && r.deps.manifests.length) L.push(`- Manifests: ${r.deps.manifests.join(', ')}`);
   return L.join('\n');
 }
@@ -181,7 +193,9 @@ function clutterStep(c) {
 
 function stepsFor(r, c, q, tt) {
   const steps = [];
-  for (const f of [...(r.findings || []), ...((c && c.advice) || []), ...((q && q.advice) || []), ...((tt && tt.advice) || [])]) {
+  // The Tests review covers "no tests" better (stacks, CI), so the code-quality version is dropped when it ran.
+  const qAdvice = ((q && q.advice) || []).filter((f) => !(tt && f.id === 'q-no-tests'));
+  for (const f of [...(r.findings || []), ...((c && c.advice) || []), ...qAdvice, ...((tt && tt.advice) || [])]) {
     const fx = fixFor(f, r);
     if (!fx) continue;
     steps.push({ ...fx, sev: f.severity, title: f.title, detail: f.detail });

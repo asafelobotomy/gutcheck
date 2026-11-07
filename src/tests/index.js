@@ -21,6 +21,7 @@ function buildTestAdvice(t) {
   const add = (id, severity, title, detail, fix) => out.push({ id, category: 'Tests', severity, title, detail, fix });
   const total = t.testCases;
   const canRun = (kind) => t.runnable.find((x) => x[kind]);
+  const needs = (kind) => { const m = ((canRun(kind) || {}).missing || []).find((x) => x.kind === kind); return m ? ` Needs ${m.bin} (not installed): ${m.install.split('   #')[0]}.` : ''; };
   const runFix = (kind, label) => { const s = canRun(kind); return s ? { type: 'tests-run', label, kind, stack: s.stack, root: s.root } : undefined; };
 
   if (!total && t.sourceFiles >= 5) add('t-none', 'warn', 'No tests', `${t.sourceFiles} source files and no test cases found. Start with the module that would hurt most if it broke.`);
@@ -44,7 +45,7 @@ function buildTestAdvice(t) {
     const sev = c.percent < COVERAGE_WARN ? 'warn' : c.percent < COVERAGE_INFO ? 'info' : null;
     if (sev) add('t-coverage', sev, `Line coverage ${c.percent}%`, `From ${c.file} (${age(c.date)} days old). Least covered: ${list(c.lowest.map((f) => `${f.path} ${f.percent}%`), 6)}.`, age(c.date) > STALE_DAYS ? runFix('coverage', 'Run coverage again…') : undefined);
     else if (age(c.date) > STALE_DAYS) add('t-coverage-stale', 'info', `Coverage report is ${age(c.date)} days old`, `${c.file} shows ${c.percent}%, but the code has moved on since.`, runFix('coverage', 'Run coverage again…'));
-  } else if (total && canRun('coverage')) add('t-coverage-none', 'info', 'Coverage never measured', 'No coverage report found. Measuring it shows which code no test runs at all.', runFix('coverage', 'Run coverage…'));
+  } else if (total && canRun('coverage')) add('t-coverage-none', 'info', 'Coverage never measured', 'No coverage report found. Measuring it shows which code no test runs at all.' + needs('coverage'), runFix('coverage', 'Run coverage…'));
 
   const j = t.results.junit;
   if (j && j.failed) add('t-failing', 'error', `${plural(j.failed, 'failing test')} in the last report`, `${list(j.failures, 5)} (${j.file}).`);
@@ -52,7 +53,7 @@ function buildTestAdvice(t) {
 
   const m = t.results.mutation;
   if (m && m.score != null && m.score < MUTATION_WARN) add('t-mutation', 'warn', `Mutation score ${m.score}%: tests miss ${plural(m.survived, 'deliberate bug')}`, `${m.tool}: ${m.killed} caught, ${m.survived} survived. Examples: ${list(m.examples, 4)}. Each survivor is a change to the code that no test noticed: add an assertion that would.`);
-  else if (!m && total && c && c.percent >= COVERAGE_WARN && canRun('mutation')) add('t-mutation-none', 'info', 'Test strength never measured', 'Coverage shows which code runs, not whether the tests would notice it breaking. Mutation testing checks that (it is slow).', runFix('mutation', 'Run mutation testing…'));
+  else if (!m && total && c && c.percent >= COVERAGE_WARN && canRun('mutation')) add('t-mutation-none', 'info', 'Test strength never measured', 'Coverage shows which code runs, not whether the tests would notice it breaking. Mutation testing checks that (it is slow).' + needs('mutation'), runFix('mutation', 'Run mutation testing…'));
   return out;
 }
 

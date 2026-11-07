@@ -100,6 +100,7 @@ async function scanClutter(dir) {
   const root = { files: [], dirs: [], names: new Set() };
   const nested = []; // git repos inside this one that are not submodules
   let seen = 0;
+  let templateSeen = false;
   let truncated = false;
 
   const addItem = async (it) => {
@@ -190,7 +191,7 @@ async function scanClutter(dir) {
       if (!e.isFile()) continue;
       seen++;
       if (ENV_RE.test(e.name)) {
-        if (!ENV_TEMPLATE_RE.test(e.name)) envNames.push(e.name);
+        if (!ENV_TEMPLATE_RE.test(e.name)) envNames.push(e.name); else templateSeen = true; // a template anywhere in the repo counts
         continue;
       }
       const rule = FILE_RULES.find((x) => x.re.test(e.name));
@@ -252,12 +253,12 @@ async function scanClutter(dir) {
   // Declared submodules and git-ignored folders (build areas, vendored checkouts) are deliberate.
   const nestedIgnored = await ignoredSet(dir, nested);
   const strays = nested.filter((n) => !subs.has(n) && !nestedIgnored.has(n));
-  const advice = buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, root, nested: strays });
+  const advice = buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, root, nested: strays, templateSeen });
   return { items, advice, count: items.length, totalSize: items.reduce((n, i) => n + i.size, 0), truncated };
 }
 
 
-function buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, root, nested = [] }) {
+function buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, root, nested = [], templateSeen = false }) {
   const out = [];
   const add = (id, severity, title, detail, fix) => out.push({ id, category: 'Organisation', severity, title, detail, fix });
 
@@ -266,7 +267,7 @@ function buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, ro
     add('env-tracked', 'error', `${plural(trackedEnv.length, 'env file is', 'env files are')} committed to git`, `${list(trackedEnv)}. Anyone with access to the repo can read them, and history keeps them. Run "git rm --cached <file>", ignore them, and rotate any secrets they held.`);
   if (envUnignored.length)
     add('env-not-ignored', 'error', `${plural(envUnignored.length, 'env file is', 'env files are')} not git-ignored`, `${list(envUnignored)}. One careless "git add ." would commit your secrets.`, { type: 'gitignore-append', label: 'Add env rules to .gitignore', entries: ENV_IGNORE });
-  const hasTemplate = [...root.names].some((n) => ENV_RE.test(n) && ENV_TEMPLATE_RE.test(n));
+  const hasTemplate = templateSeen || [...root.names].some((n) => ENV_RE.test(n) && ENV_TEMPLATE_RE.test(n));
   if ((liveEnv.length || trackedEnv.length) && !hasTemplate)
     add('env-no-template', 'info', 'No .env.example', 'Commit a .env.example listing variable names (never values) so others know what to configure.');
 

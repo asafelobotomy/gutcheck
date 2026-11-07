@@ -53,7 +53,7 @@ function hygieneFix(id, r) {
     'wf-pr-target-review': { phase: 7, rank: 9, why: 'A privileged trigger is in use.', cmds: [], note: 'Confirm none of these workflows check out or run code from the pull request.', ref: REFS.prTarget },
     'wf-write-all': { phase: 0, rank: 6, why: 'Every job gets every write scope, so one compromised step can do anything.', cmds: [], note: 'Replace write-all with `permissions: contents: read` at the top and grant specific write scopes only on the jobs that need them.', ref: REFS.permissions },
     'wf-permissions': { phase: 0, rank: 7, why: 'Without a permissions block the token gets the repository default, which may include write access.', cmds: [], note: 'Add `permissions:\\n  contents: read` at the top of each listed workflow; add job-level permissions where a job must write (releases, comments, packages).', ref: REFS.permissions },
-    'wf-unpinned': { phase: 0, rank: 8, why: 'A tag can be moved to different code, so the workflow may run something you never reviewed.', cmds: ['gh api repos/OWNER/ACTION/commits/TAG --jq .sha   # the SHA a tag points at now'], note: 'Replace each `uses: owner/action@tag` with `uses: owner/action@<full 40-char SHA> # tag`, taking the SHA from the action\'s own repository. Keep Dependabot (github-actions) enabled so the pins get update PRs.', ref: REFS.pinning },
+    'wf-unpinned': { phase: 0, rank: 8, why: 'A tag can be moved to different code, so the workflow may run something you never reviewed.', cmds: unpinnedCmds(h), note: 'Replace each `uses: owner/action@tag` with `uses: owner/action@<full 40-char SHA> # tag`, taking the SHA from the action\'s own repository. Keep Dependabot (github-actions) enabled so the pins get update PRs.', ref: REFS.pinning },
     'wf-self-hosted': { phase: 0, rank: 9, why: 'On a public repo anyone can open a PR that runs on that machine.', cmds: [], note: 'Use GitHub-hosted runners for public repos, or restrict the self-hosted runner to trusted events. Ask the owner.', ref: REFS.selfHosted },
     'dependabot-no-actions': { phase: 4, rank: 6, why: 'Pinned actions never get updates without it.', cmds: [], note: 'Add to .github/dependabot.yml under updates:\\n  - package-ecosystem: "github-actions"\\n    directory: "/"\\n    schedule:\\n      interval: "weekly"', ref: REFS.dependabot },
     'git-no-commits': { phase: 1, rank: 5, why: 'Nothing is recorded yet.', cmds: ['git status', 'git add <files>', 'git commit -m "Initial commit"'], note: 'Check for secrets and clutter before the first commit.' },
@@ -86,6 +86,13 @@ function hygieneFix(id, r) {
 
 // The repo-size step depends on where the space is (history.js, deep scans). History rewrites are
 // listed as options for the owner with a backup first; they are never part of an automatic plan.
+// One command per distinct unpinned action (up to 10): the SHA its tag points at now.
+function unpinnedCmds(h) {
+  const acts = [...new Set(((h.workflows && h.workflows.unpinned) || []).map((u) => u.uses))].filter((u) => /^[\w.-]+\/[\w.-]+[\w./-]*@[\w./-]+$/.test(u)).slice(0, 10);
+  if (!acts.length) return ['gh api repos/OWNER/ACTION/commits/TAG --jq .sha   # the SHA a tag points at now'];
+  return acts.map((u) => { const at = u.lastIndexOf('@'); return `gh api repos/${u.slice(0, at).split('/').slice(0, 2).join('/')}/commits/${u.slice(at + 1)} --jq .sha   # ${u}`; });
+}
+
 function sizeStep(hist) {
   const base = { phase: 7, rank: 8, why: 'Large repositories are slow to clone and GitHub may ask you to reduce them.', ref: REFS.largeFiles };
   if (!hist) return { ...base, cmds: ['git count-objects -vH', 'git lfs migrate info --everything --above=10MB   # what is taking the space (needs git-lfs)'], note: 'Run a GutCheck Deep scan first: it shows whether the space is current files or old history. Moving history to LFS or stripping blobs rewrites history: never do it without the owner, and never force-push a shared branch without coordinating.' };

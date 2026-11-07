@@ -24,12 +24,13 @@ fragment F on Repository {
   hasIssuesEnabled isSecurityPolicyEnabled
   contributingGuidelines { url } codeOfConduct { key }
   repositoryTopics(first: 1) { totalCount }
+  languages(first: 12, orderBy: { field: SIZE, direction: DESC }) { nodes { name } }
   latestRelease { tagName }
   rulesets(first: 20, includeParents: true) { nodes { enforcement target conditions { refName { include exclude } } } }
   issues(states: OPEN) { totalCount }
   licenseInfo { key }
   defaultBranchRef { name branchProtectionRule { id } }
-  vulnerabilityAlerts(first: 50, states: OPEN) { nodes { securityVulnerability { severity } } }
+  vulnerabilityAlerts(first: 100, states: OPEN) { totalCount nodes { vulnerableManifestPath securityVulnerability { severity package { name ecosystem } firstPatchedVersion { identifier } } } }
   pullRequests(states: OPEN, first: 30, orderBy: { field: UPDATED_AT, direction: DESC }) {
     totalCount
     nodes {
@@ -114,6 +115,7 @@ function toSnapshot(ref, n) {
       isFork: n.isFork,
       hasIssues: n.hasIssuesEnabled,
       topics: n.repositoryTopics ? n.repositoryTopics.totalCount : null,
+      languages: ((n.languages && n.languages.nodes) || []).map((l) => l.name),
       latestRelease: n.latestRelease && n.latestRelease.tagName,
       // These include defaults inherited from the owner's .github repository.
       securityPolicy: n.isSecurityPolicyEnabled,
@@ -129,7 +131,12 @@ function toSnapshot(ref, n) {
     // Only admins can see protection rules; for everyone else "no rule visible" means unknown, not unprotected.
     // Rulesets count too (GitHub stacks them with classic protection).
     protection: (n.defaultBranchRef && n.defaultBranchRef.branchProtectionRule) || ruleset ? true : isAdmin ? false : null,
-    alerts: ((n.vulnerabilityAlerts && n.vulnerabilityAlerts.nodes) || []).map((a) => ({ severity: a.securityVulnerability && String(a.securityVulnerability.severity || '').toLowerCase() })),
+    // totalCount is the true number; the nodes (up to 100) give severity, package and the fixed version.
+    alertsTotal: n.vulnerabilityAlerts ? n.vulnerabilityAlerts.totalCount : 0,
+    alerts: ((n.vulnerabilityAlerts && n.vulnerabilityAlerts.nodes) || []).map((a) => {
+      const v = a.securityVulnerability || {};
+      return { severity: String(v.severity || '').toLowerCase(), manifest: a.vulnerableManifestPath || null, pkg: v.package && v.package.name, ecosystem: v.package && String(v.package.ecosystem || '').toLowerCase(), patched: v.firstPatchedVersion && v.firstPatchedVersion.identifier };
+    }),
   };
 }
 
@@ -249,4 +256,30 @@ async function fetchSecurity(ref, opts = {}) {
   return val;
 }
 
-module.exports = { fetchRepos, fetchFailedRuns, fetchSecurity, refreshRate, getRate, rulesetCovers, refMatches };
+// Branch protection and rulesets on PRIVATE repos need a paid plan (GitHub answers 403 "Upgrade to GitHub
+// Pro or make this repository public"). One read-only probe per owner tells whether they are available.
+const protectionProbe = new Map();
+async function protectionAvailable(ref) {
+  if (protectionProbe.has(ref.owner)) return protectionProbe.get(ref.owner);
+  const r = await run('gh', ['api', `repos/${ref.owner}/${ref.name}/rulesets`], { timeout: COMMAND_TIMEOUT_MS });
+  noteCall('core');
+  const ok = r.ok || !/upgrade to github pro|make this repository public/i.test(r.stderr + r.stdout);
+  protectionProbe.set(ref.owner, ok);
+  return ok;
+}
+
+// GitHub trims a nested connection inside a large query (we saw 25 of 95 alerts), so when the count is
+// bigger than what came back, the full list comes from the REST endpoint (cursor-paginated by gh).
+async function fetchAlerts(ref) {
+  if (rate.core && rate.core.remaining < MIN_CORE) return null;
+  const r = await json('gh', ['api', '--paginate', '--slurp', `repos/${ref.owner}/${ref.name}/dependabot/alerts?state=open&per_page=100`], { timeout: COMMAND_TIMEOUT_MS });
+  noteCall('core', 2);
+  if (!r.ok || !Array.isArray(r.data)) return null;
+  return r.data.flat().slice(0, 500).map((a) => {
+    const v = a.security_vulnerability || {};
+    // REST says "medium", GraphQL says "moderate": one word for both.
+    return { severity: String(v.severity || '').toLowerCase().replace('medium', 'moderate'), manifest: a.dependency && a.dependency.manifest_path, pkg: v.package && v.package.name, ecosystem: v.package && String(v.package.ecosystem || '').toLowerCase(), patched: v.first_patched_version && v.first_patched_version.identifier };
+  });
+}
+
+module.exports = { fetchRepos, fetchFailedRuns, fetchSecurity, fetchAlerts, protectionAvailable, refreshRate, getRate, rulesetCovers, refMatches };

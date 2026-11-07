@@ -58,9 +58,10 @@ function collectProject(dir, names) {
 
 async function collectHygiene(dir, { names, rawOrigin, deep, branch }) {
   const run = (args) => git(args, { cwd: dir });
-  const [stash, track, wt, head, objects, tags] = await Promise.all([
+  const [stash, track, fetchedRefs, wt, head, objects, tags] = await Promise.all([
     run(['stash', 'list', '--format=%gd']),
     run(['for-each-ref', '--format=%(refname:short)\t%(upstream:track)', 'refs/heads']),
+    run(['for-each-ref', '--count=1', '--format=%(refname)', 'refs/remotes']),
     run(['worktree', 'list', '--porcelain']),
     run(['rev-parse', '-q', '--verify', 'HEAD']),
     run(['count-objects', '-v']),
@@ -69,8 +70,9 @@ async function collectHygiene(dir, { names, rawOrigin, deep, branch }) {
   const co = Object.fromEntries(lines(objects.stdout).map((l) => l.split(': ')).map(([k, v]) => [k, Number(v)]));
   const h = {
     stashes: lines(stash.stdout).length,
-    goneBranches: lines(track.stdout).map((l) => l.split('\t')).filter(([n, t]) => t === '[gone]' && n !== branch).map(([n]) => n),
-    currentGone: !!branch && lines(track.stdout).some((l) => l === `${branch}\t[gone]`), // pushes and pulls of the current branch have nowhere to go
+    // "gone" only means the branch was deleted upstream if the remote was ever fetched; with no remote-tracking refs at all it just means never fetched.
+    goneBranches: !lines(fetchedRefs.stdout).length ? [] : lines(track.stdout).map((l) => l.split('\t')).filter(([n, t]) => t === '[gone]' && n !== branch).map(([n]) => n),
+    currentGone: !!branch && lines(fetchedRefs.stdout).length > 0 && lines(track.stdout).some((l) => l === `${branch}\t[gone]`), // pushes and pulls of the current branch have nowhere to go
     prunableWorktrees: lines(wt.stdout).filter((l) => l.startsWith('prunable')).length,
     remote: remoteIssue(rawOrigin),
     noCommits: !head.ok,

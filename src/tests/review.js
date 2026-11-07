@@ -60,6 +60,9 @@ const LANG = {
 const LANG_BY_EXT = Object.fromEntries(Object.entries(LANG).flatMap(([k, v]) => v.exts.map((e) => [e, k])));
 // Assertions by name, as tsDetect does (assert*/fail), widened to the helper names JS and Python suites use.
 const HELPER_ASSERT = /\b\w*(?:assert|check|verify|expect|ensure|must)\w*\s*[(!]|\bfail\s*\(/i;
+// Other ways a test can fail: throwing, raising, panicking, or capturing output (screenshots, files) for a
+// later review step. A guard that throws in a test setup file is an assertion too.
+const FAILS_OR_CAPTURES = /\bthrow\s+new\b|\braise\s+\w+|\bpanic\s*\(|\.screenshot\s*\(|toHaveScreenshot|\bwriteFile(?:Sync)?\s*\(/;
 const SMOKE_NAME = /\b(?:fn|def|func|it|test)\s*\(?\s*['"`]?\w*(?:does_?not_?panic|no_?panic|does_?not_?crash|doesnt_?crash|smoke)\w*/i;
 // Real network calls, per language (a fetch( inside a Python file is JavaScript in a string).
 const NET_HOST = `\\s*\\(\\s*["'\`]https?:\\/\\/(?!localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\]|example\\.(?:com|org))`;
@@ -105,7 +108,7 @@ const count = (re, text) => (re ? (text.match(re) || []).length : 0);
 const lineOf = (text, idx) => text.slice(0, idx).split('\n').length;
 const stem = (rel) => path.basename(rel).replace(/\.[^.]+$/, '').replace(/^test_|_test$|\.(test|spec)$|_spec$|Test$|Tests$/, '').toLowerCase();
 const isTestPath = (rel) => R.TEST_RE.test(rel) || /(^|\/)tests\/[^/]+\.rs$|(^|\/)tests?\.rs$|Tests?\.(kt|java)$|(^|\/)test_[^/]+\.sh$|\.bats$/.test(rel) || /(^|\/)src\/(test|androidTest)\//.test(rel);
-const NOT_A_MODULE = /(^|\/)(main|index|__init__|mod|lib|setup|conftest|build)\.\w+$|(^|\/)_?(archive|legacy|vendor|third_party)\//;
+const NOT_A_MODULE = /(^|\/)(main|index|__init__|mod|lib|setup|conftest|build)\.\w+$|(^|\/)(?:\.claude|\.github|\.codex|\.cursor|_?archive|_?legacy|vendor|third_party)\//;
 
 async function listFiles(dir) {
   const r = await git(['ls-files', '-co', '--exclude-standard', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
@@ -176,7 +179,7 @@ async function reviewTests(dir) {
     const body = isTest ? text : text.slice(text.indexOf('#[cfg(test)]'));
     // Project helpers count as assertions (check(...), verify_x(...), expectOk(...)), and so do tests
     // whose names say they only check that nothing crashes.
-    if (!L.assert.test(body) && !HELPER_ASSERT.test(body) && !SMOKE_NAME.test(body) && out.noAssert.length < MAX_KEPT) out.noAssert.push({ path: rel, cases });
+    if (!L.assert.test(body) && !HELPER_ASSERT.test(body) && !FAILS_OR_CAPTURES.test(body) && !SMOKE_NAME.test(body) && out.noAssert.length < MAX_KEPT) out.noAssert.push({ path: rel, cases });
     const net = NETWORK_RE[lang] && !STUBS_NETWORK.test(text) ? NETWORK_RE[lang].exec(text) : null;
     if (net && out.network.length < MAX_KEPT) out.network.push({ path: rel, line: lineOf(text, net.index) });
   }

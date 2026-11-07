@@ -63,6 +63,9 @@ async function collectGit(dir) {
       const [name, date] = l.split('\t');
       return { name, date, current: name === g.branch };
     });
+  // Branches checked out in another worktree cannot be deleted or switched to from here.
+  const wt = await git(['worktree', 'list', '--porcelain'], { cwd: dir });
+  g.worktreeBranches = wt.stdout.split('\n').filter((l) => l.startsWith('branch refs/heads/')).map((l) => l.slice(18)).filter((b) => b !== g.branch);
   const rrefs = await git(['for-each-ref', '--format=%(refname:short)\t%(committerdate:iso-strict)', 'refs/remotes/origin'], { cwd: dir });
   g.remoteBranches = rrefs.stdout
     .split('\n')
@@ -194,6 +197,9 @@ async function finish(local, ghRes, opts) {
       remote = { ...ghRes.snap, ci: { failed: [], error: null } };
       if (local.hasWorkflows && !remote.remote.archived) remote.ci = await gh.fetchFailedRuns(ref, remote.remote.defaultBranch, dir, { force: opts.force });
       if (remote.remote.viewerPermission === 'ADMIN' && !remote.remote.archived) remote.security = await gh.fetchSecurity(ref, { force: opts.force });
+      if ((remote.alertsTotal || 0) > (remote.alerts || []).length) { const all = await gh.fetchAlerts(ref); if (all && all.length) remote.alerts = all; }
+      // A private repo on a free plan cannot have branch protection at all: do not ask for what cannot be done.
+      if (remote.protection === false && !remote.remote.isPublic) remote.remote.protectionUnavailable = !(await gh.protectionAvailable(ref));
     } else {
       remote.remote = { owner: ref.owner, name: ref.name, url: `https://github.com/${ref.owner}/${ref.name}`, isPublic: false, unreachable: true, description: 'unknown', defaultBranch: null };
       remote.ci.error = ghRes ? ghRes.error : 'GitHub data unavailable';
@@ -201,7 +207,7 @@ async function finish(local, ghRes, opts) {
   }
   const g = local.git;
   const base = (remote.remote && remote.remote.defaultBranch) || (g.branches.some((b) => b.name === 'main') ? 'main' : g.branches.some((b) => b.name === 'master') ? 'master' : null);
-  g.mergedBranches = await mergedInto(dir, base, g);
+  g.mergedBranches = (await mergedInto(dir, base, g)).filter((b) => !(g.worktreeBranches || []).includes(b));
   const snapshot = { path: dir, name: path.basename(dir), originUrl: local.originUrl, git: g, files: local.files, deps: local.deps, hasWorkflows: local.hasWorkflows, hygiene: local.hygiene, agents: local.agents, scannedAt: new Date().toISOString(), ...remote };
   return { ...snapshot, ...evaluate(snapshot) };
 }

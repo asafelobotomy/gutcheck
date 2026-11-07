@@ -81,6 +81,11 @@ function checkProject(s) {
 }
 
 // Security features (GitHub docs). Only read for repos you administer; public repos get them free.
+// CodeQL default setup analyses these languages, and GitHub Actions workflows themselves. A repo of shell
+// scripts, HTML or QML with no workflows has nothing for it to scan, and enabling it would fail.
+const CODEQL_LANGS = new Set(['C', 'C++', 'C#', 'Go', 'Java', 'Kotlin', 'JavaScript', 'TypeScript', 'Python', 'Ruby', 'Rust', 'Swift']);
+const codeqlCanAnalyse = (s) => !!s.hasWorkflows || !((s.remote && s.remote.languages) || []).length || s.remote.languages.some((l) => CODEQL_LANGS.has(l));
+
 function checkSecurityFeatures(s) {
   const f = s.security;
   if (!f || !s.remote) return [];
@@ -90,7 +95,7 @@ function checkSecurityFeatures(s) {
   if (pub && f.secretScanning === 'disabled') add('secret-scanning-off', 'warn', 'Secret scanning is off', 'GitHub would alert you to committed tokens and keys (free for public repos).', { type: 'security-enable', label: 'Enable secret scanning', feature: 'secret-scanning' });
   if (pub && f.pushProtection === 'disabled') add('push-protection-off', 'warn', 'Push protection is off', 'Pushes containing known secret formats would be blocked before they land.', { type: 'security-enable', label: 'Enable push protection', feature: 'push-protection' });
   if (f.securityUpdates === 'disabled' && s.deps && s.deps.manifests.length) add('security-updates-off', 'info', 'Dependabot security updates are off', 'Fix PRs for vulnerable dependencies will not be opened.', { type: 'security-enable', label: 'Enable security updates', feature: 'security-fixes' });
-  if (pub && f.codeScanning === 'not-configured' && !(s.hygiene && s.hygiene.workflows && s.hygiene.workflows.codeql)) add('code-scanning-off', 'info', 'Code scanning (CodeQL) is not set up', 'Default setup finds common vulnerabilities on every push, free for public repos.', { type: 'security-enable', label: 'Enable CodeQL default setup', feature: 'code-scanning' });
+  if (pub && f.codeScanning === 'not-configured' && codeqlCanAnalyse(s) && !(s.hygiene && s.hygiene.workflows && s.hygiene.workflows.codeql)) add('code-scanning-off', 'info', 'Code scanning (CodeQL) is not set up', 'Default setup finds common vulnerabilities on every push, free for public repos.', { type: 'security-enable', label: 'Enable CodeQL default setup', feature: 'code-scanning' });
   if (pub && f.privateReporting === false) add('private-reporting-off', 'info', 'Private vulnerability reporting is off', 'Researchers then have to report security issues in public.', { type: 'security-enable', label: 'Enable private reporting', feature: 'private-reporting' });
   return out;
 }

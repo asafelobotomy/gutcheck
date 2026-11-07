@@ -144,7 +144,7 @@ test('agentAdvice: nothing without an agent app; transcripts, indexer, paralleli
     const t = big.find((a) => a.id === 'agent-transcripts');
     assert.ok(t, 'large history is reported');
     assert.match(t.detail, /big \(600 MB\)/);
-    assert.match(t.detail, /keeps sessions for 7 days \(cleanupPeriodDays\)\. It is already short/);
+    assert.match(t.detail, /keeps sessions for 7 days \(cleanupPeriodDays\)\. It is already set that short: the space is recent work/);
     assert.equal(t.fix, undefined, 'nothing shorter to suggest');
     assert.ok(!big.some((a) => a.id === 'agent-parallel'));
   } finally {

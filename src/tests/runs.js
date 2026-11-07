@@ -6,6 +6,7 @@
 
 const path = require('node:path');
 const { runDir } = require('../paths');
+const fs = require('node:fs');
 const { INSTALL } = require('./stack');
 
 const COVERAGE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -87,6 +88,14 @@ async function planTestRun(r, p, ctx) {
   };
 }
 
-const runnable = (stacks) => stacks.map((s) => ({ stack: s.id, root: s.root, name: s.name, coverage: !!PLANS.coverage[s.id], mutation: !!PLANS.mutation[s.id] }));
+// Binaries each kind needs (not run: a PATH lookup only, so scanning never executes anything of the repo's).
+const TOOLS = { coverage: { rust: 'cargo-llvm-cov', python: null, node: null, go: null }, mutation: { rust: 'cargo-mutants', python: null, node: null } };
+const onPath = (bin) => !bin || (process.env.PATH || '').split(path.delimiter).some((d) => d && (() => { try { fs.accessSync(path.join(d, bin), fs.constants.X_OK); return true; } catch { return false; } })());
+// mutation for Node needs Stryker in the project; python needs mutmut/pytest-cov in its virtualenv (checked at plan time).
+const runnable = (stacks) => stacks.map((s) => ({
+  stack: s.id, root: s.root, name: s.name,
+  coverage: !!PLANS.coverage[s.id], mutation: !!PLANS.mutation[s.id] && (s.id !== 'node' || !!s.stryker),
+  missing: [['coverage', TOOLS.coverage[s.id]], ['mutation', TOOLS.mutation[s.id]]].filter(([, bin]) => bin && !onPath(bin)).map(([kind, bin]) => ({ kind, bin, install: INSTALL[bin] })),
+}));
 
 module.exports = { planTestRun, runnable, COVERAGE_TIMEOUT_MS, MUTATION_TIMEOUT_MS };
