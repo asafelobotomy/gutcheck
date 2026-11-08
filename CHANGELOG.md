@@ -4,6 +4,10 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+
+- The Tests review now looks after the test suite itself. It recommends consolidating near-identical tests into one parameterized test, test bodies copied between files, setup repeated across tests (a fixture or `beforeEach`), and many tiny test files for one module. It flags stale tests (skips and xfails left in for over 6 months, unless their reason names a platform or tool; non-strict xfail; tests untouched while their code changed a lot), unused ones (helpers and fixtures nothing uses, test files the runner never collects, imports of modules that no longer exist) and legacy ones (nose, APIs removed in Python 3.12 and Jest 30, Enzyme, golang/mock, two test runners in one project, snapshots left by deleted tests). Node, Python, Rust and Go. Each finding has a "Copy for LLM" step, and all of it shows in `gutcheck_tests` and the CLI. Ages come from `git blame` and `git log`; nothing runs.
+
 ## [0.27.1] - 2026-11-08
 
 ### Changed

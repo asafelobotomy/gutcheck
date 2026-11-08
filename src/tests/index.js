@@ -6,6 +6,7 @@ const { readResults } = require('./results');
 const { runnable } = require('./runs');
 const { runDir } = require('../paths');
 const { plural, list } = require('../util');
+const { upkeepAdvice } = require('./upkeep');
 
 const COVERAGE_WARN = 50;
 const COVERAGE_INFO = 75;
@@ -32,7 +33,10 @@ function buildTestAdvice(t) {
   }
   if (t.focused.length) add('t-focused', 'warn', `${plural(t.focused.length, 'focused test')} (.only)`, `${list(t.focused.map(at), 5)}. A focused test makes the runner skip every other test in that file or suite.`);
   if (t.noAssert.length) add('t-no-assert', 'warn', `${plural(t.noAssert.length, 'test file')} without assertions`, `${list(t.noAssert.map((x) => `${x.path} (${plural(x.cases, 'test')})`), 5)}. A test that asserts nothing passes whatever the code does.`);
-  if (t.skipped.length) add('t-skipped', 'info', `${plural(t.skipped.length, 'skipped test')}`, `${list(t.skipped.map(at), 5)}. Fix them, or delete them if they are no longer wanted.`);
+  // Skips switched off for months are listed once, under t-stale-skip.
+  const old = new Set(((t.upkeep && t.upkeep.oldMarkers) || []).map(at));
+  const skipped = t.skipped.filter((x) => !old.has(at(x)));
+  if (skipped.length) add('t-skipped', 'info', `${plural(skipped.length, 'skipped test')}`, `${list(skipped.map(at), 5)}. Fix them, or delete them if they are no longer wanted.`);
   if (t.sleeps.length) add('t-sleep', 'info', `${plural(t.sleeps.length, 'sleep')} in tests`, `${list(t.sleeps.map(at), 5)}. Fixed waits make tests slow and flaky: wait for the condition instead.`);
   if (t.network.length) add('t-network', 'info', `${plural(t.network.length, 'test file')} calling real servers`, `${list(t.network.map(at), 5)}. Tests that need the internet fail offline and when the server changes: use a local fake.`);
   if (total && t.untested.length && !t.results.coverage) add('t-untested', 'info', `${plural(t.untestedCount, 'source file')} with no test named after it`, `Largest: ${list(t.untested.map((u) => `${u.path} (${u.lines} lines)`), 6)}. A name match is only a hint: a coverage run shows what really runs.`, t.results.coverage ? undefined : runFix('coverage', 'Run coverage…'));
@@ -54,6 +58,7 @@ function buildTestAdvice(t) {
   const m = t.results.mutation;
   if (m && m.score != null && m.score < MUTATION_WARN) add('t-mutation', 'warn', `Mutation score ${m.score}%: tests miss ${plural(m.survived, 'deliberate bug')}`, `${m.tool}: ${m.killed} caught, ${m.survived} survived. Examples: ${list(m.examples, 4)}. Each survivor is a change to the code that no test noticed: add an assertion that would.`);
   else if (!m && total && c && c.percent >= COVERAGE_WARN && canRun('mutation')) add('t-mutation-none', 'info', 'Test strength never measured', 'Coverage shows which code runs, not whether the tests would notice it breaking. Mutation testing checks that (it is slow).' + needs('mutation'), runFix('mutation', 'Run mutation testing…'));
+  out.push(...upkeepAdvice(t.upkeep));
   return out;
 }
 

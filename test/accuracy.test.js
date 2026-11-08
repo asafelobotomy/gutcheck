@@ -238,3 +238,45 @@ test('superseded Dependabot PRs: same ecosystem only, close instead of rebase; a
   const run = { databaseId: 3, workflowName: 'Build Android', headBranch: 'main', displayTitle: 't', createdAt: new Date().toISOString(), newerPending: true };
   assert.match(evaluate(base({ ci: { failed: [run], error: null }, protection: true })).findings.find((f) => f.id === 'ci-failed-3').detail, /A newer run is queued or running/);
 });
+
+test('tests upkeep false alarms: deliberate skips, fixtures named in strings, setup files named in a sub-project config, workspace configs, build output, per-feature test files', async () => {
+  const d = repo();
+  const old = new Date(Date.now() - 400 * 86400000).toISOString();
+  try {
+    put(d, 'pyproject.toml', '[tool.pytest.ini_options]\n');
+    // A skip whose reason names the platform or tool it waits for is deliberate, however old.
+    put(d, 'tests/test_platform.py', '@pytest.mark.skip(reason="Windows only: uses the registry")\ndef test_registry():\n    assert 1\n\n@pytest.mark.skip  # needs docker\ndef test_container():\n    assert 1\n');
+    put(d, 'go.mod', 'module x\n');
+    put(d, 'x_test.go', 'package x\nfunc TestRoot(t *testing.T) {\n\tt.Skip("requires root")\n}\n');
+    // Fixtures used through usefixtures("name"), or with name=..., are used.
+    put(d, 'tests/conftest.py', '@pytest.fixture\ndef clean_env():\n    yield\n\n@pytest.fixture(name="db")\ndef _db_fixture():\n    return 1\n');
+    put(d, 'tests/test_env.py', '@pytest.mark.usefixtures("clean_env")\ndef test_env(db):\n    assert db\n');
+    // A setup file named only in web/vite.config.ts, and a JS file that imports a build output not built yet.
+    put(d, 'web/package.json', JSON.stringify({ devDependencies: { vitest: '1' } }));
+    put(d, 'web/vite.config.ts', "export default { test: { setupFiles: ['./src/test/fetchGuard.ts'] } }\n");
+    put(d, 'web/src/test/fetchGuard.ts', 'globalThis.fetch = () => { throw new Error("no") }\n');
+    put(d, '.gitignore', 'dist/\n');
+    put(d, 'package.json', JSON.stringify({ devDependencies: { vitest: '1' }, scripts: { test: 'vitest run --config vitest.workspace.js' } }));
+    put(d, 'vitest.workspace.js', "export default ['web', { test: { include: ['scripts/**/*.test.js'] } }]\n");
+    put(d, 'scripts/audit.test.js', "import { test, expect } from 'vitest'\nimport { run } from '../dist/cli.js'\ntest('a', () => { expect(run).toBeTruthy() })\n");
+    // Many small per-feature test files for one module are the project's convention, not clutter.
+    put(d, 'reddit.py', 'x = 1\n');
+    for (let i = 0; i < 6; i++) put(d, `tests/test_reddit_f${i}.py`, `def test_f${i}():\n    assert ${i} >= 0\n` + (i > 2 ? Array.from({ length: 50 }, (_, j) => `def test_g${i}_${j}():\n    assert 1\n`).join('') : ''));
+    // Two endpoints tested with the same shape (different strings) are not copies.
+    put(d, 'tests/test_a_api.py', 'def test_err(client):\n    r = client.get("/a")\n    assert r.status_code == 400\n    assert "nope" in r.text\n    assert r.headers\n    assert r.json()["detail"]\n');
+    put(d, 'tests/test_b_api.py', 'def test_err(client):\n    r = client.get("/b")\n    assert r.status_code == 400\n    assert "auth" in r.text\n    assert r.headers\n    assert r.json()["detail"]\n');
+    // Scanner code in a folder called tests/ that names test( and it( in regexes is not a test file.
+    put(d, 'src/tests/scan.js', "const RE = /(?:it|test)\\s*\\(/g;\nmodule.exports = (s) => RE.test(s);\n");
+    sh(d, 'add', '-A');
+    execFileSync('git', ['commit', '-q', '-m', 'old'], { cwd: d, env: { ...process.env, GIT_AUTHOR_DATE: old, GIT_COMMITTER_DATE: old } });
+    const u = (await reviewTests(d)).upkeep;
+    assert.deepEqual(u.oldMarkers, [], 'skips with a platform or tool reason are deliberate');
+    assert.equal(u.markers.filter((m) => m.deliberate).length, 3);
+    assert.deepEqual(u.fixtures, []);
+    assert.deepEqual(u.helpers, []);
+    assert.deepEqual(u.notCollected, [], 'a workspace config decides what vitest runs');
+    assert.deepEqual(u.missing, [], 'dist/ is build output');
+    assert.deepEqual(u.tinyFiles, []);
+    assert.deepEqual(u.copies, []);
+  } finally { rm(d); }
+});

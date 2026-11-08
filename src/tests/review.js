@@ -11,6 +11,8 @@ const { COMMAND_TIMEOUT_MS } = require('../util');
 const R = require('../quality/rules');
 const { LANGS, lex } = require('../quality/lexer');
 const { detectStacks, CI_TEST_RE, GENERIC_TEST_RE } = require('./stack');
+const { scanUpkeep } = require('./upkeep');
+const { TEST_DIR } = require('./unused');
 
 const MAX_FILES = 8000;
 const MAX_READ = 512 * 1024;
@@ -146,6 +148,7 @@ async function reviewTests(dir) {
   const out = { stacks, testFiles: 0, testCases: 0, inlineTests: 0, sourceFiles: 0, testLines: 0, sourceLines: 0, skipped: [], focused: [], noAssert: [], sleeps: [], network: [], untested: [], byLang };
   const testStems = new Set();
   const sources = [];
+  const up = { kept: [], candidates: [], tests: [] };
   for (const rel of files) {
     const ext = path.extname(rel).slice(1).toLowerCase();
     const lang = LANG_BY_EXT[ext];
@@ -159,6 +162,17 @@ async function reviewTests(dir) {
     const cases = count(L.test, text);
     const inline = lang === 'rs' && !isTest && /#\[cfg\(test\)\]/.test(text) ? cases : 0;
     const b = byLang[lang] || (byLang[lang] = { testFiles: 0, testCases: 0, sourceFiles: 0 });
+    // Kept for the upkeep scan: code in test folders (helpers), and any file with test cases.
+    const spec = LANGS[ext];
+    const lexed = () => (spec && spec.fam !== 'plain' ? lex(text, spec).code.join('\n') : text);
+    if (isTest || inline || cases || TEST_DIR.test(rel)) {
+      const code = lexed();
+      // Test cases counted on code, not strings or comments (a scanner's own regexes name it( and test().
+      const k = { rel, lang, cases: count(L.test, code), lines, isTest, text, code };
+      up.kept.push(k);
+      if (k.cases) up.candidates.push(k);
+      if (isTest && k.cases && ['js', 'py', 'rs', 'go'].includes(lang)) up.tests.push(k);
+    }
     if (!isTest && !inline) { out.sourceFiles++; out.sourceLines += lines; b.sourceFiles++; sources.push({ rel, lines, lang }); continue; }
     if (isTest) { out.testFiles++; out.testLines += lines; b.testFiles++; testStems.add(stem(rel)); } else {
       // Rust: the #[cfg(test)] module at the end of a source file is test code, the rest is source.
@@ -169,8 +183,7 @@ async function reviewTests(dir) {
     if (!cases) continue;
     // Strings and comments blanked (quotes kept), so code inside a string (a script a test runs) or a
     // commented-out line is not read as the test's own code. Network checks need the URL literals: raw text.
-    const spec = LANGS[ext];
-    const code = spec && spec.fam !== 'plain' ? lex(text, spec).code.join('\n') : text;
+    const code = up.kept.length && up.kept[up.kept.length - 1].rel === rel ? up.kept[up.kept.length - 1].code : lexed();
     const textLines = code.split('\n');
     const at = (re, list, kind, keep = () => true) => { if (!re) return; re.lastIndex = 0; let m; while ((m = re.exec(code)) && list.length < MAX_KEPT) { const ln = lineOf(code, m.index); if (keep(ln - 1)) list.push({ path: rel, line: ln, kind }); } };
     at(L.skip, out.skipped, 'skipped', (i) => (lang === 'go' || lang === 'sh' ? skipIsUnconditional(textLines, i) : true));
@@ -193,6 +206,7 @@ async function reviewTests(dir) {
   if ((byLang.sh || {}).testCases || files.some((f) => f.endsWith('.bats'))) stacks.push({ id: 'shell', name: 'Shell', root: '.', runner: files.some((f) => f.endsWith('.bats')) ? 'bats' : 'script', inferred: true });
   out.ci = ciCoverage(dir, stacks);
   out.ruff = await ruffPytest(dir, files.filter(isTestPath));
+  try { out.upkeep = await scanUpkeep(dir, { files, ...up, sources, skipped: out.skipped, stacks }); } catch (e) { out.upkeep = null; out.upkeepError = String(e.message || e); }
   return out;
 }
 

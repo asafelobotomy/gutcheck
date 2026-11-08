@@ -1,6 +1,8 @@
 // The Tests part of the "Copy for LLM" report: what the review found, and ordered steps an agent
 // can follow to improve the tests. Agents write tests here; GutCheck only points at the gaps.
 
+const { upkeepFix } = require('./upkeep');
+
 const clip = (s, n = 160) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, n);
 
 function testsSection(t) {
@@ -34,7 +36,7 @@ const STEPS = {
 };
 
 function testsFix(id) {
-  const s = STEPS[id];
+  const s = STEPS[id] || upkeepFix(id);
   if (!s) return null; // coverage-none, mutation-none, stale: the app offers a run; nothing for an agent to edit
   return { cmds: [], ...s };
 }
