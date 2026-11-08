@@ -120,6 +120,9 @@ test('pr-merge builds the exact gh command and rejects bad PRs', async () => {
   const ok = await plan(repo, { type: 'pr-merge', number: 1, method: 'squash', deleteBranch: true });
   assert.deepEqual(ok.steps[0].args, ['pr', 'merge', '1', '--squash', '-R', 'o/demo', '--delete-branch']);
   assert.equal(ok.risk, 'caution');
+  const oid = 'a'.repeat(40);
+  const pinned = await plan(ghRepo({ prs: repo.prs.map((x) => (x.number === 1 ? { ...x, headRefOid: oid } : x)) }), { type: 'pr-merge', number: 1, method: 'squash' });
+  assert.deepEqual(pinned.steps[0].args.slice(-2), ['--match-head-commit', oid], 'only the scanned head is merged');
   assert.equal((await plan(repo, { type: 'pr-merge', number: 2, method: 'squash' })).ok, false); // draft
   assert.equal((await plan(repo, { type: 'pr-merge', number: 3, method: 'squash' })).ok, false); // conflicts
   assert.equal((await plan(repo, { type: 'pr-merge', number: 99, method: 'squash' })).ok, false); // unknown
@@ -143,11 +146,19 @@ test('branch protection sends a JSON body on stdin and needs admin', async () =>
   const repo = ghRepo();
   const p = await plan(repo, { type: 'protect-branch', preset: 'basic' });
   assert.ok(p.ok);
-  assert.deepEqual(p.steps[0].args.slice(0, 4), ['api', '-X', 'PUT', 'repos/o/demo/branches/main/protection']);
-  const body = JSON.parse(p.steps[0].input);
+  assert.equal(p.steps[0].kind, 'check', 'first: the branch still has no protection');
+  assert.deepEqual(p.steps[1].args.slice(0, 4), ['api', '-X', 'PUT', 'repos/o/demo/branches/main/protection']);
+  const body = JSON.parse(p.steps[1].input);
   assert.equal(body.allow_force_pushes, false);
   assert.equal(body.required_pull_request_reviews.required_approving_review_count, 0);
   assert.equal((await plan(ghRepo({ remote: { ...repo.remote, viewerPermission: 'READ' } }), { type: 'protect-branch', preset: 'basic' })).ok, false);
+  assert.match((await plan(ghRepo({ remote: { ...repo.remote, protection: true } }), { type: 'protect-branch', preset: 'basic' })).error, /already protected/, 'never replaces existing rules');
+  // Protection added on GitHub after the scan: the check finds it and nothing is sent.
+  const sent = [];
+  const late = await apply(p, { run: async (cmd, args) => { sent.push(args); return { ok: true, stdout: '{"url":"..."}', stderr: '' }; } });
+  assert.equal(late.ok, false);
+  assert.equal(sent.length, 1);
+  assert.match(late.results[0].out, /changed since the scan/);
   assert.equal((await plan(repo, { type: 'protect-branch', preset: 'nonsense' })).ok, false);
   assert.equal((await plan(repo, { type: 'unprotect-branch' })).risk, 'danger');
 });
@@ -172,8 +183,9 @@ test('apply stops at the first failing step and uses the injected runner', async
   const none = await apply(p2, { run: async () => ({ ok: true, stdout: '', stderr: '' }) });
   assert.match(none.results[0].out, /Nothing is left to commit/);
   const prot = await plan(ghRepo(), { type: 'protect-branch', preset: 'basic' });
-  await apply(prot, { run: runner });
-  assert.ok(calls.at(-1)[2].includes('required_pull_request_reviews'));
+  const put = [];
+  await apply(prot, { run: async (cmd, args, o) => { put.push(o.input); return put.length === 1 ? { ok: false, stdout: '', stderr: 'gh: Branch not protected (HTTP 404)' } : { ok: true, stdout: '', stderr: '' }; } });
+  assert.ok(put[1].includes('required_pull_request_reviews'));
 });
 
 test('append and write refuse to follow a symlink out of the repo', async () => {

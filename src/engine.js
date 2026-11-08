@@ -247,8 +247,9 @@ function createEngine(opts = {}) {
     if (!Array.isArray(tokens) || !tokens.length) return { ok: false, error: 'Pass tokens from gutcheck_plan.' };
     const res = [];
     const failed = new Set(); // a failed plan stops the later ones for the same repo
+    const startedAt = Date.now(); // plans fresh now stay valid for the whole batch
     for (const t of tokens) {
-      if (typeof t === 'string' && t.startsWith('a:')) { const r = store.load().readOnly ? { ok: false, error: 'Read-only mode is on in the GutCheck app.' } : await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm, failed })));
+      if (typeof t === 'string' && t.startsWith('a:')) { const r = store.load().readOnly ? { ok: false, error: 'Read-only mode is on in the GutCheck app.' } : await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm, failed, startedAt })));
     }
     return { ok: res.every((r) => r.ok), results: res.map((r) => ({ ok: r.ok, ...(r.skipped ? { skipped: true } : {}), repo: r.repoName, title: r.title, error: r.error, steps: (r.results || []).map((x) => ({ cmd: x.text, ok: x.ok, output: x.out || undefined })) })) };
   }

@@ -10,7 +10,6 @@ const INSTALLERS = ['npm install', 'yarn install', 'pnpm install', 'bun install'
 const { TEMPLATES, findEcosystems } = require('./templates');
 const { detectStacks } = require('./tests/stack');
 const { IGNORE_OK } = require('./clutter');
-const { PROTECTION } = require('./protection');
 const { planTestRun } = require('./tests/runs');
 
 class PlanError extends Error {}
@@ -145,104 +144,12 @@ const ACTIONS = {
       if (secrets.length) fail(`These files look like secrets or keys and would be committed:\n${secrets.slice(0, 10).join('\n')}${secrets.length > 10 ? `\n...and ${secrets.length - 10} more` : ''}\nAdd them to .gitignore (or move them out of the repo), then plan the commit again.`);
       // `git add -A` must stage exactly what was previewed: the check step refuses if anything changed since.
       // Fewer files is fine (a .gitignore added just before can hide some); any file not listed stops it.
-      const check = { kind: 'check', cmd: 'git', args: [...READONLY_GIT, 'status', '--short', '-uall'], cwd: r.path, expect: st, subset: true, display: 'check no file outside the list below has changed' };
-      return { risk: 'caution', title: `Commit all changes on ${r.git.branch}`, steps: [check, git(['add', '-A'], r.path), git(['commit', '-m', msg], r.path)], warnings: ['Files to be committed:\n' + st.split('\n').slice(0, 40).join('\n')], undo: 'git reset --soft HEAD~1' };
-    },
-  },
-
-  'pr-merge': {
-    plan(r, p) {
-      const slug = needRemote(r);
-      const pr = (r.prs || []).find((x) => x.number === p.number) || fail('That PR was not in the last scan.');
-      if (pr.isDraft) fail('This PR is a draft. Mark it ready first.');
-      if (pr.mergeable === 'CONFLICTING') fail('This PR has merge conflicts.');
-      const flag = { squash: '--squash', merge: '--merge', rebase: '--rebase' }[p.method] || fail('Choose squash, merge or rebase.');
-      const args = ['pr', 'merge', String(pr.number), flag, '-R', slug];
-      if (p.deleteBranch) args.push('--delete-branch');
-      const failing = pr.statusCheckRollup === 'FAILURE';
-      return { risk: failing ? 'danger' : 'caution', title: `Merge PR #${pr.number} (${p.method})${p.deleteBranch ? ' and delete its branch' : ''}`, steps: [gh(args, r.path)], warnings: failing ? ['This PR has FAILING checks.'] : [], note: pr.title };
-    },
-  },
-
-  'pr-close': {
-    plan(r, p) {
-      const slug = needRemote(r);
-      const pr = (r.prs || []).find((x) => x.number === p.number) || fail('That PR was not in the last scan.');
-      return { risk: 'caution', title: `Close PR #${pr.number} without merging`, steps: [gh(['pr', 'close', String(pr.number), '-R', slug], r.path)], undo: `gh pr reopen ${pr.number} -R ${slug}`, note: pr.title };
-    },
-  },
-
-  'pr-ready': {
-    plan(r, p) {
-      const slug = needRemote(r);
-      const pr = (r.prs || []).find((x) => x.number === p.number) || fail('That PR was not in the last scan.');
-      if (!pr.isDraft) fail('This PR is not a draft.');
-      return { risk: 'safe', title: `Mark PR #${pr.number} ready for review`, steps: [gh(['pr', 'ready', String(pr.number), '-R', slug], r.path)], note: pr.title };
-    },
-  },
-
-  'pr-create': {
-    plan(r, p) {
-      const slug = needRemote(r);
-      const base = defaultBranch(r) || fail('Unknown default branch.');
-      if (p.branch === base) fail('The branch is the default branch.');
-      localBranch(r, p.branch);
-      if (!(r.git.remoteBranches || []).some((x) => x.name === p.branch)) fail('Push the branch first: it does not exist on the remote.');
-      if ((r.prs || []).some((x) => x.headRefName === p.branch)) fail('A PR from this branch is already open.');
-      const title = cleanText(p.title, 200);
-      const args = ['pr', 'create', '-R', slug, '--head', p.branch, '--base', base, ...(title ? ['--title', title, '--body', ''] : ['--fill'])];
-      return { risk: 'caution', title: `Open a PR from ${p.branch} into ${base}`, steps: [gh(args, r.path)] };
-    },
-  },
-
-  'run-rerun': {
-    plan(r, p) {
-      const slug = needRemote(r);
-      const run_ = ((r.ci && r.ci.failed) || []).find((x) => x.databaseId === p.runId) || fail('That run was not in the last scan.');
-      const failedOnly = p.failedOnly !== false;
-      return { risk: 'safe', title: `Re-run ${failedOnly ? 'failed jobs of' : ''} "${run_.workflowName}"`, steps: [gh(['run', 'rerun', String(run_.databaseId), ...(failedOnly ? ['--failed'] : []), '-R', slug], r.path)] };
-    },
-  },
-
-  'protect-branch': {
-    plan(r, p) {
-      const slug = needRemote(r);
-      const preset = PROTECTION[p.preset] || fail('Unknown protection preset.');
-      const b = defaultBranch(r) || fail('Unknown default branch.');
-      if (r.remote.archived) fail('Repository is archived.');
-      if (r.remote.viewerPermission && r.remote.viewerPermission !== 'ADMIN') fail('Admin permission is required to change branch protection.');
-      const body = JSON.stringify(preset.body);
-      return {
-        risk: 'caution',
-        title: `Protect ${b}`,
-        steps: [gh(['api', '-X', 'PUT', `repos/${slug}/branches/${b}/protection`, '-H', 'Accept: application/vnd.github+json', '--input', '-'], r.path, body)],
-        warnings: [preset.label, 'Private repositories on a free plan cannot use branch protection; GitHub will report an error.'],
-        undo: `gh api -X DELETE repos/${slug}/branches/${b}/protection`,
-        body: JSON.stringify(preset.body, null, 2),
-      };
-    },
-  },
-
-  'unprotect-branch': {
-    plan(r) {
-      const slug = needRemote(r);
-      const b = defaultBranch(r) || fail('Unknown default branch.');
-      if (r.remote.viewerPermission && r.remote.viewerPermission !== 'ADMIN') fail('Admin permission is required.');
-      return { risk: 'danger', title: `Remove ALL branch protection from ${b}`, steps: [gh(['api', '-X', 'DELETE', `repos/${slug}/branches/${b}/protection`], r.path)] };
-    },
-  },
-
-  'security-enable': {
-    plan(r, p) {
-      const slug = needRemote(r);
-      if (r.remote.viewerPermission && r.remote.viewerPermission !== 'ADMIN') fail('Admin permission is required.');
-      if (p.feature === 'alerts') return { risk: 'safe', title: 'Enable Dependabot alerts', steps: [gh(['api', '-X', 'PUT', `repos/${slug}/vulnerability-alerts`], r.path)], undo: `gh api -X DELETE repos/${slug}/vulnerability-alerts` };
-      if (p.feature === 'security-fixes') return { risk: 'caution', title: 'Enable Dependabot security updates (opens PRs automatically)', steps: [gh(['api', '-X', 'PUT', `repos/${slug}/automated-security-fixes`], r.path)], undo: `gh api -X DELETE repos/${slug}/automated-security-fixes` };
-      if (p.feature === 'secret-scanning') return { risk: 'caution', title: 'Enable secret scanning', steps: [gh(['api', '-X', 'PATCH', `repos/${slug}`, '--input', '-'], r.path, JSON.stringify({ security_and_analysis: { secret_scanning: { status: 'enabled' } } }))] };
-      if (p.feature === 'push-protection') return { risk: 'caution', title: 'Enable secret scanning push protection', steps: [gh(['api', '-X', 'PATCH', `repos/${slug}`, '--input', '-'], r.path, JSON.stringify({ security_and_analysis: { secret_scanning: { status: 'enabled' }, secret_scanning_push_protection: { status: 'enabled' } } }))], note: 'Pushes that contain a recognised secret are blocked; whoever pushes can still bypass it with a reason.' };
-      if (p.feature === 'code-scanning') return { risk: 'caution', title: 'Enable CodeQL default setup', steps: [gh(['api', '-X', 'PATCH', `repos/${slug}/code-scanning/default-setup`, '-f', 'state=configured'], r.path)], note: 'Runs CodeQL through GitHub Actions on pushes, pull requests and weekly.', undo: `gh api -X PATCH repos/${slug}/code-scanning/default-setup -f state=not-configured` };
-      if (p.feature === 'private-reporting') return { risk: 'safe', title: 'Enable private vulnerability reporting', steps: [gh(['api', '-X', 'PUT', `repos/${slug}/private-vulnerability-reporting`], r.path)], undo: `gh api -X DELETE repos/${slug}/private-vulnerability-reporting` };
-      return fail('Unknown security feature.');
+      // afterGitignore: Fix all adds .gitignore rules just before this commit, so .gitignore itself may
+      // show up as changed or new; it is committed with the rest.
+      const also = p.afterGitignore === true && !st.split('\n').some((l) => statusPath(l) === '.gitignore') ? [' M .gitignore', '?? .gitignore'] : [];
+      const check = { kind: 'check', cmd: 'git', args: [...READONLY_GIT, 'status', '--short', '-uall'], cwd: r.path, expect: [st, ...also].join('\n'), subset: true, display: 'check no file outside the list below has changed' };
+      const list = st.split('\n').slice(0, 40).join('\n') + (also.length ? '\n.gitignore (the rules added just before)' : '');
+      return { risk: 'caution', title: `Commit all changes on ${r.git.branch}`, steps: [check, git(['add', '-A'], r.path), git(['commit', '-m', msg], r.path)], warnings: ['Files to be committed:\n' + list], undo: 'git reset --soft HEAD~1' };
     },
   },
 
@@ -251,34 +158,16 @@ const ACTIONS = {
     plan: (r) => ({ risk: 'safe', title: 'Prune stale worktrees', steps: [git(['worktree', 'prune', '-v'], r.path)], note: 'Only removes git\'s records of worktrees whose folders are already gone.' }),
   },
 
-  'repo-edit': {
-    plan(r, p) {
-      const slug = needRemote(r);
-      const args = ['repo', 'edit', slug];
-      const parts = [];
-      if (p.description != null) { const d = cleanText(p.description, 350); args.push('--description', d); parts.push(`description "${d}"`); }
-      if (typeof p.deleteBranchOnMerge === 'boolean') { args.push(`--delete-branch-on-merge=${p.deleteBranchOnMerge}`); parts.push(`auto-delete merged branches: ${p.deleteBranchOnMerge}`); }
-      if (!parts.length) fail('Nothing to change.');
-      return { risk: 'caution', title: `Edit repository settings: ${parts.join(', ')}`, steps: [gh(args, r.path)], note: r.remote.description ? `Previous description: ${r.remote.description}` : undefined };
-    },
-  },
-
-  'repo-archive': {
-    plan(r) {
-      const slug = needRemote(r);
-      return { risk: 'danger', title: `Archive ${slug} (read-only until unarchived)`, steps: [gh(['repo', 'archive', slug, '--yes'], r.path)], undo: `gh repo unarchive ${slug} --yes` };
-    },
-  },
-
   'add-file': {
     async plan(r, p, ctx) {
       const t = TEMPLATES[p.template] || fail('Unknown template.');
       const target = path.join(r.path, t.file);
       if (!target.startsWith(r.path + path.sep)) fail('Bad path.');
       if (ctx.fs.existsSync(target)) fail(`${t.file} already exists.`);
-      const author = (await readGit(ctx, ['config', 'user.name'], r.path)).stdout.trim() || 'Author';
+      const author = (await readGit(ctx, ['config', 'user.name'], r.path)).stdout.trim();
+      if (!author && p.template === 'license') fail('Set your name first (git config user.name "Your Name"): the licence names the copyright holder.');
       const manifests = (r.deps && r.deps.manifests) || [];
-      const content = t.build({ author, name: path.basename(r.path), manifests, ecosystems: findEcosystems(r.path), stacks: detectStacks(r.path), owner: r.remote && r.remote.owner, hasWorkflows: !!r.hasWorkflows, branch: (r.remote && r.remote.defaultBranch) || r.git.branch || 'main' });
+      const content = t.build({ author: author || 'Author', name: path.basename(r.path), manifests, ecosystems: findEcosystems(r.path), stacks: detectStacks(r.path), owner: r.remote && r.remote.owner, hasWorkflows: !!r.hasWorkflows, branch: (r.remote && r.remote.defaultBranch) || r.git.branch || 'main' });
       const steps = [{ kind: 'write', root: r.path, path: target, content, display: `write ${t.file} (${content.length} bytes)`, preview: content.split('\n').slice(0, 14).join('\n') }];
       if (p.commit) steps.push(git(['add', '--', t.file], r.path), git(['commit', '-m', `Add ${t.label}`, '--', t.file], r.path));
       return { risk: p.commit ? 'caution' : 'safe', title: `Add ${t.file}${p.commit ? ' and commit it' : ''}`, steps, undo: p.commit ? 'git reset --soft HEAD~1 && git rm --cached ' + t.file : `rm ${t.file}` };
@@ -348,6 +237,9 @@ const ACTIONS = {
   },
 };
 
+
+// GitHub-side actions live in actions-github.js, built with this file's step builders.
+Object.assign(ACTIONS, require('./actions-github')({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh: (ctx, args, cwd) => ctx.run('gh', args, { cwd }) }));
 
 // AI agent actions live in actions-agent.js; their plan errors read like this file's.
 const AGENT = require('./actions-agent');

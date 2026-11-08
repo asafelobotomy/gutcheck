@@ -4,6 +4,26 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-11-08
+
+### Changed
+
+- Fix all asks before adding a licence, README, CODEOWNERS or CI workflow: these are the owner's call. A licence starts on "leave it", and GutCheck refuses to write one until `git config user.name` is set, instead of naming "Author".
+- Setting up an LSP language server that installs for every user (`npm -g`, `dotnet --global`) or as root (`run0 pacman`) is now dangerous: you type the repo name. Installs run from your home folder, so a repo's `.npmrc` or `nuget.config` cannot choose the registry.
+- "Copy for LLM" pulls before it commits, as Fix all does, and ends with a push for the commits its steps make.
+
+### Fixed
+
+- Fix all no longer stops at your commit after adding `.gitignore` rules: the changed `.gitignore` goes into that commit.
+- A long Fix all (an install, a test run) no longer expires the later steps you already reviewed.
+- Protecting a branch never replaces existing protection: it refuses when the scan saw protection or a ruleset, and checks again just before the change.
+- Merging a PR merges only the commit that was scanned and previewed (`--match-head-commit`), and an approved PR is offered for merging only once its checks pass.
+- Splitting CLAUDE.md keeps `@AGENTS.md` (and other agents' instruction files) as imports, and suggests `git checkout` as the undo only when the file has no uncommitted edits.
+- Removing clutter reads each name literally, so a file named like a pattern (`a*b.tmp`) is no longer refused because of another file it would match.
+- Rewriting a file (split, permission rules) keeps its permissions and never writes through a temp file someone placed.
+- Connecting an agent no longer overwrites changes made to its config file after the preview, and writes through a symlinked config instead of replacing the link.
+- "Copy for LLM" lists two failed runs of the same workflow as two steps.
+
 ## [0.27.0] - 2026-11-07
 
 ### Changed
@@ -276,7 +296,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 - First release: health checks for every git repo in a folder.
 
-[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.27.1...HEAD
+[0.27.1]: https://github.com/asafelobotomy/gutcheck/compare/v0.27.0...v0.27.1
 [0.27.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.26.1...v0.27.0
 [0.26.1]: https://github.com/asafelobotomy/gutcheck/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.25.0...v0.26.0

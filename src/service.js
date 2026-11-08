@@ -85,11 +85,14 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
     if (!Array.isArray(tokens)) return [];
     const out = [];
     const failed = opts.failed instanceof Set ? opts.failed : new Set();
+    // A plan counts as fresh if it was when the batch started: a long Fix all (an install, test runs)
+    // must not expire the later steps the user already reviewed. opts.startedAt carries it across calls.
+    const started = typeof opts.startedAt === 'number' ? opts.startedAt : Date.now();
     const note = (r, p) => { if (!r.ok && p) failed.add(p.repoPath); out.push(r); };
     for (const token of tokens) {
       const entry = plans.get(token);
       plans.delete(token); // single use
-      if (!entry || entry.expires < Date.now()) { out.push({ ok: false, error: 'Plan expired. Please review it again.' }); continue; }
+      if (!entry || entry.expires < started) { out.push({ ok: false, error: 'Plan expired. Please review it again.' }); continue; }
       const p = entry.plan;
       if (failed.has(p.repoPath)) { out.push({ ok: false, skipped: true, repoName: p.repoName, title: p.title, error: 'Skipped: an earlier change to this repo failed, so the rest did not run.' }); continue; }
       if (p.confirmName && !(opts.confirm && opts.confirm[token] === p.confirmName)) { note({ ok: false, repoName: p.repoName, title: p.title, error: `This is a dangerous action: confirm it by passing the repo name "${p.confirmName}" for this token.` }, p); continue; }

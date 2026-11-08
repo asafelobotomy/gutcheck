@@ -54,7 +54,7 @@ function checkPRs(s) {
       out.push({ id: 'pr-ci-' + pr.number, category: 'PRs', severity: 'error', title: `PR #${pr.number} has failing checks`, detail: pr.title, url: pr.url });
     if (age >= STALE_PR_DAYS && !pr.isDraft)
       out.push({ id: 'pr-stale-' + pr.number, category: 'PRs', severity: 'warn', title: `PR #${pr.number} stale for ${age} days`, detail: pr.title, url: pr.url });
-    if (pr.reviewDecision === 'APPROVED' && pr.mergeable === 'MERGEABLE' && pr.statusCheckRollup !== 'FAILURE')
+    if (pr.reviewDecision === 'APPROVED' && pr.mergeable === 'MERGEABLE' && (pr.statusCheckRollup === 'SUCCESS' || pr.statusCheckRollup === 'NONE')) // not while checks still run
       out.push({ id: 'pr-ready-' + pr.number, category: 'PRs', severity: 'info', title: `PR #${pr.number} approved and mergeable`, detail: pr.title, url: pr.url, fix: { type: 'pr-merge', label: 'Merge…', number: pr.number, method: 'squash', deleteBranch: true } });
   }
   return out;

@@ -155,3 +155,21 @@ test('from an AppImage, agents get an unpacked copy (no FUSE under NoNewPrivs): 
   assert.ok(!again.display.some((d) => d.startsWith('unpack')), 'already unpacked: not done twice');
   fs.rmSync(home, { recursive: true, force: true });
 });
+
+test('a JSON client file changed after the preview is not overwritten; a symlinked config stays a symlink', async () => {
+  const { home, ac } = setup();
+  const real = path.join(home, 'dotfiles', 'mcp.json');
+  put(real, JSON.stringify({ mcpServers: {} }));
+  fs.mkdirSync(path.join(home, '.cursor'), { recursive: true });
+  const file = path.join(home, '.cursor', 'mcp.json');
+  fs.symlinkSync(real, file);
+  const p = ac.plan('cursor', {});
+  fs.writeFileSync(real, JSON.stringify({ mcpServers: { added: { command: 'y' } } })); // the agent rewrote it meanwhile
+  const r = await ac.apply(p.token);
+  assert.equal(r.ok, false);
+  assert.match(r.results.at(-1).out, /changed since the preview/);
+  assert.deepEqual(read(real).mcpServers, { added: { command: 'y' } }, 'the newer content is kept');
+  assert.equal((await ac.apply(ac.plan('cursor', {}).token)).ok, true);
+  assert.ok(fs.lstatSync(file).isSymbolicLink(), 'written through the link');
+  assert.ok(read(real).mcpServers.gutcheck && read(real).mcpServers.added);
+});

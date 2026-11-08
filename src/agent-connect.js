@@ -68,6 +68,9 @@ function clients(home = os.homedir(), platform = process.platform, env = process
 }
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
+// The file's bytes as planned (null: no file yet), so apply can tell whether it changed since.
+const fileSha = (f) => { try { return crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'); } catch { return null; } };
+
 function readJson(file) {
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return e.code === 'ENOENT' ? { missing: true, data: {} } : { error: `Cannot read ${file}: ${e.message}` }; }
@@ -175,7 +178,7 @@ function createAgentConnect(opts = {}) {
       if (remove) { if (!next[c.key][NAME]) return { ok: false, error: `GutCheck is not in ${c.file}.` }; delete next[c.key][NAME]; }
       else next[c.key][NAME] = c.entry(cmd);
       const content = JSON.stringify(next, null, 2) + '\n';
-      const steps = [...unpack, { kind: 'json', file: c.file, content, backup: !r.missing }];
+      const steps = [...unpack, { kind: 'json', file: c.file, content, backup: !r.missing, expect: fileSha(c.file) }];
       p = { title: `${remove ? 'Remove GutCheck from' : 'Add GutCheck to'} ${c.name}`, steps, display: [...unpack.filter((x) => x.label).map((x) => x.label), `${r.missing ? 'create' : 'update'} ${c.file}${r.missing ? '' : ` (backup: ${path.basename(c.file)}.gutcheck.bak)`}`], preview: remove ? null : JSON.stringify({ [c.key]: { [NAME]: c.entry(cmd) } }, null, 2), note: c.restart ? `Restart ${c.name} to pick it up.` : null };
     }
     const token = crypto.randomBytes(16).toString('hex');
@@ -192,7 +195,7 @@ function createAgentConnect(opts = {}) {
     const r = readJson(file);
     if (r.error) return { ok: false, error: r.error };
     const content = JSON.stringify({ ...r.data, cleanupPeriodDays: days }, null, 2) + '\n';
-    const p = { title: `Keep Claude Code session history for ${days} days`, steps: [{ kind: 'json', file, content, backup: !r.missing }], display: [`${r.missing ? 'create' : 'update'} ${file}: "cleanupPeriodDays": ${days}${r.data.cleanupPeriodDays != null ? ` (was ${r.data.cleanupPeriodDays})` : ' (default was 30)'}`], note: 'Claude Code removes older sessions the next time it starts. Sessions older than this can no longer be resumed.', client: { name: 'Claude Code', file } };
+    const p = { title: `Keep Claude Code session history for ${days} days`, steps: [{ kind: 'json', file, content, backup: !r.missing, expect: fileSha(file) }], display: [`${r.missing ? 'create' : 'update'} ${file}: "cleanupPeriodDays": ${days}${r.data.cleanupPeriodDays != null ? ` (was ${r.data.cleanupPeriodDays})` : ' (default was 30)'}`], note: 'Claude Code removes older sessions the next time it starts. Sessions older than this can no longer be resumed.', client: { name: 'Claude Code', file } };
     const token = crypto.randomBytes(16).toString('hex');
     plans.set(token, { ...p, expires: Date.now() + PLAN_TTL });
     return { ok: true, token, title: p.title, display: p.display, preview: null, note: p.note, allowActions: false };
@@ -245,11 +248,14 @@ function createAgentConnect(opts = {}) {
         if (!r.ok && !s.optional) { ok = false; break; }
       } else {
         try {
+          // Agents rewrite their settings often: content built at plan time must not undo a later change.
+          if ('expect' in s && fileSha(s.file) !== s.expect) throw new Error('The file changed since the preview. Review it again.');
           fs.mkdirSync(path.dirname(s.file), { recursive: true });
+          const file = fs.existsSync(s.file) ? fs.realpathSync(s.file) : s.file; // a symlinked dotfile stays a symlink
           const bak = s.file + '.gutcheck.bak';
-          if (s.backup && !fs.existsSync(bak)) fs.copyFileSync(s.file, bak); // the user's original, kept once
-          fs.writeFileSync(s.file + '.tmp', s.content, { mode: 0o600 });
-          fs.renameSync(s.file + '.tmp', s.file);
+          if (s.backup && !fs.existsSync(bak)) fs.copyFileSync(file, bak); // the user's original, kept once
+          fs.writeFileSync(file + '.tmp', s.content, { mode: 0o600 }); // agent configs can hold tokens
+          fs.renameSync(file + '.tmp', file);
           results.push({ text: `wrote ${s.file}`, ok: true, out: '' });
         } catch (e) { results.push({ text: `write ${s.file}`, ok: false, out: String(e.message) }); ok = false; }
       }

@@ -29,6 +29,7 @@ const PHASES = [
   'Remove clutter',
   'Repository settings and housekeeping',
   'Code quality',
+  'Send it to GitHub',
 ];
 
 const FILE_HELP = {
@@ -67,8 +68,9 @@ function fixFor(f, r) {
   if (id === 'root-sprawl' || id === 'root-media' || id === 'root-archives') return { phase: 7, rank: 6, why: 'The repo root is crowded.', cmds: [], note: 'Move files into src/, scripts/, docs/ or assets/ with "git mv" and update references. Ask before moving anything the build depends on.' };
 
   if (id === 'git-detached') return { phase: 1, rank: 0, why: 'Commits made on a detached HEAD can be lost.', cmds: ['git switch -c rescue-work   # keeps any commits made here', `# or go back: git switch ${D}`] };
-  if (id === 'git-dirty') return { phase: 1, rank: 1, why: 'Uncommitted work is not backed up.', cmds: ['git status --short', '# review the files, make sure none are secrets or clutter, then:', 'git add -A', 'git commit -m "<describe the change>"'], note: 'Do the "Protect secrets" and "Remove clutter" steps first so they are not committed by accident.' };
-  if (id === 'git-behind') return { phase: 1, rank: 2, why: 'Local branch is behind its upstream.', cmds: ['git pull --ff-only'] };
+  if (id === 'git-dirty') return { phase: 1, rank: 2, why: 'Uncommitted work is not backed up.', cmds: ['git status --short', '# review the files, make sure none are secrets or clutter, then:', 'git add -A', 'git commit -m "<describe the change>"'], note: 'Do the "Protect secrets" and "Remove clutter" steps first so they are not committed by accident.' };
+  // Pull before anything is committed: a fast-forward needs no local commits (Fix all runs the same order).
+  if (id === 'git-behind') return { phase: 1, rank: 1, why: 'Local branch is behind its upstream.', cmds: ['git pull --ff-only'], note: 'Pull before committing anything, so it can fast-forward.' };
   if (id === 'git-ahead') return { phase: 1, rank: 3, why: 'Unpushed commits exist only on this machine.', cmds: ['git push'] };
   if (id === 'git-no-upstream') return { phase: 1, rank: 4, why: 'Branch is not tracking a remote.', cmds: [`git push -u origin ${sq(g.branch || 'HEAD')}`] };
 
@@ -226,15 +228,21 @@ function stepsFor(r, c, q, tt) {
   for (const f of [...(r.findings || []), ...((c && c.advice) || []), ...qAdvice, ...((tt && tt.advice) || [])]) {
     const fx = fixFor(f, r);
     if (!fx) continue;
-    steps.push({ ...fx, sev: f.severity, title: f.title, detail: f.detail });
+    steps.push({ ...fx, id: f.id, sev: f.severity, title: f.title, detail: f.detail });
   }
   const cs = clutterStep(c);
   if (cs) steps.push({ ...cs, sev: cs.severity });
-  // Dedupe identical titles (advice and findings can overlap) and order: phase, rank, severity.
+  // Dedupe by finding id (two failed runs of one workflow share a title but are two steps), and order:
+  // phase, rank, severity.
   const seen = new Set();
-  return steps
-    .filter((s) => (seen.has(s.title) ? false : seen.add(s.title)))
+  const out = steps
+    .filter((s) => { const k = s.id || s.title; return seen.has(k) ? false : seen.add(k); })
     .sort((a, b) => a.phase - b.phase || a.rank - b.rank || SEV[a.sev] - SEV[b.sev]);
+  // Every commit above still needs to reach GitHub: one push at the end, as Fix all does.
+  if (r.remote && !r.remote.unreachable && out.some((s) => s.cmds.some((c) => /\bgit (?:add -A && git )?commit\b/.test(c)))) {
+    out.push({ phase: PHASES.length - 1, rank: 0, sev: 'info', title: 'Push the commits', why: 'The commits made in the steps above exist only on this machine until they are pushed.', cmds: [r.git && r.git.upstream ? 'git push' : `git push -u origin ${sq((r.git && r.git.branch) || 'HEAD')}`] });
+  }
+  return out;
 }
 
 function renderSteps(steps, level = 2) {

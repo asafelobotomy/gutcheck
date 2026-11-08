@@ -35,7 +35,13 @@ async function apply(p, ctx = {}) {
   const io = ctx.fs;
   const results = [];
   for (const s of p.steps) {
-    if (s.kind === 'check') {
+    if (s.kind === 'check' && s.expectFail) {
+      // The command must fail in the expected way (for example GitHub's 404 for "no protection yet").
+      const r = await ctx.run(s.cmd, s.args, { cwd: s.cwd });
+      const same = !r.ok && s.expectFail.test(`${r.stdout}\n${r.stderr}`);
+      results.push({ text: s.display, ok: same, out: same ? '' : r.ok ? 'It changed since the scan. Rescan and review it again.' : (r.stdout + r.stderr).trim().slice(-500) });
+      if (!same) return { ok: false, results };
+    } else if (s.kind === 'check') {
       const r = await ctx.run(s.cmd, s.args, { cwd: s.cwd });
       const now = r.ok ? r.stdout.trimEnd() : null; // not trim(): " M a" keeps its leading status space
       // subset: fewer lines than previewed is fine (a .gitignore added just before hides some), but
@@ -73,7 +79,8 @@ async function apply(p, ctx = {}) {
         const st = io.lstatSync(s.path); // throws ENOENT when it is already gone
         if (s.fileStat && (st.size !== s.fileStat.size || st.mtimeMs !== s.fileStat.mtime)) throw new Error('Changed since the preview. Rescan and review it again.');
         // Might have been committed since the preview: never remove anything git tracks.
-        const tr = await ctx.run('git', [...READONLY_GIT, 'ls-files', '-z', '--', s.rel], { cwd: s.root });
+        // --literal-pathspecs: "a*b.tmp" is that one file, not a pattern that matches a tracked axb.tmp.
+        const tr = await ctx.run('git', [...READONLY_GIT, '--literal-pathspecs', 'ls-files', '-z', '--', s.rel], { cwd: s.root });
         if (!tr.ok || tr.stdout) throw new Error('Tracked by git (or could not be checked): not removed.');
         if (s.mode === 'trash') await ctx.trash(s.path);
         else io.rmSync(s.path, { recursive: true, force: true });
@@ -91,8 +98,11 @@ async function apply(p, ctx = {}) {
         const cur = io.readFileSync(s.path, 'utf8');
         if (require('node:crypto').createHash('sha256').update(cur).digest('hex') !== s.expect) throw new Error('Changed since the preview. Rescan and review it again.');
         if (s.backup) { io.mkdirSync(path.dirname(s.backup), { recursive: true, mode: 0o700 }); io.writeFileSync(s.backup, cur, { mode: 0o600 }); }
-        io.writeFileSync(s.path + '.gutcheck-tmp', s.content);
-        io.renameSync(s.path + '.gutcheck-tmp', s.path);
+        // A new temp file (wx: never one that is already there, or a link someone placed), with the
+        // original's permissions, then renamed over it.
+        const tmp = `${s.path}.gutcheck-${require('node:crypto').randomBytes(4).toString('hex')}.tmp`;
+        io.writeFileSync(tmp, s.content, { flag: 'wx', mode: io.statSync(s.path).mode & 0o7777 });
+        io.renameSync(tmp, s.path);
         results.push({ text: s.display, ok: true, out: '' });
       } catch (e) {
         results.push({ text: s.display, ok: false, out: String(e.message) });

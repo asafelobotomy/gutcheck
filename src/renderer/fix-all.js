@@ -23,6 +23,9 @@
   const step = (a) => (a.type === 'add-file' && a.template === 'gitignore' ? 1 : STEP[a.type] ?? 9);
   const AUTO = new Set(['add-file', 'run-rerun', 'pull', 'push', 'delete-merged', 'security-enable', 'protect-branch', 'gitignore-append', 'worktree-prune', 'repo-edit', 'permissions-prune']);
   const NOT_HERE = { 'claude-cleanup-days': 'a setting for this machine, not this repo' };
+  // Files whose content is the owner's call (which licence, what the README says, who owns the code,
+  // which CI): asked in the wizard, never added on their own. A licence starts on "leave it".
+  const OWNER_FILES = { license: 1, readme: 0, codeowners: 0, 'ci-node': 0 };
 
   const leave = (label = 'Leave it for now') => ({ label, action: null });
 
@@ -38,6 +41,7 @@
       case 'npm-install': return { ...base, pick: 1, choices: [{ label: `Run ${fix.label || 'the install'} (runs the packages' install scripts)`, action: { type: 'npm-install' } }, leave('Skip')] };
       case 'split-instructions': return { ...base, pick: 0, choices: [{ label: `Split ${fix.file}: keep the core, move the largest sections to docs/agents/ (every line kept)`, action: fix }, leave()] };
       case 'lsp-setup': return { ...base, pick: 1, choices: [{ label: 'Set it up (installs software)', action: fix }, leave('Skip')] };
+      case 'add-file': return { ...base, pick: OWNER_FILES[fix.template] ?? 0, choices: [{ label: `${fix.label || 'Add the file'} and commit it${fix.template === 'license' ? ' (check the licence is the one you want)' : ''}`, action: { ...fix, commit: true } }, leave('Skip')] };
       case 'tests-run': return { ...base, pick: 1, choices: [{ label: 'Run it (executes the project\'s code)', action: fix }, leave('Skip')] };
       default: return { ...base, pick: 0, choices: [{ label: fix.label || 'Do it', action: fix }, leave()] };
     }
@@ -54,7 +58,7 @@
       if (!f.fix) continue;
       const { label, ...fix } = f.fix;
       if (NOT_HERE[fix.type]) { skipped.push({ id: f.id, title: f.title, reason: NOT_HERE[fix.type] }); continue; }
-      const auto = AUTO.has(fix.type) && !(fix.type === 'repo-edit' && fix.deleteBranchOnMerge !== true);
+      const auto = AUTO.has(fix.type) && !(fix.type === 'repo-edit' && fix.deleteBranchOnMerge !== true) && !(fix.type === 'add-file' && fix.template in OWNER_FILES);
       if (!auto) { decisions.push(decision(f, f.fix)); continue; }
       const action = fix.type === 'add-file' ? { ...fix, commit: true } : fix; // each added file is its own commit
       const key = JSON.stringify(action);
@@ -71,6 +75,10 @@
     const commits = all.some((a) => (a.type === 'add-file' && a.commit) || a.type === 'commit-all');
     if (commits && !all.some((a) => a.type === 'push') && r.remote && !r.remote.unreachable && g.branch && !g.detached) all.push({ type: 'push', sev: 'warn' });
     const sorted = all.map((a, i) => ({ a, i })).sort((x, y) => step(x.a) - step(y.a) || SEV[x.a.sev] - SEV[y.a.sev] || x.i - y.i).map(({ a }) => { const { sev, ...rest } = a; return rest; });
+    // .gitignore rules appended just before the owner's commit change .gitignore itself.
+    const gi = sorted.findIndex((a) => a.type === 'gitignore-append');
+    const ci = sorted.findIndex((a) => a.type === 'commit-all');
+    if (gi >= 0 && ci > gi) sorted[ci] = { ...sorted[ci], afterGitignore: true };
     const def = r && r.remote && r.remote.defaultBranch;
     const note = commits && def && g.branch && g.branch !== def ? `You are on ${g.branch}, not ${def}: commits go to ${g.branch}.` : null;
     return { actions: sorted, note };

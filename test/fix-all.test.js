@@ -14,6 +14,7 @@ const repoOf = (findings, o = {}) => ({ name: 'app', path: '/w/app', findings, r
 
 test('plan: automatic fixes run as they are, owner choices become decisions, machine settings are left out', () => {
   const r = repoOf([
+    F('no-security', 'warn', { type: 'add-file', label: 'Add SECURITY.md', template: 'security' }),
     F('no-license', 'error', { type: 'add-file', label: 'Add MIT licence', template: 'license' }),
     F('git-dirty', 'warn', { type: 'commit-all', label: 'Commit all…' }),
     F('git-ahead', 'warn', { type: 'push', label: 'Push' }),
@@ -27,7 +28,8 @@ test('plan: automatic fixes run as they are, owner choices become decisions, mac
   const p = FixAll.plan(r);
   assert.deepEqual(p.actions.map((a) => a.type), ['add-file', 'push', 'repo-edit'], 'two findings with the same push fix become one push');
   assert.equal(p.actions[0].commit, true, 'each added file is committed on its own');
-  assert.deepEqual(p.decisions.map((d) => d.id), ['git-dirty', 'no-description', 'pr-ready-4']);
+  assert.deepEqual(p.decisions.map((d) => d.id), ['no-license', 'git-dirty', 'no-description', 'pr-ready-4'], 'which licence is the owner\'s call');
+  assert.equal(p.decisions[0].choices[p.decisions[0].pick].action, null, 'a licence starts on "leave it"');
   assert.deepEqual(p.skipped.map((s) => s.id), ['agent-history']);
   const install = FixAll.decision(F('deps', 'warn', {}), { type: 'npm-install', label: 'npm ci' });
   assert.equal(install.choices[install.pick].action, null, 'choices that run project code start on "leave it"');
@@ -56,7 +58,7 @@ test('order: sync, save work, dependencies, files, cleanup, push, GitHub, test r
 test('app: Fix all asks the owner\'s choices, then one review in run order where any step can be unticked', async () => {
   const r = { path: '/w/app', name: 'app', score: 40, grade: 'C', prs: [], ci: { failed: [] }, alerts: [], files: { license: false, readme: true }, remote: { owner: 'o', name: 'app', url: 'https://github.com/o/app', defaultBranch: 'main', pushedAt: new Date().toISOString() },
     git: { branch: 'main', dirty: 2, ahead: 0, behind: 0, branches: [{ name: 'main', current: true, date: new Date().toISOString() }], remoteBranches: [], mergedBranches: [] },
-    findings: [F('no-license', 'error', { type: 'add-file', label: 'Add MIT licence', template: 'license' }, 'Missing LICENSE'), F('git-dirty', 'warn', { type: 'commit-all', label: 'Commit all…' }, '2 uncommitted changes'), F('pr-ready-4', 'info', { type: 'pr-merge', label: 'Merge…', number: 4 }, 'PR #4 approved')] };
+    findings: [F('no-security', 'warn', { type: 'add-file', label: 'Add SECURITY.md', template: 'security' }, 'Missing SECURITY.md'), F('git-dirty', 'warn', { type: 'commit-all', label: 'Commit all…' }, '2 uncommitted changes'), F('pr-ready-4', 'info', { type: 'pr-merge', label: 'Merge…', number: 4 }, 'PR #4 approved')] };
   const t = await boot({ repos: [r] });
   const applied = [];
   let plannedItems = [];
@@ -112,7 +114,8 @@ test('cli: fix <repo> all lists every step in order and the choices, and runs th
     assert.match(dry.out, /Nothing was run/);
     const yes = await run(['fix', 'alpha', 'all', '--yes', '--root', root]);
     assert.equal(yes.code, 0, yes.err + yes.out);
-    assert.ok(fs.existsSync(path.join(d, '.gitignore')) && fs.existsSync(path.join(d, 'LICENSE')));
+    assert.ok(fs.existsSync(path.join(d, '.gitignore')));
+    assert.ok(!fs.existsSync(path.join(d, 'LICENSE')), 'a licence is only added when the owner picks it');
     assert.match(sh('log', '--format=%s'), /Add \.gitignore/);
     assert.ok(fs.existsSync(path.join(d, 'wip.txt')) && /wip\.txt/.test(sh('status', '--porcelain')), 'the owner\'s own uncommitted work is left alone');
   } finally { for (const x of [root, data]) fs.rmSync(x, { recursive: true, force: true }); }
@@ -146,4 +149,30 @@ test('app: each repo with a dangerous plan needs its name typed, and the names g
   type(inputs[1], 'lib');
   click(applyBtn()); await tick();
   assert.deepEqual(sent, [[['a1', 'l1', 's1'], { a1: 'app', l1: 'lib' }]]);
+});
+
+test('Fix all end to end: .gitignore rules, then the owner\'s commit, then a file, in one batch', async () => {
+  const { createService } = require('../src/service');
+  const { scanRepo } = require('../src/scanner');
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gutcheck-fae-'));
+  const sh = (...a) => execFileSync('git', a, { cwd: d, encoding: 'utf8' });
+  try {
+    sh('init', '-q', '-b', 'main'); sh('config', 'user.email', 't@t'); sh('config', 'user.name', 'T Owner');
+    fs.writeFileSync(path.join(d, '.gitignore'), 'node_modules/\n'); fs.writeFileSync(path.join(d, 'a.js'), '1\n');
+    sh('add', '-A'); sh('commit', '-qm', 'init');
+    fs.writeFileSync(path.join(d, 'a.js'), '2\n');
+    const known = new Map([[d, await scanRepo(d)]]);
+    const svc = createService({ known, settings: () => ({}), audit() {} });
+    const r = known.get(d);
+    const { actions } = FixAll.order(r, [{ type: 'gitignore-append', entries: ['*.log'], sev: 'warn' }, { type: 'add-file', template: 'security', commit: true, sev: 'warn' }], [{ action: { type: 'commit-all', message: 'Save work' }, sev: 'warn' }]);
+    assert.deepEqual(actions.map((a) => a.type), ['gitignore-append', 'commit-all', 'add-file']);
+    const plans = await svc.planActions(actions.map((action) => ({ dir: d, action })));
+    assert.ok(plans.every((p) => p.ok), JSON.stringify(plans.filter((p) => !p.ok)));
+    const out = await svc.applyActions(plans.map((p) => p.token));
+    assert.deepEqual(out.map((o) => o.ok), [true, true, true], JSON.stringify(out.map((o) => o.results)));
+    assert.equal(sh('status', '--porcelain'), '', 'the .gitignore change went into the owner\'s commit');
+    const log = sh('log', '--format=%s').trim().split('\n');
+    assert.equal(log.length, 3);
+    assert.equal(log[1], 'Save work');
+  } finally { fs.rmSync(d, { recursive: true, force: true }); }
 });

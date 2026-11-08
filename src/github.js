@@ -35,7 +35,7 @@ fragment F on Repository {
   pullRequests(states: OPEN, first: 30, orderBy: { field: UPDATED_AT, direction: DESC }) {
     totalCount
     nodes {
-      number title body url isDraft updatedAt mergeable reviewDecision headRefName
+      number title body url isDraft updatedAt mergeable reviewDecision headRefName headRefOid
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
     }
   }
@@ -126,7 +126,7 @@ function toSnapshot(ref, n) {
     },
     prs: ((n.pullRequests && n.pullRequests.nodes) || []).map((p) => ({
       number: p.number, title: p.title, url: p.url, isDraft: p.isDraft, updatedAt: p.updatedAt,
-      mergeable: p.mergeable, reviewDecision: p.reviewDecision, headRefName: p.headRefName,
+      mergeable: p.mergeable, reviewDecision: p.reviewDecision, headRefName: p.headRefName, headRefOid: p.headRefOid || null,
       // Only the packages a Dependabot PR bumps are kept from its body, never the body itself.
       updates: /^dependabot\//.test(p.headRefName || '') ? parseUpdates(p.title, p.body) : [],
       statusCheckRollup: rollup(p.commits && p.commits.nodes[0] && p.commits.nodes[0].commit.statusCheckRollup && p.commits.nodes[0].commit.statusCheckRollup.state),

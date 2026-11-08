@@ -114,6 +114,8 @@ test('LSP: a missing or turned-off plugin gets a Set up fix that installs or ena
     const p = await plan(r, { type: 'lsp-setup', plugin: 'pyright-lsp' }, { env: { PATH: bin } });
     assert.equal(p.ok, true, p.error);
     assert.deepEqual(p.display.map((x) => x.text), ['claude plugin install pyright-lsp@claude-plugins-official --scope user', 'npm install -g pyright']);
+    assert.ok(p.steps.every((x) => x.cwd === os.homedir()), 'installs run from the home folder, not the repo (its .npmrc)');
+    assert.equal(p.risk, 'danger', 'a global install changes the machine: the repo name must be typed');
     assert.equal((await plan(r, { type: 'lsp-setup', plugin: 'nope' })).ok, false);
   } finally { rm(bin); }
 });
@@ -161,4 +163,22 @@ test('stale agent config: old .gutcheck.bak and interrupted-write temp files are
     assert.equal(ac.planFix({ type: 'plugin-disable', plugin: 'x' }).ok, false, 'no claude binary here');
     assert.equal(ac.planFix({ type: 'skill-remove', path: '/etc' }).ok, false, 'only skills found in the config can be removed');
   } finally { rm(home, data); }
+});
+
+test('split-instructions keeps imports of the other agents\' files, and offers git checkout as undo only for a clean file', async () => {
+  const d = repo();
+  try {
+    execFileSync('git', ['config', 'user.email', 't@t'], { cwd: d }); execFileSync('git', ['config', 'user.name', 't'], { cwd: d });
+    put(d, 'AGENTS.md', big('Shared rules', 4));
+    put(d, 'CLAUDE.md', `# Project\n\n@AGENTS.md\n\n${big('Build', 9)}${big('Release', 9)}`);
+    const r = { path: d, name: 'x', git: {}, agents: {} };
+    const dirty = await plan(r, { type: 'split-instructions', file: 'CLAUDE.md' });
+    assert.equal(dirty.ok, true, dirty.error);
+    assert.doesNotMatch(dirty.undo, /git checkout/, 'uncommitted edits would be lost');
+    execFileSync('git', ['add', '-A'], { cwd: d }); execFileSync('git', ['commit', '-qm', 'x'], { cwd: d });
+    const clean = await plan(r, { type: 'split-instructions', file: 'CLAUDE.md' });
+    assert.match(clean.undo, /^git checkout -- CLAUDE\.md/);
+    assert.equal((await apply(clean, {})).ok, true);
+    assert.match(fs.readFileSync(path.join(d, 'CLAUDE.md'), 'utf8'), /^@AGENTS\.md$/m, 'still an import');
+  } finally { rm(d); }
 });
