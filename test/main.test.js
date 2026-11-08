@@ -140,7 +140,7 @@ test('a login item that cannot be written comes back as a message, not a crash',
   assert.equal(out.closeToTray, true, 'the other options are still saved');
 });
 
-test('agents: Read-only blocks connecting, the actions choice is remembered, only the agents\' docs open', async () => {
+test('agents: Read-only blocks connecting, reviewing does not save the actions choice, only the agents\' docs open', async () => {
   const { call, opened } = load();
   const st = await call('agents:status');
   assert.ok(Array.isArray(st.clients) && st.clients.length >= 5);
@@ -148,7 +148,7 @@ test('agents: Read-only blocks connecting, the actions choice is remembered, onl
   assert.match((await call('agents:status', { allowActions: true })).command, /--allow-actions/);
   assert.equal((await call('agents:status')).allowActions, false, 'looking does not save');
   await call('agents:plan', { id: 'nope', allowActions: true });
-  assert.equal((await call('agents:status')).allowActions, true, 'planning saves the choice');
+  assert.equal((await call('agents:status')).allowActions, false, 'planning does not save the choice; only Connect does');
   await call('settings:set', { readOnly: true });
   assert.match((await call('agents:plan', { id: 'cursor' })).error, /Read-only/);
   assert.match((await call('agents:apply', { token: 'x' })).error, /Read-only/);

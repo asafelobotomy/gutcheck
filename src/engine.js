@@ -5,12 +5,11 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { discover, scanRepo, scanAll } = require('./scanner');
-const github = require('./github');
 const { createService } = require('./service');
 const { createSettingsStore } = require('./settings');
 const { appendAudit, readAudit } = require('./audit');
 const { expandHome } = require('./util');
+const { createWorkspaceScanner } = require('./workspace-scan');
 const { createPolicyStore, driftReport, repoKey } = require('./policy');
 const { createSeenStore } = require('./schedule');
 const FixAll = require('./renderer/fix-all');
@@ -60,12 +59,11 @@ function createEngine(opts = {}) {
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   const store = createSettingsStore(path.join(dir, 'settings.json'));
   const known = new Map();
-  let root = null;
-  let scanning = null;
   const allowActions = !!opts.allowActions;
+  let ws = null; // the shared workspace scanner, made once the service exists
   const settings = () => {
     const s = store.load();
-    return { ...s, root: root || s.root, readOnly: !allowActions || !!s.readOnly };
+    return { ...s, root: (ws && ws.root()) || s.root, readOnly: !allowActions || !!s.readOnly };
   };
   const trendFile = path.join(dir, 'trend.json');
   const trendStore = {
@@ -75,41 +73,36 @@ function createEngine(opts = {}) {
   const auditFile = path.join(dir, 'audit.log');
   const policy = createPolicyStore(dir);
   const seen = createSeenStore(path.join(dir, 'seen.json'));
-  let lastFresh = null; // new findings found by the last scan (null: nothing to compare with)
   // Machine-level agent fixes (plugins, MCP servers, skills, stale config) plan and apply through
   // agent-connect.js; their tokens carry an "a:" prefix so apply() can route them.
   let agc = null;
   const agentsCtl = () => (agc = agc || require('./agent-connect').createAgentConnect({ env, launch: { dataDir: dir }, audit: (e) => appendAudit(auditFile, { ...e, via: opts.via || 'cli' }) }));
   const service = createService({
     known, settings, audit: (e) => appendAudit(auditFile, { ...e, via: opts.via || 'cli' }),
-    rescan: (d) => scanRepo(d, { deep: !!store.load().deep, policy: policy.load }), trendStore,
+    rescan: async (d) => (await ws.refresh(d)) || known.get(d), trendStore,
     updateSettings: (p) => store.update(p && p.quality ? { quality: p.quality } : {}), // headless callers may only change quality settings
   });
 
-  // Scan a workspace (default: the folder the app last scanned). Concurrent calls share one scan.
-  async function scan({ root: r, deep = false, onProgress } = {}) {
-    if (scanning) return scanning;
-    const want = r || store.load().root;
-    if (!want) return { ok: false, error: 'No workspace folder: pass root (for example ~/Projects).' };
-    const abs = expandHome(String(want).trim(), os.homedir());
-    try { if (!fs.statSync(abs).isDirectory()) throw new Error(); } catch { return { ok: false, error: `Folder does not exist: ${abs}` }; }
-    scanning = (async () => {
-      const dirs = discover(abs);
-      known.clear();
-      service.forgetPlans();
-      root = abs;
-      const results = await scanAll(dirs, { deep: !!deep, policy: policy.load }, (res, done, total) => { known.set(res.path, res); if (onProgress) onProgress(done, total, res.name); });
-      service.recordScan(abs, results);
-      const rec = seen.record(abs, results);
-      lastFresh = rec.compared ? rec.fresh : null;
-      if (!store.load().root) store.update({ root: abs }); // remembered for later calls; never replaces the app's own choice
-      return { ok: true, root: abs, count: results.length, rate: github.getRate() };
-    })();
-    try { return await scanning; } finally { scanning = null; }
+  ws = createWorkspaceScanner({ known, service, policy: policy.load, seen });
+  const root = () => ws.root();
+
+  // Scan a workspace (default: the folder last scanned from the command line or MCP, else the app's).
+  // Concurrent calls for the same folder share one scan; another folder waits for it, then scans.
+  // recordSeen: compare with the stored findings and store these (only `new` does; other commands
+  // must not use up the "new since last scan" baseline).
+  async function scan({ root: r, deep = false, recordSeen = false, onProgress } = {}) {
+    const s = store.load();
+    const out = await ws.scan({ root: r || s.cliRoot || s.root || '', deep, recordSeen, onProgress });
+    if (out.ok && out.root !== s.cliRoot) store.update({ cliRoot: out.root }); // never replaces the app's own folder
+    return out;
   }
 
-  // Scan on first use, so a caller never has to know the order of calls.
-  const ensure = async ({ onProgress } = {}) => (known.size ? { ok: true, root } : scan({ onProgress }));
+  // Scan on first use, so a caller never has to know the order of calls. A scan in flight is waited
+  // for, so parallel calls never read a half-filled workspace.
+  const ensure = async ({ onProgress } = {}) => {
+    await ws.settled();
+    return known.size ? { ok: true, root: root() } : scan({ onProgress });
+  };
 
   // A repo by name, folder name or path. Ambiguous names list the candidates.
   function resolve(ref) {
@@ -119,7 +112,7 @@ function createEngine(opts = {}) {
     const hits = [...known.values()].filter((r) => r.name.toLowerCase() === ref.trim().toLowerCase() || (r.remote && `${r.remote.owner}/${r.remote.name}`.toLowerCase() === ref.trim().toLowerCase()));
     if (hits.length === 1) return { repo: hits[0] };
     if (hits.length > 1) return { error: `"${ref}" matches several repos: ${hits.map((r) => r.path).join(', ')}. Use the path.` };
-    return { error: `No repo "${ref}" in the scanned workspace (${root}). Known: ${[...known.values()].map((r) => r.name).sort().join(', ')}.` };
+    return { error: `No repo "${ref}" in the scanned workspace (${root()}). Known: ${[...known.values()].map((r) => r.name).sort().join(', ')}.` };
   }
 
   const summary = (r) => r.error ? { name: r.name, path: r.path, error: String(r.error) } : {
@@ -135,7 +128,7 @@ function createEngine(opts = {}) {
     if (!s.ok) return s;
     const list = [...known.values()].map(summary).sort((a, b) => (a.score ?? -1) - (b.score ?? -1));
     const ok = list.filter((r) => !r.error);
-    return { ok: true, root, count: list.length, averageScore: ok.length ? Math.round(ok.reduce((n, r) => n + r.score, 0) / ok.length) : null, repos: list };
+    return { ok: true, root: root(), count: list.length, averageScore: ok.length ? Math.round(ok.reduce((n, r) => n + r.score, 0) / ok.length) : null, repos: list };
   }
 
   async function findings({ repo, severity, category, limit = 200, onProgress } = {}) {
@@ -195,7 +188,7 @@ function createEngine(opts = {}) {
   async function workspace({ onProgress } = {}) {
     const s = await ensure({ onProgress });
     if (!s.ok) return s;
-    return { ok: true, root, advice: (await service.wsAdvice(root)) || [] };
+    return { ok: true, root: root(), advice: (await service.wsAdvice(root())) || [] };
   }
 
   // items: [{ repo, action: { type, ...params } } | { repo, finding: '<finding id>', params? }]. A finding id
@@ -255,16 +248,17 @@ function createEngine(opts = {}) {
     const res = [];
     const failed = new Set(); // a failed plan stops the later ones for the same repo
     for (const t of tokens) {
-      if (typeof t === 'string' && t.startsWith('a:')) { const r = await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm, failed })));
+      if (typeof t === 'string' && t.startsWith('a:')) { const r = store.load().readOnly ? { ok: false, error: 'Read-only mode is on in the GutCheck app.' } : await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm, failed })));
     }
     return { ok: res.every((r) => r.ok), results: res.map((r) => ({ ok: r.ok, ...(r.skipped ? { skipped: true } : {}), repo: r.repoName, title: r.title, error: r.error, steps: (r.results || []).map((x) => ({ cmd: x.text, ok: x.ok, output: x.out || undefined })) })) };
   }
 
   // Findings that were not there at the previous scan of this workspace (stored ids only).
   async function fresh({ rescan = false, onProgress } = {}) {
-    const s = rescan ? await scan({ onProgress }) : await ensure({ onProgress });
+    const s = rescan ? await scan({ root: root() || undefined, deep: ws.deep(), recordSeen: true, onProgress }) : await ensure({ onProgress });
     if (!s.ok) return s;
-    return { ok: true, root, compared: lastFresh != null, findings: lastFresh || [] };
+    const f = ws.lastFresh();
+    return { ok: true, root: root(), compared: f != null, findings: f || [] };
   }
 
   // Ignore a finding with a reason (or stop ignoring it). Stored in GutCheck's data folder, logged.
@@ -277,7 +271,7 @@ function createEngine(opts = {}) {
     const res = remove ? policy.removeIgnore(key, String(finding || '')) : policy.setIgnore(key, String(finding || ''), reason);
     if (!res.ok) return res;
     appendAudit(auditFile, { ok: true, repo: r ? r.name : 'all repos', title: `${remove ? 'Stopped ignoring' : 'Ignored'} ${finding}${remove ? '' : `: ${res.reason}`}`, via: opts.via || 'cli' });
-    if (r) known.set(r.path, await scanRepo(r.path, { deep: !!store.load().deep, policy: policy.load }));
+    if (r) await ws.refresh(r.path); else await ws.refreshAll(); // an ignore for every repo changes them all
     return { ...res, file: policy.ignoreFile };
   }
 
@@ -289,7 +283,7 @@ function createEngine(opts = {}) {
 
   // Baseline drift: per rule, the repos that do not meet it. init writes a starting baseline.json.
   async function drift({ init = false, onProgress } = {}) {
-    if (init) { const i = policy.initBaseline(); known.clear(); return { ok: true, file: i.file, created: i.created }; }
+    if (init) { const i = policy.initBaseline(); await ws.refreshAll(); return { ok: true, file: i.file, created: i.created }; }
     const b = policy.load().baseline;
     if (!b) return { ok: true, file: policy.baselineFile, baseline: null, note: `No baseline yet. Run "gutcheck baseline init" (or pass init: true) to create ${policy.baselineFile}, then edit it.` };
     const s = await ensure({ onProgress });
@@ -305,9 +299,11 @@ function createEngine(opts = {}) {
     if (!s.ok) return s;
     const { scanUsage } = require('./agent-usage');
     const bin = require('./agent-connect').claudeBin();
+    const ro = live && !!store.load().readOnly; // Read-only mode turns the live check off, as in the app
+    live = live && !ro;
     const r = await scanUsage({ repos: [...known.values()].filter((x) => !x.error).map((x) => ({ path: x.path, name: x.name })), live: live && !!bin, bin, runner: require('./exec').run });
     if (live && bin) appendAudit(auditFile, { ok: true, repo: 'Agent setup', title: `Started ${(r.servers || []).length} MCP servers to check them (claude mcp list)`, via: opts.via || 'cli' });
-    return { ok: true, ...r, note: live && !bin ? 'Claude Code was not found, so servers were not checked.' : undefined };
+    return { ok: true, ...r, note: ro ? 'Read-only mode is on in the GutCheck app, so servers were not started.' : live && !bin ? 'Claude Code was not found, so servers were not checked.' : undefined };
   }
 
   const history = ({ limit = 50 } = {}) => ({ ok: true, entries: readAudit(auditFile, Math.max(1, Math.min(500, limit))) });

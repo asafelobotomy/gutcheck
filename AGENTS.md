@@ -13,7 +13,7 @@ GutCheck is an Electron app (plus a CLI and an MCP server) that checks the healt
 ## Layout
 
 - `src/main.js`: Electron wiring only (IPC, window, tray). `src/entry.js` picks app, `--cli` or `--mcp`.
-- `src/service.js`, `src/engine.js`: the logic behind the IPC handlers and the headless CLI/MCP, with dependencies injected so it runs without Electron.
+- `src/service.js`, `src/engine.js`: the logic behind the IPC handlers and the headless CLI/MCP, with dependencies injected so it runs without Electron. `src/workspace-scan.js` is the one workspace scan all three use (it owns the `known` map).
 - Checks: `scanner.js` collects, `checks.js` and `checks-hygiene.js` turn it into findings, `report.js` and `report-fixes.js` write the "Copy for LLM" plan.
 - Upkeep checks: `dep-automation.js` (Dependabot grouping, auto-merge), `release.js` (tags vs manifest, changelog).
 - The user's rules: `policy.js` (ignores with reasons, baseline drift), `schedule.js` (new-since-last-scan, scheduled scans). Report steps for these are in `report-upkeep.js`.

@@ -222,8 +222,9 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
   }
 
   const forgetPlans = () => plans.clear();
+  const hasPlans = () => [...plans.values()].some((v) => v.expires >= Date.now()); // a review may be open
 
-  return { planActions, applyActions, forgetPlans, clutterScan, qualityScan, testsScan, qualitySettings, setQualitySettings, reportText, copyReport, wsAdvice, recordScan, trend };
+  return { planActions, applyActions, forgetPlans, hasPlans, clutterScan, qualityScan, testsScan, qualitySettings, setQualitySettings, reportText, copyReport, wsAdvice, recordScan, trend };
 }
 
 module.exports = { createService };

@@ -10,7 +10,7 @@ const HELP = `GutCheck ${version}: health checks for every git repo in a folder.
 
 Usage: gutcheck <command> [options]
 
-  scan [folder]                 scan and list repos, worst first (default folder: the one last scanned)
+  scan [folder]                 scan and list repos, worst first (default folder: the last one scanned here, else the app's)
   new [--notify]                scan, then list only findings that were not there last scan; --notify
                                 also shows a desktop notification (for a cron job or systemd timer)
   findings                      every finding; filter with --repo, --severity error|warn|info, --category
@@ -121,7 +121,7 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
   const engine = createEngine({ allowActions: cmd === 'fix', env, via: 'cli' });
   const json = (v) => out(JSON.stringify(v, null, 2));
   const scanned = async () => {
-    const s = await engine.scan({ root: f.root || (cmd === 'scan' ? rest[0] : undefined), deep: !!f.deep, onProgress: (d, t) => { if (process.stderr.isTTY) process.stderr.write(`\rScanning ${d}/${t}…`); } });
+    const s = await engine.scan({ root: f.root || (cmd === 'scan' ? rest[0] : undefined), deep: !!f.deep, recordSeen: cmd === 'new', onProgress: (d, t) => { if (process.stderr.isTTY) process.stderr.write(`\rScanning ${d}/${t}…`); } });
     if (process.stderr.isTTY) process.stderr.write('\r\x1b[K');
     return s;
   };
@@ -152,8 +152,8 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
       if (!r.findings.length) { out('No new findings since the last scan.'); return 0; }
       r.findings.forEach((x) => out(`${icon[x.severity]} ${x.repo}: ${x.title}  [${x.id}]`));
       if (f.notify) {
-        const n = require('./schedule').notification(r.findings);
-        await require('./exec').run('notify-send', ['--app-name=GutCheck', n.title, n.body]);
+        const n = require('./schedule').notification(r.findings); // warnings and errors only, as in the app
+        if (n) await require('./exec').run('notify-send', ['--app-name=GutCheck', n.title, n.body]);
       }
       return 0;
     }

@@ -4,6 +4,30 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-07
+
+### Changed
+
+- The app, the command line and the MCP server share one workspace scan, so they behave the same way.
+- The command line remembers the last folder it scanned, separately from the app's.
+- The app, the CLI and MCP use the same data folder, including when `GUTCHECK_DATA_DIR` is set.
+- In Settings > AI agents, the "allow actions" choice is saved when you connect, not while you review.
+
+### Fixed
+
+- MCP: calls made while a scan is running wait for it to finish, instead of seeing only some of the repos.
+- MCP: asking for another folder while a scan is running scans that folder, instead of returning the first one.
+- Ignoring a finding in every repo, or creating a baseline, updates every repo straight away, in the app, the CLI and MCP.
+- Only `gutcheck new` and scheduled scans use up "new since last scan". Running `findings`, `report` or other commands in between no longer hides what `new` should report.
+- A repo whose scan failed, or whose GitHub data could not be fetched, keeps its previous findings, so they don't all come back as new later.
+- Deep and normal scans are compared separately, so findings that only a deep scan finds are not reported as new.
+- `gutcheck new --notify` notifies only about warnings and errors, as the app does.
+- A scheduled scan replaces the app's old results (no deleted repos or stale clutter, quality or test results). It waits while a change is open for review, and a failed one no longer leaves the progress bar showing.
+- A refused scan (no such folder, or one already running) no longer clears the results on screen.
+- A change or ignore that finishes after a new workspace scan no longer puts a repo from the old workspace back.
+- After a change, the repo is rescanned with the same depth (deep or not) as the scan it came from.
+- Read-only mode turns off the live MCP server check in `gutcheck_agent_usage`, and blocks machine-level agent fixes in `gutcheck_apply`.
+
 ## [0.26.1] - 2026-11-07
 
 ### Fixed
@@ -252,7 +276,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 - First release: health checks for every git repo in a folder.
 
-[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.26.1...HEAD
+[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.26.1...v0.27.0
 [0.26.1]: https://github.com/asafelobotomy/gutcheck/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.24.2...v0.25.0

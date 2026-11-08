@@ -146,8 +146,9 @@ async function runActions(items, { ask = true, lead = [] } = {}) {
   if (bad.length) toast(`Could not plan ${bad.length} change${bad.length === 1 ? '' : 's'}:\n` + bad.map((p) => `${p.repoName || '?'}: ${p.error}`).join('\n'));
   const chosen = await confirmPlans(good, { lead });
   if (!chosen || !chosen.length) return;
+  const gen = state.gen;
   const outs = await window.api.applyActions(chosen.map((p) => p.token), confirmOf(chosen));
-  for (const o of outs) if (o.res) state.repos.set(o.res.path, o.res);
+  if (gen === state.gen) for (const o of outs) if (o.res) state.repos.set(o.res.path, o.res); // not into a newer workspace
   const rate = outs.find((o) => o.rate)?.rate;
   if (rate) showRate(rate);
   renderStats(); renderList(); renderMain();
@@ -307,6 +308,8 @@ function select(dir) { state.selected = dir; state.view = 'repo'; renderList(); 
 async function startScan() {
   const root = $('root').value.trim();
   if (!root || state.scanning) return;
+  // Kept so a refused scan (no such folder, one already running) leaves the results on screen.
+  const prev = { repos: new Map(state.repos), clutter: state.clutter, quality: state.quality, tests: state.tests, selected: state.selected, view: state.view };
   state.gen++; state.scanError = {};
   state.scanning = true; state.clutter = null; state.quality = null; state.tests = null; state.picked.clear(); state.repos.clear(); state.selected = null; state.view = 'dashboard';
   $('ptext').textContent = 'Scanning…'; $('progress').hidden = false;
@@ -316,13 +319,20 @@ async function startScan() {
   finally { state.scanning = false; $('scan').disabled = false; $('progress').hidden = true; }
   showRate(out.rate);
   if (out.root) $('root').value = out.root; // "~/Projects" is shown as the folder it means
+  if (!out.ok && !state.repos.size) { Object.assign(state, prev); renderStats(); renderList(); }
   await loadTrend();
   if (!out.ok) toast(out.error, 'bad');
   else if (!out.count) toast('No git repositories found under that folder.', 'bad');
   renderMain();
 }
 
-window.api.onBegin(({ total }) => { $('progress').hidden = false; $('bar').style.width = '0'; $('progress').setAttribute('aria-valuenow', '0'); $('ptext').textContent = `Found ${total} repositories…`; });
+// A scan the app started on its own (scheduled) replaces the workspace too: drop the old results.
+function beginBackgroundScan() {
+  state.gen++; state.scanError = {};
+  state.clutter = null; state.quality = null; state.tests = null; state.picked.clear(); state.repos.clear();
+  renderStats(); renderList(); renderMain();
+}
+window.api.onBegin(({ total }) => { if (!state.scanning) beginBackgroundScan(); $('progress').hidden = false; $('bar').style.width = '0'; $('progress').setAttribute('aria-valuenow', '0'); $('ptext').textContent = `Found ${total} repositories…`; });
 
 // Repo results can arrive faster than we can usefully paint; coalesce to one render per frame.
 let paintQueued = false;

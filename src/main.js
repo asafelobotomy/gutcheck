@@ -1,23 +1,26 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, session, clipboard, Tray, Menu, nativeImage, Notification } = require('electron');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
-const { discover, scanRepo, scanAll } = require('./scanner');
+const { scanRepo } = require('./scanner');
 const github = require('./github');
 const { createService } = require('./service');
 const { appendAudit, readAudit } = require('./audit');
 const { run } = require('./exec');
-const { expandHome } = require('./util');
 const { createTrayController } = require('./tray');
 const { setAutostart, isAutostart, HIDDEN_FLAG } = require('./autostart');
 const { createSettingsStore } = require('./settings');
 const { createAgentConnect } = require('./agent-connect');
 const { createPolicyStore, driftReport } = require('./policy');
 const sched = require('./schedule');
+const { createWorkspaceScanner } = require('./workspace-scan');
+const { dataDir } = require('./paths');
+
+// The CLI and MCP server find the data folder through paths.js (GUTCHECK_DATA_DIR first); the app
+// uses the same one, so all three share settings, ignores and History.
+if (app.setPath) app.setPath('userData', dataDir());
 
 let win;
-let scanning = false;
 const RENDERER_FILE = path.join(__dirname, 'renderer', 'index.html');
 // Only our own bundled page may call privileged IPC. fileURLToPath also handles Windows drive letters.
 const trusted = (e) => {
@@ -84,44 +87,35 @@ handle('dir:pick', async () => {
 
 const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
-// One workspace scan, from the Scan button or the schedule. Results stream to the window if it exists.
-async function scanWorkspace(root, deep) {
-  scanning = true;
-  const send = (ch, d) => { if (win && !win.isDestroyed()) win.webContents.send(ch, d); };
-  try {
-    const dirs = discover(root);
-    known.clear();
-    service.forgetPlans(); // plans reviewed for the previous workspace can no longer run
-    send('scan:begin', { total: dirs.length });
-    const results = await scanAll(dirs, { deep: !!deep, policy: policyNow }, (res, done, total) => {
-      known.set(res.path, res);
-      send('scan:repo', { res, done, total });
-    });
-    service.recordScan(root, results);
-    const rec = seen().record(root, results);
-    updateSettings({ lastScanAt: Date.now() });
-    return { ok: true, root, count: results.length, rate: github.getRate(), fresh: rec.compared ? rec.fresh : null };
-  } finally {
-    scanning = false;
-  }
-}
+// One workspace scan, shared with the CLI and MCP (workspace-scan.js). Results stream to the window if it exists.
+const send = (ch, d) => { if (win && !win.isDestroyed()) win.webContents.send(ch, d); };
+let ws = null; // made once the service exists, below
 
 handle('scan:start', async (_e, { root, deep } = {}) => {
-  if (typeof root !== 'string' || !root.trim()) return { ok: false, error: 'Folder does not exist' };
-  root = expandHome(root.trim(), os.homedir());
-  if (!isDir(root)) return { ok: false, error: 'Folder does not exist' };
-  if (scanning) return { ok: false, error: 'A scan is already running' };
-  updateSettings({ root, deep: !!deep });
-  return scanWorkspace(root, deep);
+  const r = ws.resolveRoot(root);
+  if (r.error) return { ok: false, error: 'Folder does not exist' };
+  if (ws.busy()) return { ok: false, error: 'A scan is already running' };
+  updateSettings({ root: r.root, deep: !!deep });
+  const out = await ws.scan({ root: r.root, deep: !!deep });
+  if (out.ok) updateSettings({ lastScanAt: Date.now() });
+  return out;
 });
 
-// Scheduled scans: every few minutes, check whether one is due; notify only about new warnings and errors.
+// Scheduled scans: every few minutes, check whether one is due; notify only about new warnings and
+// errors. A scan never starts while a change is waiting in an open review: it would expire the plans.
 async function scheduledScan() {
   const s = loadSettings();
-  if (scanning || !s.root || !isDir(s.root) || !sched.isDue(Date.now(), s.lastScanAt, sched.normalizeSchedule(s.schedule))) return;
-  const out = await scanWorkspace(s.root, !!s.deep);
-  if (win && !win.isDestroyed()) win.webContents.send('scan:done', out);
-  const n = sched.notification((out.fresh || []).filter((f) => f.severity !== 'info'));
+  if (ws.busy() || service.hasPlans() || !s.root || !isDir(s.root) || !sched.isDue(Date.now(), s.lastScanAt, sched.normalizeSchedule(s.schedule))) return;
+  let out = { ok: false, error: 'Scheduled scan failed' };
+  try {
+    out = await ws.scan({ root: s.root, deep: !!s.deep, recordSeen: true });
+    if (out.ok) updateSettings({ lastScanAt: Date.now() });
+  } catch (e) {
+    out = { ok: false, error: 'Scheduled scan failed: ' + ((e && e.message) || e) };
+  } finally {
+    send('scan:done', out); // the window hides its progress bar whatever happened
+  }
+  const n = sched.notification(out.fresh || []);
   if (n && Notification.isSupported()) {
     const note = new Notification({ title: n.title, body: n.body, icon: path.join(__dirname, 'assets', 'icon.png') });
     note.on('click', () => { if (win) { win.show(); win.focus(); } });
@@ -131,8 +125,9 @@ async function scheduledScan() {
 
 handle('scan:one', async (_e, { dir, deep } = {}) => {
   if (!known.has(dir)) return { ok: false, error: 'Unknown repo' };
+  const g = ws.generation();
   const res = await scanRepo(dir, { deep: !!deep, policy: policyNow });
-  if (!known.has(dir)) return { ok: false, error: 'The workspace was rescanned meanwhile' };
+  if (g !== ws.generation() || !known.has(dir)) return { ok: false, error: 'The workspace was rescanned meanwhile' };
   known.set(dir, res);
   return { ok: true, res, rate: github.getRate() };
 });
@@ -145,8 +140,9 @@ const trendStore = {
   read: () => JSON.parse(fs.readFileSync(trendFile(), 'utf8')),
   write: (a) => { const f = trendFile(); fs.writeFileSync(f + '.tmp', JSON.stringify(a)); fs.renameSync(f + '.tmp', f); },
 };
-const rescan = (dir) => scanRepo(dir, { deep: !!loadSettings().deep, policy: policyNow }); // keep deep findings after an action
+const rescan = async (dir) => (await ws.refresh(dir)) || known.get(dir); // same depth as the scan it came from
 const service = createService({ known, settings: loadSettings, audit, trash: (f) => shell.trashItem(f), clipboard, rescan, trendStore, updateSettings });
+ws = createWorkspaceScanner({ known, service, policy: policyNow, seen: seen(), onBegin: (total) => send('scan:begin', { total }), onRepo: (res, done, total) => send('scan:repo', { res, done, total }) });
 
 handle('action:plan', (_e, { items } = {}) => service.planActions(items));
 // confirm: { token: the repo name the user typed } for each dangerous plan; the service checks it.
@@ -161,7 +157,7 @@ handle('report:copy', (_e, { dir } = {}) => service.copyReport(dir));
 handle('audit:list', () => readAudit(auditFile()));
 
 // Ignores (with a reason) and the baseline: GutCheck's own data, not the repos. Each change is logged.
-const rescanKnown = async (dir) => { if (known.has(dir)) known.set(dir, await rescan(dir)); return known.get(dir); };
+const rescanKnown = (dir) => ws.refresh(dir); // null if the workspace was rescanned meanwhile
 handle('ignore:set', async (_e, { dir, id, reason, remove, allRepos } = {}) => {
   const r = known.get(dir);
   if (!r && !allRepos) return { ok: false, error: 'Unknown repo' };
@@ -169,14 +165,14 @@ handle('ignore:set', async (_e, { dir, id, reason, remove, allRepos } = {}) => {
   const res = remove ? policy().removeIgnore(key, String(id || '')) : policy().setIgnore(key, String(id || ''), reason);
   if (!res.ok) return res;
   audit({ ok: true, repo: allRepos ? 'all repos' : r.name, title: `${remove ? 'Stopped ignoring' : 'Ignored'} ${id}${remove ? '' : `: ${res.reason}`}`, via: 'app' });
-  if (allRepos) { for (const d of known.keys()) await rescanKnown(d); return { ok: true, all: true }; }
+  if (allRepos) { await ws.refreshAll(); return { ok: true, all: true, repos: [...known.values()] }; }
   return { ok: true, res: await rescanKnown(dir) };
 });
 handle('drift:get', () => { const b = policyNow().baseline; return { file: policy().baselineFile, rules: b ? driftReport([...known.values()], b) : null }; });
 handle('baseline:init', async () => {
   const i = policy().initBaseline();
-  for (const d of known.keys()) await rescanKnown(d);
-  return i;
+  await ws.refreshAll(); // every repo's drift changes
+  return { ...i, repos: [...known.values()] };
 });
 handle('baseline:open', () => { const f = policy().baselineFile; if (fs.existsSync(f)) shell.openPath(f); });
 
@@ -200,10 +196,13 @@ handle('background:set', (_e, patch) => {
 const agents = createAgentConnect({ launch: { env: process.env, execPath: process.execPath, isPackaged: app.isPackaged, appPath: app.getAppPath(), dataDir: app.getPath('userData'), version: app.getVersion() }, audit, trash: (f) => shell.trashItem(f) });
 const agentAllow = (v) => (typeof v === 'boolean' ? v : !!loadSettings().agentAllowActions);
 handle('agents:status', (_e, { allowActions } = {}) => ({ ...agents.status(agentAllow(allowActions)), allowActions: agentAllow(allowActions) }));
+// The "allow actions" choice is saved when the user connects (agents:apply), not while reviewing.
+const pendingAllow = new Map(); // agent plan token -> the allowActions it was planned with
 handle('agents:plan', (_e, { id, allowActions, remove } = {}) => {
-  if (typeof allowActions === 'boolean') updateSettings({ agentAllowActions: allowActions });
   if (loadSettings().readOnly) return { ok: false, error: 'Read-only mode is on.' };
-  return agents.plan(String(id || ''), { allowActions: agentAllow(allowActions), remove: remove === true });
+  const p = agents.plan(String(id || ''), { allowActions: agentAllow(allowActions), remove: remove === true });
+  if (p && p.ok && p.token && typeof allowActions === 'boolean') pendingAllow.set(p.token, allowActions);
+  return p;
 });
 handle('agents:cleanup', (_e, { days } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.planCleanup(Number(days))));
 // Permission rules of a scanned repo: shapes and hashes only. One value is returned on request, for the
@@ -217,7 +216,15 @@ handle('agents:reveal-rule', (_e, { dir, hash } = {}) => {
 });
 handle('agents:fix', (_e, { fix } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.planFix(fix && typeof fix === 'object' ? fix : {}, [...known.values()].filter((r) => !r.error))));
 handle('agents:usage', (_e, { live } = {}) => agents.usageScan({ live: live === true && !loadSettings().readOnly, repos: [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name })) }));
-handle('agents:apply', (_e, { token } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.apply(String(token || ''))));
+handle('agents:apply', async (_e, { token } = {}) => {
+  if (loadSettings().readOnly) return { ok: false, error: 'Read-only mode is on.' };
+  const t = String(token || '');
+  const allow = pendingAllow.get(t);
+  pendingAllow.delete(t);
+  const r = await agents.apply(t);
+  if (r && r.ok && typeof allow === 'boolean') updateSettings({ agentAllowActions: allow });
+  return r;
+});
 handle('agents:copy', (_e, { id, allowActions } = {}) => {
   const c = agents.status(agentAllow(allowActions)).clients.find((x) => x.id === id);
   if (!c) return { ok: false };

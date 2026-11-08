@@ -43,6 +43,8 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
   const w = dom.window;
   const calls = [];
   let onRepo = () => {};
+  let onBegin = () => {};
+  let onDone = () => {};
   w.api = {
     settings: async () => settings, version: async () => '9.9.9', rate: async () => null, authStatus: async () => ({ ok: true }), pickDir: async () => '/w',
     scan: async () => { repos.forEach((r, i) => onRepo({ res: r, done: i + 1, total: repos.length })); return { ok: true, count: repos.length }; },
@@ -63,13 +65,13 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
     applyAgent: async (tok) => { calls.push(['applyAgent', tok]); return { ok: true, title: 'Connect', results: [{ text: 'claude mcp add', ok: true, out: '' }] }; },
     copyAgent: async (id, allow) => { calls.push(['copyAgent', id, allow]); return { ok: true }; },
     testsScan: async (d) => { calls.push(['testsScan', d]); return TESTS; },
-    setIgnore: async (o) => { calls.push(['ignore', o]); return { ok: true }; }, drift: async () => ({ file: '/d/baseline.json', rules: null }), initBaseline: async () => ({ ok: true }), openBaseline: async () => {}, onDone: () => {},
-    onBegin: () => {}, onRepo: (cb) => { onRepo = cb; },
+    setIgnore: async (o) => { calls.push(['ignore', o]); return { ok: true }; }, drift: async () => ({ file: '/d/baseline.json', rules: null }), initBaseline: async () => ({ ok: true }), openBaseline: async () => {}, onDone: (cb) => { onDone = cb; },
+    onBegin: (cb) => { onBegin = cb; }, onRepo: (cb) => { onRepo = cb; },
   };
   const ctx = dom.getInternalVMContext();
   for (const f of ['metrics.js', 'fix-all.js', 'app.js', 'modals.js', 'fixall-view.js', 'overview-view.js', 'clutter-view.js', 'quality-view.js', 'tests-view.js', 'dashboard.js', 'agents-view.js', 'policy-view.js', 'usage-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
   await tick();
-  return { dom, w, doc: w.document, calls, $: (s) => w.document.querySelector(s), $$: (s) => [...w.document.querySelectorAll(s)], run: (code) => new vm.Script(code).runInContext(ctx) };
+  return { dom, w, doc: w.document, calls, $: (s) => w.document.querySelector(s), $$: (s) => [...w.document.querySelectorAll(s)], run: (code) => new vm.Script(code).runInContext(ctx), emit: { begin: (d) => onBegin(d), repo: (d) => onRepo(d), done: (d) => onDone(d) } };
 }
 
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));

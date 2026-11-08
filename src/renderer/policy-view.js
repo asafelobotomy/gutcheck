@@ -14,10 +14,12 @@ const IGNORE_SPEC = {
 };
 
 async function applyIgnore(r, o) {
+  const gen = state.gen;
   const out = await window.api.setIgnore({ dir: r.path, ...o });
   if (!out.ok) return toast(out.error || 'Could not change the ignore list.', 'bad');
+  if (gen !== state.gen) return; // a new workspace scan replaced these results meanwhile
   if (out.res) state.repos.set(r.path, out.res);
-  if (out.all) toast('Saved. Rescan the workspace to update every repo.');
+  if (out.all && Array.isArray(out.repos)) for (const x of out.repos) state.repos.set(x.path, x); // every repo was rescanned
   renderStats(); renderList(); renderMain();
 }
 
@@ -48,7 +50,7 @@ async function renderDriftView() {
   const head = [h('h2', {}, 'Baseline'), h('p', { class: 'sub' }, 'Your baseline lists what every repo should have. Each repo is compared with it; the ones that differ get a "Baseline" finding.')];
   if (!d.rules) {
     return put($('detail'), ...head, h('p', { class: 'empty' }, 'No baseline yet.'),
-      h('div', { class: 'toolbar' }, btn('Create a starting baseline', async () => { await window.api.initBaseline(); toast('Created baseline.json. Edit it to match what you want, then rescan.'); renderDriftView(); })));
+      h('div', { class: 'toolbar' }, btn('Create a starting baseline', async () => { const gen = state.gen; const i = await window.api.initBaseline(); if (gen === state.gen && i && Array.isArray(i.repos)) { for (const x of i.repos) state.repos.set(x.path, x); renderStats(); renderList(); } toast('Created baseline.json. Edit it to match what you want, then rescan.'); renderDriftView(); })));
   }
   put($('detail'), ...head,
     h('div', { class: 'toolbar' }, btn('Edit baseline.json', () => window.api.openBaseline())),

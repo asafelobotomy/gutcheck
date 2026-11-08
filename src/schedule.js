@@ -27,14 +27,38 @@ function newFindings(prev, results) {
   return out;
 }
 
+// seen.json keeps one set of keys per workspace and depth ("<root>|deep" or "<root>|normal"): a deep
+// scan finds more than a normal one, so comparing the two would report the difference as new.
+const MAX_SETS = 20;
+const failedRepo = (r) => !!(r.error || (r.remote && r.remote.unreachable));
+
 function createSeenStore(file, io = fs) {
-  const load = () => { try { const v = JSON.parse(io.readFileSync(file, 'utf8')); return v && Array.isArray(v.keys) ? v : null; } catch { return null; } };
-  // A scan of a different workspace has nothing to compare with: everything would look new.
-  function record(root, results) {
-    const prev = load();
-    const fresh = prev && prev.root === root ? newFindings(prev.keys, results) : [];
-    try { io.writeFileSync(file + '.tmp', JSON.stringify({ root, ts: Date.now(), keys: findingKeys(results) })); io.renameSync(file + '.tmp', file); } catch {}
-    return { compared: !!(prev && prev.root === root), fresh };
+  const read = () => {
+    try {
+      const v = JSON.parse(io.readFileSync(file, 'utf8'));
+      if (v && v.sets && typeof v.sets === 'object') return v;
+      if (v && Array.isArray(v.keys) && v.root) return { sets: { [`${v.root}|normal`]: { ts: v.ts, keys: v.keys } } }; // older single-set file
+    } catch {}
+    return { sets: {} };
+  };
+  const load = (root, { deep = false } = {}) => read().sets[`${root}|${deep ? 'deep' : 'normal'}`] || null;
+  // A repo whose scan failed, or whose GitHub data could not be fetched, keeps its previous keys, so
+  // its findings do not all come back as new once it scans again.
+  function record(root, results, { deep = false } = {}) {
+    const all = read();
+    const id = `${root}|${deep ? 'deep' : 'normal'}`;
+    const prev = all.sets[id];
+    const fresh = prev ? newFindings(prev.keys, results.filter((r) => !failedRepo(r))) : [];
+    const keys = findingKeys(results.filter((r) => !failedRepo(r)));
+    if (prev) {
+      // An unreachable remote changes repoKey to the folder name, so match the owner/name form too.
+      const kept = new Set(results.filter(failedRepo).flatMap((r) => [repoKey(r), r.remote && r.remote.owner ? `${r.remote.owner}/${r.remote.name}` : null].filter(Boolean).map((k) => k + '|')));
+      for (const k of prev.keys) if (kept.has(k.slice(0, k.lastIndexOf('|') + 1))) keys.push(k);
+    }
+    all.sets[id] = { ts: Date.now(), keys };
+    const ids = Object.keys(all.sets).sort((a, b) => all.sets[b].ts - all.sets[a].ts).slice(0, MAX_SETS);
+    try { io.writeFileSync(file + '.tmp', JSON.stringify({ sets: Object.fromEntries(ids.map((k) => [k, all.sets[k]])) })); io.renameSync(file + '.tmp', file); } catch {}
+    return { compared: !!prev, fresh };
   }
   return { load, record };
 }
@@ -46,8 +70,9 @@ function normalizeSchedule(s) {
 }
 const isDue = (now, lastTs, sched) => sched.enabled && (!lastTs || now - lastTs >= sched.hours * HOUR);
 
-// One notification for a batch of new findings: the worst first, repos named.
-function notification(fresh) {
+// One notification for a batch of new findings: warnings and errors only, the worst first, repos named.
+function notification(all) {
+  const fresh = (all || []).filter((f) => f.severity === 'error' || f.severity === 'warn');
   if (!fresh.length) return null;
   const order = { error: 0, warn: 1, info: 2 };
   const sorted = [...fresh].sort((a, b) => order[a.severity] - order[b.severity]);
