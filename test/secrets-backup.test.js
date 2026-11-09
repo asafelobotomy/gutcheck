@@ -26,7 +26,7 @@ test('pass: "my app" and "my_app" get distinct item names, so neither overwrites
   const ws = { repos: [{ path: path.dirname(a), name: 'my app' }, { path: path.dirname(b), name: 'my_app' }], root };
   const p = await ctl.plan([a, b], { via: 'app', ...ws });
   assert.ok(p.ok, p.error);
-  assert.deepEqual(p.display.map((d) => d.text.split('  ←')[0]).sort(), ['pass insert -m -f gutcheck/repo/my%20app/.env', 'pass insert -m -f gutcheck/repo/my_app/.env']);
+  assert.deepEqual(p.display.map((d) => d.text.split('  ←')[0]).sort(), ['pass insert -m -f gutcheck/@repo/my%20app/.env', 'pass insert -m -f gutcheck/@repo/my_app/.env']);
 });
 
 test('a key clash drops the second file of two with one key; a key recorded for another file is refused', async () => {
@@ -41,12 +41,16 @@ test('a key clash drops the second file of two with one key; a key recorded for 
     const r = await ctl.plan([envPath, local], { via: 'app', ...ws });
     assert.ok(r.ok, r.error);
     assert.match(r.title, /^Back up 1 secret file/);
-    assert.deepEqual(r.display.map((d) => d.text.split('  ←')[0]), ['pass insert -m -f gutcheck/repo/api/.env', 'repo api/.env.local: skipped: another file already uses this vault item name']);
+    assert.deepEqual(r.display.map((d) => d.text.split('  ←')[0]), ['pass insert -m -f gutcheck/@repo/api/.env']);
+    assert.deepEqual(r.warnings, ['skipped: repo api/.env.local: another file already uses the vault item name gutcheck/same']);
+    assert.equal(r.skipped, 1);
   } finally { ADAPTERS.pass.saveCmd = orig; }
   const rec = require('../src/secret-status').createRecord(path.join(dataDir, 'secret-backups.json'));
-  rec.update((x) => { x.entries['/elsewhere/.env'] = { sha256: 'f', tool: 'pass', target: '', itemId: 'gutcheck/repo/api/.env', title: 'gutcheck: old' }; });
+  const elsewhere = path.join(dataDir, 'elsewhere.env'); // still on disk, so it still owns the name
+  fs.writeFileSync(elsewhere, 'E=1\n');
+  rec.update((x) => { x.entries[elsewhere] = { sha256: 'f', tool: 'pass', target: '', itemId: 'gutcheck/@repo/api/.env', title: 'gutcheck: old' }; });
   const r2 = await ctl.plan([envPath], { via: 'app', ...ws });
-  assert.equal(r2.error, 'Two files would get the same vault item name: gutcheck/repo/api/.env. Rename one or skip it.');
+  assert.equal(r2.error, 'Two files would get the same vault item name: gutcheck/@repo/api/.env. Rename one or skip it.');
   assert.equal((await ctl.plan([local], { via: 'app', ...ws })).ok, true);
 });
 
@@ -121,7 +125,7 @@ test('KeePassXC: a changed file is re-backed up with attachment-import -f onto i
   const saves = () => calls.filter((c) => c.args[0] !== 'ls').map((c) => (c.cmd === '/bin/sh' ? c.args.slice(3) : c.args));
   assert.deepEqual(saves().map((a) => a[0]), ['add', 'attachment-import']);
   const entry = record().entries[envPath].itemId;
-  assert.equal(entry, 'gutcheck/repo%2Fapi%2F.env');
+  assert.equal(entry, 'gutcheck/@repo%2Fapi%2F.env');
   fs.appendFileSync(envPath, 'NEW=1\n');
   calls.length = 0;
   const p2 = await ctl.plan([envPath], { via: 'app', ...ws });

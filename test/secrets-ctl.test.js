@@ -267,7 +267,7 @@ test('titles: two nested repos with the same folder name get distinct titles; a 
   fs.mkdirSync(loose.root);
   const clash = await ctl.plan([path.join(a, '.env'), path.join(b, '.env')], { via: 'app', ...loose });
   assert.equal(clash.title, 'Back up 1 secret file to Proton Pass');
-  assert.equal(clash.display[1].text, 'repo api/.env: skipped: another file already uses this vault item title');
+  assert.deepEqual(clash.warnings, ['skipped: repo api/.env: another file already uses the vault item title gutcheck: repo api/.env']);
 
   // A title already recorded for another file is refused too.
   const p = await ctl.plan([path.join(a, '.env')], { via: 'app', ...loose });

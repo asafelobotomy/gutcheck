@@ -101,3 +101,28 @@ test('report: same-named nested repos each get their own secret step; a one-repo
     assert.ok(!md.includes('hunter5') && !one.includes('hunter5'));
   } finally { for (const d of [root, data]) fs.rmSync(d, { recursive: true, force: true }); }
 });
+
+test('cli: --backup shows a dropped file as a skipped: line, and --backup --yes exits 2 when one was left out', () => {
+  const w = setup();
+  try {
+    const bin = path.join(w.home, 'bin');
+    fs.mkdirSync(bin);
+    // A fake pass-cli: signed in, and every create prints an item id.
+    fs.writeFileSync(path.join(bin, 'pass-cli'), '#!/bin/sh\ncat >/dev/null\nif [ "$1" = info ]; then echo \'{"id":"u"}\'; else echo ID_' + 'x'.repeat(30) + '; fi\n', { mode: 0o755 });
+    w.env.PATH = `${bin}:${process.env.PATH}`;
+    fs.writeFileSync(path.join(w.data, 'settings.json'), JSON.stringify({ vault: { tool: 'proton', target: 'Dev' } }));
+    // Another file, still on disk, already owns alpha's title.
+    const other = path.join(w.home, 'elsewhere.env');
+    fs.writeFileSync(other, 'X=1\n');
+    fs.writeFileSync(path.join(w.data, 'secret-backups.json'), JSON.stringify({ version: 1, skipped: {}, entries: {
+      [other]: { sha256: 'x', tool: 'proton', target: 'Dev', itemId: 'ID_' + 'y'.repeat(30), key: 'gutcheck: repo alpha/.env', title: 'gutcheck: repo alpha/.env' } } }));
+    const p = w.run('--backup');
+    assert.equal(p.status, 0, p.stderr);
+    assert.match(p.stdout, /^ {2}skipped: repo alpha\/\.env: another file already uses the vault item title gutcheck: repo alpha\/\.env$/m);
+    assert.ok(!/\$ .*skipped/.test(p.stdout));
+    const y = w.run('--backup', '--yes');
+    assert.equal(y.status, 2, y.stdout + y.stderr);
+    assert.match(y.stdout, /ok +Back up gutcheck: home ~\/\.aws\/credentials to Proton Pass/);
+    assert.match(y.stdout, /Not backed up: 1 file was left out/);
+  } finally { w.cleanup(); }
+});

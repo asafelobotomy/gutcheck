@@ -40,7 +40,7 @@ async function backupSecrets(paths) {
   if (!paths.length) return toast('Nothing to back up.');
   const p = await window.api.secrets.plan(paths);
   if (!p || !p.ok) return toast((p && p.error) || 'Could not plan the backup.', 'bad');
-  const shown = { token: p.token, risk: p.risk, title: p.title, note: p.note, repoName: 'Secrets', warnings: [], display: (p.display || []).map((d) => ({ text: d.text })) };
+  const shown = { token: p.token, risk: p.risk, title: p.title, note: p.note, repoName: 'Secrets', warnings: p.warnings || [], display: (p.display || []).map((d) => ({ text: d.text })) };
   const chosen = await confirmPlans([shown]);
   if (!chosen || !chosen.length) return;
   const out = await window.api.secrets.apply(p.token);

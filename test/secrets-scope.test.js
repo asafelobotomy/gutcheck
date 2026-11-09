@@ -39,10 +39,10 @@ test('titles: a repo named workspace and the root .env get distinct titles and v
     const p = await ctl.plan([repoEnv, path.join(root, '.env')], { via: 'app', ...ws });
     assert.ok(p.ok, p.error);
     assert.equal(p.display.length, 2, tool);
-    assert.ok(!p.display.some((d) => /skipped/.test(d.text)), tool);
+    assert.deepEqual(p.warnings, [], tool);
   }
   const p = await ctl.plan([repoEnv, path.join(root, '.env')], { via: 'app', ...ws });
-  assert.deepEqual(p.display.map((d) => d.text.split('  ')[0]), ['pass insert -m -f gutcheck/repo/workspace/.env', 'pass insert -m -f gutcheck/root/.env']);
+  assert.deepEqual(p.display.map((d) => d.text.split('  ')[0]), ['pass insert -m -f gutcheck/@repo/workspace/.env', 'pass insert -m -f gutcheck/@root/.env']);
 });
 
 test('titles: a repo folder named ~ does not collide with the home folder', async () => {
@@ -60,7 +60,7 @@ test('titles: a repo folder named ~ does not collide with the home folder', asyn
     ctl.link({ tool, target });
     const p = await ctl.plan([inRepo, path.join(home, '.netrc')], { via: 'app', ...ws });
     assert.ok(p.ok, `${tool}: ${p.error}`);
-    assert.ok(!p.display.some((d) => /skipped/.test(d.text)), tool);
+    assert.deepEqual(p.warnings, [], tool);
   }
 });
 
@@ -80,9 +80,8 @@ test('titles: a clash drops just the clashing file, notes it, and backs up the r
   const p = await ctl.plan([ea, eb, ec], { via: 'app', ...loose });
   assert.ok(p.ok, p.error);
   assert.match(p.title, /2 secret files/);
-  const notes = p.display.filter((d) => /skipped/.test(d.text));
-  assert.equal(notes.length, 1);
-  assert.equal(notes[0].text, 'repo api/.env: skipped: another file already uses this vault item title');
+  assert.equal(p.display.length, 2);
+  assert.deepEqual(p.warnings, ['skipped: repo api/.env: another file already uses the vault item title gutcheck: repo api/.env']);
   const r = await ctl.apply(p.token, { via: 'app' });
   assert.ok(r.ok);
   assert.equal(calls.length, 2);
@@ -114,7 +113,7 @@ test('titles: a record written with the old titles keeps working through its key
   ctl.link({ tool: 'proton', target: 'Dev' });
   const q = await ctl.plan([envPath], { via: 'app', ...ws });
   assert.ok(q.ok, q.error);
-  assert.ok(!q.display.some((d) => /skipped/.test(d.text)));
+  assert.deepEqual(q.warnings, []);
   assert.equal((await ctl.apply(q.token, { via: 'app' })).ok, true);
   assert.equal(record().entries[envPath].title, 'gutcheck: repo api/.env');
 });

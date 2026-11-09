@@ -22,6 +22,15 @@ test('printable escapes C0, C1, DEL, line separators and bidi controls, and noth
   assert.ok(!RAW.test(printable(EVIL)));
 });
 
+test('printable also escapes format and invisible characters, and backslash, so it is one-to-one', () => {
+  for (const ch of ['\u{200b}', '\u{200d}', '\u{2060}', '\u{feff}', '\u{ad}', '\u{180e}', '\u{fe0f}', '\u{E0041}', '\u{fff9}', '\u{34f}', '\u{3164}', '\u{115f}', '\u{1160}', '\u{fe00}', '\u{E0100}', '\u{E01EF}']) {
+    const got = printable(`a${ch}b`);
+    assert.equal(got, `a\\u{${ch.codePointAt(0).toString(16)}}b`, JSON.stringify(ch));
+  }
+  assert.equal(printable('a\\x1b'), 'a\\\\x1b');
+  assert.notEqual(printable('a\\x1b'), printable('a\x1b'), 'a literal backslash never looks like an escape');
+});
+
 function setup() {
   const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'gc-esc-')));
   const root = path.join(tmp, 'ws'), home = path.join(tmp, 'home'), data = path.join(tmp, 'data'), bin = path.join(tmp, 'bin');

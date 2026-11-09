@@ -21,16 +21,17 @@ const lines = (s) => String(s || '').split('\n').map((l) => l.trim()).filter(Boo
 const baseName = (rel) => path.basename(String(rel || 'file'));
 
 // The title without "gutcheck: ", with every byte outside [A-Za-z0-9_./-] percent-encoded (UTF-8),
-// "%" and "~" included, and the scope word as its own folder: "gutcheck: repo my app/.env" ->
-// "repo/my%20app/.env", "gutcheck: home ~/.netrc" -> "home/%7E/.netrc", "gutcheck: root .env" ->
-// "root/.env". Injective: the encoding is, and the scope words are fixed and hold no "/". A title
-// from before the scope words (still in an old record) is encoded whole, as it was then.
+// "%" and "~" included, and the scope word as an "@" folder: "gutcheck: repo my app/.env" ->
+// "@repo/my%20app/.env", "gutcheck: home ~/.netrc" -> "@home/%7E/.netrc", "gutcheck: root .env" ->
+// "@root/.env". Injective: the encoding is, and the scope words are fixed and hold no "/". A title
+// from before the scope words (still in an old record) is encoded whole, as it was then; that
+// encoding writes "@" as "%40", so old names never meet the "@" folders.
 function slug(title) {
   const hex = (b) => '%' + b.toString(16).toUpperCase().padStart(2, '0');
   const enc = (s) => s.replace(/[^\w./-]/gu, (ch) => [...Buffer.from(ch, 'utf8')].map(hex).join(''));
   const t = String(title).replace(/^gutcheck:\s*/, '');
   const m = /^(repo|home|root) ([\s\S]*)$/.exec(t);
-  return m ? `${m[1]}/${enc(m[2])}` : enc(t);
+  return m ? `@${m[1]}/${enc(m[2])}` : enc(t);
 }
 
 // UTF-8 text without NULs, else "base64:\n<b64>" (for text-only tools).

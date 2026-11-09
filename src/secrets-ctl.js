@@ -21,7 +21,7 @@ const SCAN_FIRST = 'Scan a workspace first.';
 const lockedText = (l, s) => (s.locked ? `${l.info.label} is locked or not signed in. ` : '') + (s.hint || l.info.unlockHint);
 // Names the clashing item: its title for id-based tools, else its pass/gopass name or KeePassXC entry.
 const keyWord = (cand, key) => (key === cand.title ? 'title' : 'name');
-const CLASH = (cand, key) => printable(`Two files would get the same vault item ${keyWord(cand, key)}: ${key}. Rename one or skip it.`);
+const CLASH = (cand, key) => `Two files would get the same vault item ${keyWord(cand, key)}: ${key}. Rename one or skip it.`;
 const shortName = (cand) => cand.title.replace(/^gutcheck: /, '');
 const GOOGLE = { id: 'google', label: 'Google Password Manager', found: false, reason: 'No CLI or write API' };
 
@@ -127,7 +127,8 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     const list = (Array.isArray(repos) ? repos : []).filter((r) => r && typeof r.path === 'string');
     last = { repos: list, root: typeof root === 'string' ? root : null };
     const found = [];
-    for (const r of list) found.push(...await findRepoSecrets(r.path, { name: repoLabel(r.path, last.root) }));
+    const problems = []; // { repo, error }: a repo whose secrets could not be checked
+    for (const r of list) found.push(...await findRepoSecrets(r.path, { name: repoLabel(r.path, last.root), problems }));
     if (last.root) found.push(...await findWorkspaceSecrets(last.root));
     if (withHome !== false) found.push(...await findHomeSecrets({ home, env }));
     const byReal = new Map();
@@ -138,7 +139,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     return {
       ok: true, linked: !!l, tool: l ? l.tool : null, target: l ? l.target : null, // where items go (a vault name or paths), for the app's panel
       items: cands.map((c) => ({ ...c, ...statusOf(c, rec) })),
-      advice: secretAdvice(cands, rec, { linked: !!l }),
+      advice: secretAdvice(cands, rec, { linked: !!l }), problems,
     };
   }
 
@@ -164,27 +165,45 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     const ours = (e) => !!e && typeof e === 'object' && e.tool === l.tool && JSON.stringify(e.target == null ? '' : e.target) === JSON.stringify(l.target == null ? '' : l.target);
     // One vault item per key (the title, or the pass/gopass name or KeePassXC entry): insert -f and
     // attachment-import -f would overwrite an item another file owns. A file whose key is taken is
-    // left out of this plan, with a note in the preview; the rest go ahead.
+    // left out of this plan, with a "skipped:" warning; the rest go ahead.
     const keyOf = (e) => e.key || (l.a.named ? e.itemId : e.title);
-    const owners = new Map(Object.entries(rec.entries).filter(([, e]) => ours(e)).map(([real, e]) => [keyOf(e), real]));
+    const owners = new Map(Object.entries(rec.entries).filter(([, e]) => ours(e)).map(([real, e]) => [keyOf(e), { real, e }]));
+    // An owner is gone when its file no longer exists (a renamed workspace), or when it was a home file
+    // whose name now leads elsewhere (a repointed dotfiles link): a home title names one place here.
+    const homeAt = new Map(fresh.items.filter((c) => c.scope === 'home').map((c) => [c.title, c.real]));
+    const gone = (o) => {
+      if (!fs.existsSync(o.real)) return 'which no longer exists';
+      const now = homeAt.get(o.e.title);
+      return now && now !== o.real ? `which ${o.e.title.replace(/^gutcheck: home /, '')} no longer points to` : null;
+    };
     const keys = new Set();
     const items = [];
     const display = [];
+    const warnings = [];
     let clash = null;
     for (const c of fresh.items) {
       if (!wanted.has(c.real) || c.status === 'backed' || c.status === 'skipped' || !isFile(c.real)) continue;
       const prev = rec.entries[c.real];
       const again = l.a.named && ours(prev) && !prev.missing && isText(prev.itemId) ? { update: true, itemId: prev.itemId } : {};
-      const save = l.a.saveCmd(c, l.target, again);
+      let save = l.a.saveCmd(c, l.target, again);
       if (save.error) return { ok: false, error: save.error };
       const other = owners.get(save.key);
-      if (keys.has(save.key) || (other && other !== c.real)) {
+      const why = other && other.real !== c.real ? gone(other) : null;
+      let replaces = null;
+      // A gone owner: an id-based tool just creates a new item (it never overwrites); a named one
+      // replaces the old backup explicitly, and the record entry moves to this file.
+      if (why && l.a.named && isText(other.e.itemId)) {
+        save = l.a.saveCmd(c, l.target, { update: true, itemId: other.e.itemId });
+        replaces = other.real;
+      }
+      if (keys.has(save.key) || (other && other.real !== c.real && !why)) {
         clash = clash || CLASH(c, save.key);
-        display.push({ text: printable(`${shortName(c)}: skipped: another file already uses this vault item ${keyWord(c, save.key)}`) });
+        warnings.push(printable(`skipped: ${shortName(c)}: another file already uses the vault item ${keyWord(c, save.key)} ${save.key}`));
         continue;
       }
       keys.add(save.key);
-      items.push({ cand: c, sha256: c.sha256, save });
+      if (replaces) warnings.push(printable(`${shortName(c)} replaces the backup of ${replaces}, ${why}`));
+      items.push({ cand: c, sha256: c.sha256, save, replaces });
       const steps = save.steps || [save];
       steps.forEach((s, i) => {
         const cmd = [l.a.bin, ...s.args.map(quote)].join(' ');
@@ -193,11 +212,12 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
       });
     }
     if (!items.length) return { ok: false, error: clash || 'Nothing to back up: those files are already backed up, skipped or no longer found.' };
+    const skipped = warnings.filter((w) => w.startsWith('skipped: ')).length;
     const token = 's:' + crypto.randomBytes(16).toString('hex');
     plans.set(token, { at: now, l, bin: bin.path, ws, items });
     const where = l.tool === 'keepassxc' ? `${l.target.db}, group ${l.target.group}` : l.target || 'default';
     return {
-      ok: true, token, title: `Back up ${plural(items.length, 'secret file')} to ${l.info.label}`, risk: 'caution', display,
+      ok: true, token, title: `Back up ${plural(items.length, 'secret file')} to ${l.info.label}`, risk: 'caution', display, warnings, skipped,
       note: printable(`Copies the file's contents into ${l.info.label} (${where}). The local file is not changed.`),
     };
   }
@@ -213,7 +233,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     const { l } = p;
     const { cand } = it;
     const text = printable(`Back up ${cand.title} to ${l.info.label}`);
-    const fail = (out) => ({ text, ok: false, out });
+    const fail = (out) => ({ text, ok: false, out: String(out).split('\n').map(printable).join('\n') });
     const got = await readPlanned(cand.real, it.sha256);
     if (got.error) return fail(got.error);
     const { buf } = got;
@@ -235,6 +255,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     record.update((rec) => {
       const e = { sha256: it.sha256, tool: l.tool, target: l.target, itemId, key: it.save.key, title: cand.title, at: new Date().toISOString() };
       if (cand.kind === 'ssh' && cand.fingerprint && l.a.fingerprintCmd(itemId, l.target)) e.fingerprint = cand.fingerprint;
+      if (it.replaces && it.replaces !== cand.real) delete rec.entries[it.replaces]; // the backup moved to this file
       rec.entries[cand.real] = e;
       delete rec.skipped[cand.real];
     });

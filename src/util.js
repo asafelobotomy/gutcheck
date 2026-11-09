@@ -10,12 +10,14 @@ const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`; // POSIX single-quote
 const plural = (n, w, pl = w + 's') => `${n} ${n === 1 ? w : pl}`;
 // The folder box accepts "~/Projects" (as its placeholder suggests) and relative paths.
 const expandHome = (p, home) => path.resolve(p === '~' ? home : p.startsWith('~/') ? path.join(home, p.slice(2)) : p);
-// Text safe to print to a terminal or show as a name: C0 and C1 controls and DEL become \xNN; line
-// separators and bidi controls (which reorder what follows) become \u{...}. Everything else is kept.
-const UNPRINTABLE = /[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+// Text safe to print to a terminal or show as a name, one-to-one: "\" becomes "\\", C0 and C1
+// controls and DEL become \xNN, and line separators, format characters (bidi controls, zero-width
+// characters, BOM, soft hyphen, tags), variation selectors and invisible fillers become \u{...}.
+const UNPRINTABLE = /[\\\x00-\x1f\x7f-\x9f\u{2028}\u{2029}\p{Cf}\u{34f}\u{115f}\u{1160}\u{3164}\u{fe00}-\u{fe0f}\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]/gu;
 const printable = (s) => String(s).replace(UNPRINTABLE, (ch) => {
-  const n = ch.charCodeAt(0);
-  return n <= 0xff ? '\\x' + n.toString(16).padStart(2, '0') : '\\u{' + n.toString(16) + '}';
+  if (ch === '\\') return '\\\\';
+  const n = ch.codePointAt(0);
+  return n <= 0x9f ? '\\x' + n.toString(16).padStart(2, '0') : '\\u{' + n.toString(16) + '}';
 });
 const list = (a, max = 6) => a.slice(0, max).join(', ') + (a.length > max ? `, +${a.length - max} more` : '');
 
