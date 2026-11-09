@@ -33,6 +33,7 @@ function openClutter() {
 }
 
 function adviceEl(r, f) {
+  if (f.fix && /^secret-/.test(f.fix.type)) return secretAdviceEl(f); // secrets-view.js: picks the files, or opens the password manager panel
   return h('div', { class: 'finding ' + f.severity },
     h('div', { class: 't' }, h('b', {}, f.title), h('span', {}, f.detail || '')),
     f.fix && r && f.fix.type === 'permissions-prune' ? btn('Review rules…', () => reviewRules(r, f.fix.hashes)) : null,

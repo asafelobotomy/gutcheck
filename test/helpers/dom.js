@@ -37,7 +37,29 @@ const QUALITY = { ok: true, settings: { maxLines: 400, locMode: 'total', ignore:
     advice: [{ id: 'q-secrets', category: 'Code quality', severity: 'error', title: '1 possible hardcoded secret', detail: 'src/cfg.js:3 (AWS access key)' }, { id: 'q-loc', category: 'Code quality', severity: 'warn', title: '1 file over 400 lines', detail: 'src/big.js (950)' }] },
 ] };
 
-async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clutter = CLUTTER, quality = QUALITY } = {}) {
+const SECRET_ITEM = (o) => ({ scope: 'repo', repo: 'gamma', kind: 'file', size: 120, confidence: 'high', saveable: true, ...o });
+const SECRETS = { ok: true, linked: true, tool: 'proton', advice: [], items: [
+  SECRET_ITEM({ title: 'gutcheck: gamma/deploy_key', path: '/w/gamma/deploy_key', rel: 'deploy_key', status: 'unbacked', kind: 'ssh', size: 411, fingerprint: 'SHA256:fpXYZ123' }),
+  SECRET_ITEM({ title: 'gutcheck: gamma/old.pem', path: '/w/gamma/old.pem', rel: 'old.pem', status: 'skipped' })] };
+const VAULT_TOOLS = [{ id: 'proton', label: 'Proton Pass', found: true, live: true }, { id: 'keepassxc', label: 'KeePassXC', found: true, live: false },
+  { id: 'bitwarden', label: 'Bitwarden', found: false, live: false }, { id: 'google', label: 'Google Password Manager', found: false, reason: 'No CLI or write API' }];
+
+// A fake window.api.secrets: every call is recorded as ['secrets.<name>', ...args]; `over` replaces any method.
+function fakeSecrets(calls, scan, over = {}) {
+  const rec = (name, fn) => async (...a) => { calls.push(['secrets.' + name, ...a]); return fn(...a); };
+  return {
+    scan: rec('scan', () => scan), tools: rec('tools', () => VAULT_TOOLS), link: rec('link', () => ({ ok: true })),
+    test: rec('test', () => ({ ok: false, locked: true, hint: 'Run "pass-cli login" in a terminal, then try again.' })),
+    plan: rec('plan', (paths) => ({ ok: true, token: 's:tok', title: `Back up ${paths.length} secret file to Proton Pass`, risk: 'caution', note: 'Saved as a vault item.',
+      display: [{ text: 'pass-cli item create ssh-key import --from-private-key /dev/stdin --title "gutcheck: gamma/deploy_key"', preview: 'SHOULD-NOT-SHOW' }, { text: '← contents of deploy_key (411 bytes)' }] })),
+    apply: rec('apply', () => ({ ok: true, results: [{ text: 'pass-cli item create ssh-key import', ok: true, out: 'saved' }], stdout: 'SHOULD-NOT-SHOW' })),
+    verify: rec('verify', () => ({ ok: true, checked: 3, missing: 1, mismatch: 0 })),
+    skip: rec('skip', () => ({ ok: true })),
+    ...over,
+  };
+}
+
+async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clutter = CLUTTER, quality = QUALITY, secrets = SECRETS, secretsApi = {} } = {}) {
   const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8').replace(/<script[^>]*><\/script>/g, '');
   const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true, url: 'file:///app/index.html' });
   const w = dom.window;
@@ -67,9 +89,10 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
     testsScan: async (d) => { calls.push(['testsScan', d]); return TESTS; },
     setIgnore: async (o) => { calls.push(['ignore', o]); return { ok: true }; }, drift: async () => ({ file: '/d/baseline.json', rules: null }), initBaseline: async () => ({ ok: true }), openBaseline: async () => {}, onDone: (cb) => { onDone = cb; },
     onBegin: (cb) => { onBegin = cb; }, onRepo: (cb) => { onRepo = cb; },
+    secrets: fakeSecrets(calls, secrets, secretsApi),
   };
   const ctx = dom.getInternalVMContext();
-  for (const f of ['metrics.js', 'fix-all.js', 'app.js', 'modals.js', 'fixall-view.js', 'overview-view.js', 'clutter-view.js', 'quality-view.js', 'tests-view.js', 'dashboard.js', 'agents-view.js', 'policy-view.js', 'usage-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
+  for (const f of ['metrics.js', 'fix-all.js', 'app.js', 'modals.js', 'fixall-view.js', 'overview-view.js', 'clutter-view.js', 'quality-view.js', 'tests-view.js', 'secrets-view.js', 'dashboard.js', 'agents-view.js', 'policy-view.js', 'usage-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
   await tick();
   return { dom, w, doc: w.document, calls, $: (s) => w.document.querySelector(s), $$: (s) => [...w.document.querySelectorAll(s)], run: (code) => new vm.Script(code).runInContext(ctx), emit: { begin: (d) => onBegin(d), repo: (d) => onRepo(d), done: (d) => onDone(d) } };
 }
@@ -84,4 +107,4 @@ const TESTS = { ok: true, repos: [
     advice: [{ id: 't-ci-none', category: 'Tests', severity: 'warn', title: 'No CI runs the 12 tests', detail: '' }, { id: 't-coverage', category: 'Tests', severity: 'warn', title: 'Line coverage 41%', detail: '', fix: { type: 'tests-run', label: 'Run coverage again…', kind: 'coverage', stack: 'python', root: '.' } }] },
   { path: '/w/alpha', name: 'alpha', testCases: 0, testFiles: 0, stacks: [], skipped: [], focused: [], untested: [], runnable: [], results: {}, advice: [{ id: 't-none', category: 'Tests', severity: 'warn', title: 'No tests', detail: '' }] }] };
 
-module.exports = { boot, tick, snap, REPOS, CLUTTER };
+module.exports = { boot, tick, snap, REPOS, CLUTTER, SECRETS, SECRET_ITEM };

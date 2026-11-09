@@ -92,7 +92,7 @@ function renderStats() {
   );
 }
 
-const NAV = { drift: 'baseline', dashboard: 'dashboard', overview: 'overview', quality: 'quality', tests: 'tests', clutter: 'clutter', history: 'history' };
+const NAV = { drift: 'baseline', dashboard: 'dashboard', overview: 'overview', quality: 'quality', tests: 'tests', secrets: 'secrets', clutter: 'clutter', history: 'history' };
 function renderList() {
   document.body.classList.toggle('dash', state.view === 'dashboard'); // the dashboard shows these numbers itself
   for (const [view, id] of Object.entries(NAV)) { const b = $(id); if (b) { if (state.view === view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); } }
@@ -294,6 +294,7 @@ function renderMain() {
   if (state.view === 'clutter') renderClutterView();
   else if (state.view === 'quality') renderQualityView();
   else if (state.view === 'tests') renderTestsView();
+  else if (state.view === 'secrets') renderSecrets();
   else if (state.view === 'repo' && state.repos.has(state.selected)) renderRepo();
   else if (state.view === 'history') renderHistory();
   else if (state.view === 'drift') renderDriftView();
@@ -309,9 +310,9 @@ async function startScan() {
   const root = $('root').value.trim();
   if (!root || state.scanning) return;
   // Kept so a refused scan (no such folder, one already running) leaves the results on screen.
-  const prev = { repos: new Map(state.repos), clutter: state.clutter, quality: state.quality, tests: state.tests, selected: state.selected, view: state.view };
+  const prev = { repos: new Map(state.repos), clutter: state.clutter, secrets: state.secrets, quality: state.quality, tests: state.tests, selected: state.selected, view: state.view };
   state.gen++; state.scanError = {};
-  state.scanning = true; state.clutter = null; state.quality = null; state.tests = null; state.picked.clear(); state.repos.clear(); state.selected = null; state.view = 'dashboard';
+  state.scanning = true; state.clutter = null; state.secrets = null; state.quality = null; state.tests = null; state.picked.clear(); state.repos.clear(); state.selected = null; state.view = 'dashboard';
   $('ptext').textContent = 'Scanning…'; $('progress').hidden = false;
   $('scan').disabled = true; renderStats(); renderList(); renderMain();
   let out;
@@ -329,7 +330,7 @@ async function startScan() {
 // A scan the app started on its own (scheduled) replaces the workspace too: drop the old results.
 function beginBackgroundScan() {
   state.gen++; state.scanError = {};
-  state.clutter = null; state.quality = null; state.tests = null; state.picked.clear(); state.repos.clear();
+  state.clutter = null; state.quality = null; state.tests = null; state.secrets = null; state.picked.clear(); state.repos.clear();
   renderStats(); renderList(); renderMain();
 }
 window.api.onBegin(({ total }) => { if (!state.scanning) beginBackgroundScan(); $('progress').hidden = false; $('bar').style.width = '0'; $('progress').setAttribute('aria-valuenow', '0'); $('ptext').textContent = `Found ${total} repositories…`; });
