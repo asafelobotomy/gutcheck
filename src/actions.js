@@ -18,6 +18,7 @@ const fail = (msg) => { throw new PlanError(msg); };
 
 const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const validBranch = (b) => typeof b === 'string' && BRANCH_RE.test(b) && !b.includes('..') && !b.includes('//') && !/(\.lock|[./])$/.test(b);
+const REMOTE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const cleanText = (s, max) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) : '');
 
 // Read-only git for planning: same hardening as scans (no hooks, no fsmonitor, no index lock).
@@ -28,8 +29,11 @@ const readGit = (ctx, args, cwd) => ctx.run('git', [...READONLY_GIT, ...args], {
 const quote = (a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : sq(a));
 const show = (cmd, args) => `${cmd} ${args.map(quote).join(' ')}`;
 
-// Step builders. `display` is what the user sees in the confirm dialog.
-const git = (args, dir, note) => ({ kind: 'cmd', cmd: 'git', args: ['-c', 'core.fsmonitor=false', ...args], cwd: dir, display: show('git', args), note });
+// Step builders. `display` is what the user sees in the confirm dialog. Every git step runs with
+// fixed options a repo's config cannot undo: no fsmonitor, no ext:: or fd:: transport, no
+// signature checks (gpg programs). `pre` adds per-step -c options, also left out of `display`.
+const GIT_STEP = ['-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'protocol.fd.allow=never', '-c', 'log.showSignature=false', '-c', 'gpg.program=false', '-c', 'gpg.ssh.program=false', '-c', 'gpg.x509.program=false'];
+const git = (args, dir, note, pre = []) => ({ kind: 'cmd', cmd: 'git', args: [...GIT_STEP, ...pre, ...args], cwd: dir, display: show('git', args), note });
 const gh = (args, dir, input) => ({ kind: 'cmd', cmd: 'gh', args, cwd: dir, input, display: show('gh', args) + (input ? '   # with JSON body' : '') });
 
 const RISK = { safe: 0, caution: 1, danger: 2 };
@@ -55,11 +59,28 @@ const ACTIONS = {
     },
   },
 
+  // One explicit refspec, so repo config cannot widen the push: remote.<r>.mirror (deletes the
+  // remote's other branches) and remote.<r>.push (+refspecs force-push) only apply to a bare `git
+  // push`. Names are checked before they reach the command line, where `--mirror` is an option.
   push: {
-    plan(r) {
+    async plan(r, p, ctx) {
       if (r.git.detached || !r.git.branch) fail('Detached HEAD: nothing to push.');
-      const steps = r.git.upstream ? [git(['push'], r.path)] : [git(['push', '-u', 'origin', r.git.branch], r.path)];
-      return { risk: 'safe', title: `Push ${r.git.branch}`, steps };
+      const b = r.git.branch;
+      if (!validBranch(b)) fail(`Refusing to push: "${cleanText(b, 60)}" is not a safe branch name.`);
+      let remote = 'origin';
+      let dest = b;
+      if (r.git.upstream) {
+        const u = await readGit(ctx, ['for-each-ref', '--format=%(upstream:remotename)%00%(upstream:remoteref)', `refs/heads/${b}`], r.path);
+        const [rn, ref] = u.ok ? u.stdout.replace(/\n$/, '').split('\0') : [];
+        if (!rn || !ref || !ref.startsWith('refs/heads/')) fail('Could not read where this branch pushes to. Rescan and try again.');
+        remote = rn;
+        dest = ref.slice('refs/heads/'.length);
+        if (`${remote}/${dest}` !== r.git.upstream) fail('The upstream changed since the scan. Rescan and try again.');
+      }
+      if (!REMOTE_RE.test(remote)) fail(`Refusing to push: "${cleanText(remote, 60)}" is not a safe remote name.`);
+      if (!validBranch(dest)) fail(`Refusing to push: "${cleanText(dest, 60)}" is not a safe branch name.`);
+      const args = ['push', ...(r.git.upstream ? [] : ['-u']), '--', remote, `refs/heads/${b}:refs/heads/${dest}`];
+      return { risk: 'safe', title: `Push ${b}`, steps: [git(args, r.path, undefined, ['-c', `remote.${remote}.mirror=false`, '-c', 'push.default=simple'])] };
     },
   },
 
