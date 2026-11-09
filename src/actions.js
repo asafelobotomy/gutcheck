@@ -10,6 +10,7 @@ const INSTALLERS = ['npm install', 'yarn install', 'pnpm install', 'bun install'
 const { TEMPLATES, findEcosystems } = require('./templates');
 const { detectStacks } = require('./tests/stack');
 const { IGNORE_OK } = require('./clutter');
+const { looksSecret } = require('./secret-patterns');
 const { planTestRun } = require('./tests/runs');
 
 class PlanError extends Error {}
@@ -43,10 +44,6 @@ const defaultBranch = (repo) => (repo.remote && repo.remote.defaultBranch) || nu
 // Each action: plan(repo, params, ctx) -> { risk, title, steps, undo?, warnings? }
 // The path in a `git status --short` line ("XY path", "R  old -> new", "\"quoted path\"").
 const statusPath = (l) => { const p = l.slice(3).split(' -> ').pop(); return p.startsWith('"') ? p.slice(1, -1) : p; };
-// Env files (not their templates), private keys and credential stores, by name only (never read).
-const SECRET_NAME = /^(?:\.env(?:\..+)?|\.netrc|\.pgpass|id_(?:rsa|dsa|ecdsa|ed25519)|.+\.(?:pem|key|p12|pfx|jks|keystore))$/i;
-const ENV_TEMPLATE = /^\.env\.(?:example|sample|template|dist|defaults)$/i;
-const looksSecret = (p) => { const b = p.split('/').pop(); return SECRET_NAME.test(b) && !ENV_TEMPLATE.test(b); };
 
 const ACTIONS = {
   fetch: { plan: (r) => ({ risk: 'safe', title: 'Fetch all remotes and prune deleted branches', steps: [git(['fetch', '--all', '--prune'], r.path)] }) },
