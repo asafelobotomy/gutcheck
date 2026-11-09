@@ -214,3 +214,82 @@ test('repo: when git ls-files fails (not a repo) nothing is reported', async () 
     assert.deepEqual(await S.findRepoSecrets(dir), []);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+const R = require('../src/secret-status');
+const cand = (o) => ({ abs: '/r/.env', real: '/r/.env', scope: 'repo', repo: 'r', rel: '.env', title: 'gutcheck: r/.env', size: 3, sha256: 'a'.repeat(64), kind: 'file', fingerprint: null, keyType: null, confidence: 'high', ...o });
+const emptyRec = () => ({ version: 1, entries: {}, skipped: {} });
+
+test('statusOf covers every state', () => {
+  const rec = { version: 1, entries: { '/r/.env': { sha256: 'a'.repeat(64) }, '/r/old': { sha256: 'b'.repeat(64) }, '/r/gone': { sha256: 'c'.repeat(64), missing: true }, '/r/k': { sha256: 'd'.repeat(64), mismatch: true } }, skipped: { '/r/t.key': { reason: 'throwaway', at: '' } } };
+  assert.equal(R.statusOf(cand(), rec).status, 'backed');
+  assert.equal(R.statusOf(cand({ real: '/r/old' }), rec).status, 'changed');
+  assert.equal(R.statusOf(cand({ real: '/r/new', sha256: 'e'.repeat(64) }), rec).status, 'unbacked');
+  assert.equal(R.statusOf(cand({ real: '/r/gone', sha256: 'c'.repeat(64) }), rec).status, 'missing');
+  assert.equal(R.statusOf(cand({ real: '/r/k', sha256: 'd'.repeat(64) }), rec).status, 'mismatch');
+  assert.equal(R.statusOf(cand({ real: '/r/t.key' }), rec).status, 'skipped');
+});
+
+test('a copy of a backed-up file counts as backed', () => {
+  const rec = { version: 1, entries: { '/a/.env': { sha256: 'a'.repeat(64) } }, skipped: {} };
+  assert.deepEqual(R.statusOf(cand({ real: '/b/.env' }), rec), { status: 'backed', sameAs: '/a/.env' });
+  // a missing entry does not vouch for a copy
+  const gone = { version: 1, entries: { '/a/.env': { sha256: 'a'.repeat(64), missing: true } }, skipped: {} };
+  assert.equal(R.statusOf(cand({ real: '/b/.env' }), gone).status, 'unbacked');
+});
+
+test('record file is 0600, atomic and survives a corrupt file', () => {
+  const dir = tmp('rec');
+  try {
+    const file = path.join(dir, 'sub', 'secret-backups.json');
+    const store = R.createRecord(file);
+    assert.deepEqual(store.load(), emptyRec());
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file + '.tmp', 'old', { mode: 0o666 });
+    const r = store.update((x) => { x.entries['/r/.env'] = { sha256: 'a'.repeat(64) }; });
+    assert.ok(r.entries['/r/.env']);
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    assert.ok(!fs.existsSync(file + '.tmp'));
+    assert.equal(store.load().entries['/r/.env'].sha256, 'a'.repeat(64));
+    fs.writeFileSync(file, 'nope');
+    assert.deepEqual(store.load(), emptyRec());
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('advice: paths only, no contents; low-confidence excluded from severity', () => {
+  const a = R.secretAdvice([cand(), cand({ real: '/r/test/fixtures/id_rsa', rel: 'test/fixtures/id_rsa', confidence: 'low' })], emptyRec(), { linked: true });
+  const u = a.find((x) => x.id === 'secret-unbacked');
+  assert.equal(u.severity, 'warn');
+  assert.equal(u.repo, 'r');
+  assert.equal(u.category, 'Secrets');
+  assert.match(u.title, /^1 secret file exists only on this machine$/);
+  assert.match(u.detail, /Probably test keys: test\/fixtures\/id_rsa/);
+  assert.deepEqual(u.fix, { type: 'secret-backup', paths: ['/r/.env'] });
+});
+
+test('advice: grouping, changed, workspace, unlinked, low-only and empty groups', () => {
+  const rec = { version: 1, entries: { '/r/old': { sha256: 'b'.repeat(64) }, '/r/gone': { sha256: 'c'.repeat(64), missing: true }, '/r/ok': { sha256: 'e'.repeat(64) } }, skipped: { '/r/skip': { reason: 'x', at: '' } } };
+  const cs = [
+    cand({ real: '/r/old', rel: 'old' }), cand({ real: '/r/gone', rel: 'gone', sha256: 'c'.repeat(64) }),
+    cand({ real: '/r/ok', rel: 'ok', sha256: 'e'.repeat(64) }), cand({ real: '/r/skip', rel: 'skip' }),
+    cand({ real: '/q/.env', repo: 'q', rel: '.env', sha256: 'f'.repeat(64), confidence: 'low' }),
+    cand({ real: '/w/a.pem', scope: 'workspace', repo: null, rel: 'a.pem', title: 'gutcheck: workspace/a.pem', sha256: '1'.repeat(64) }),
+    cand({ real: '/h/.npmrc', scope: 'home', repo: null, rel: '.npmrc', title: 'gutcheck: ~/.npmrc', sha256: '2'.repeat(64) })];
+  const a = R.secretAdvice(cs, rec, { linked: false });
+  assert.deepEqual(a.map((x) => x.id).sort(), ['secret-changed', 'secret-unbacked', 'secret-unbacked', 'ws-secret-unbacked']);
+  const ch = a.find((x) => x.id === 'secret-changed');
+  assert.equal(ch.severity, 'info');
+  assert.equal(ch.title, '1 secret file changed since the last backup');
+  const r = a.find((x) => x.id === 'secret-unbacked' && x.repo === 'r');
+  assert.equal(r.title, '1 secret file exists only on this machine');
+  assert.match(r.detail, /gone/);
+  assert.match(r.detail, /missing/);
+  assert.deepEqual(r.fix, { type: 'secret-link' });
+  const q = a.find((x) => x.repo === 'q');
+  assert.equal(q.severity, 'info');
+  const ws = a.find((x) => x.id === 'ws-secret-unbacked');
+  assert.match(ws.title, /^2 secret files exist only on this machine$/);
+  assert.match(ws.detail, /a\.pem/);
+  assert.match(ws.detail, /~\/\.npmrc/);
+  assert.equal(ws.repo, undefined);
+  assert.deepEqual(R.secretAdvice([], emptyRec(), { linked: true }), []);
+});
