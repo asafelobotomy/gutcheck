@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { isolatedEnv } = require('./helpers/env');
 const { PassThrough } = require('node:stream');
 const { execFileSync } = require('node:child_process');
 const { createServer, start, TOOLS, PROTOCOLS } = require('../src/mcp');
@@ -27,7 +28,7 @@ function workspace() {
   fs.writeFileSync(path.join(root, 'beta', 'new.txt'), 'x'); // one uncommitted change
   return root;
 }
-const envFor = (data) => ({ ...process.env, GUTCHECK_DATA_DIR: data });
+const envFor = (data) => isolatedEnv({ GUTCHECK_DATA_DIR: data }); // a temp HOME: reports scan home secrets
 
 // Drive the protocol with plain objects.
 function client(engine) {

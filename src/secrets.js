@@ -44,12 +44,14 @@ async function makeCandidate({ real, scope, repo, rel, title, inSshDir = false, 
   } catch { return null; }
 }
 
-async function findRepoSecrets(dir) {
+// opts.name: the repo's label in titles and advice (default: the folder name). Callers pass the path
+// relative to the workspace root, so two nested repos named alike never share a vault item title.
+async function findRepoSecrets(dir, { name } = {}) {
   let root;
   try { root = await fsp.realpath(dir); } catch { return []; }
   const tracked = await trackedFiles(root);
   if (!tracked) return [];
-  const repo = path.basename(dir);
+  const repo = typeof name === 'string' && name ? name : path.basename(dir);
   const found = new Map(); // real path -> candidate
   let seen = 0;
 

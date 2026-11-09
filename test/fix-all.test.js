@@ -4,6 +4,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { isolatedEnv } = require('./helpers/env');
 const { execFileSync } = require('node:child_process');
 const FixAll = require('../src/renderer/fix-all');
 const { boot, tick } = require('./helpers/dom');
@@ -104,7 +105,7 @@ test('cli: fix <repo> all lists every step in order and the choices, and runs th
   sh('init', '-q', '-b', 'main'); sh('config', 'user.email', 't@t'); sh('config', 'user.name', 't');
   fs.writeFileSync(path.join(d, 'README.md'), '# alpha\n'); sh('add', '-A'); sh('commit', '-qm', 'init');
   fs.writeFileSync(path.join(d, 'wip.txt'), 'x');
-  const env = { ...process.env, GUTCHECK_DATA_DIR: data };
+  const env = isolatedEnv({ GUTCHECK_DATA_DIR: data });
   const run = async (argv) => { const o = []; const e = []; const code = await main(argv, { out: (s) => o.push(s), err: (s) => e.push(s), env }); return { code, out: o.join('\n'), err: e.join('\n') }; };
   try {
     const dry = await run(['fix', 'alpha', 'all', '--root', root]);

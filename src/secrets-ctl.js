@@ -21,6 +21,7 @@ const CHANGED = 'Changed since the preview. Rescan and review it again.';
 const NOT_LINKED = 'Link a password manager first (Settings).';
 const SCAN_FIRST = 'Scan the workspace first.';
 const lockedText = (l, s) => (s.locked ? `${l.info.label} is locked or not signed in. ` : '') + (s.hint || l.info.unlockHint);
+const CLASH = (t) => `Two files would get the same vault item title: ${t}. Rename one or skip it.`;
 const GOOGLE = { id: 'google', label: 'Google Password Manager', found: false, reason: 'No CLI or write API' };
 
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
@@ -28,6 +29,11 @@ const refused = (via) => (via === 'mcp' ? { ok: false, error: MCP_REFUSAL } : nu
 const quote = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : '"' + String(s).replace(/(["\\$`])/g, '\\$1') + '"');
 const isText = (s) => typeof s === 'string' && s.length <= 300 && !/[\0-\x1f\x7f]/.test(s) && !s.startsWith('-');
 const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+// A repo's label in titles: its path under the workspace root (posix), else its folder name.
+function repoLabel(repoPath, root) {
+  const rel = root ? path.relative(path.resolve(root), path.resolve(repoPath)) : '';
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel.split(path.sep).join('/') : path.basename(repoPath);
+}
 
 // Normalise and validate a target for a tool; returns { ok, target } or { ok: false }.
 function checkTarget(tool, t) {
@@ -144,13 +150,14 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     return { ok: !!s.ok, locked: !!s.locked, hint: s.ok ? '' : s.hint || l.info.unlockHint };
   }
 
-  async function scan({ repos, root } = {}) {
+  // home: false leaves out the home folder (a one-repo report has no use for it).
+  async function scan({ repos, root, home: withHome = true } = {}) {
     const list = (Array.isArray(repos) ? repos : []).filter((r) => r && typeof r.path === 'string');
     last = { repos: list, root: typeof root === 'string' ? root : null };
     const found = [];
-    for (const r of list) found.push(...await findRepoSecrets(r.path));
+    for (const r of list) found.push(...await findRepoSecrets(r.path, { name: repoLabel(r.path, last.root) }));
     if (last.root) found.push(...await findWorkspaceSecrets(last.root));
-    found.push(...await findHomeSecrets({ home, env }));
+    if (withHome !== false) found.push(...await findHomeSecrets({ home, env }));
     const byReal = new Map();
     for (const c of found) if (!byReal.has(c.real)) byReal.set(c.real, c);
     const cands = [...byReal.values()];
@@ -195,6 +202,14 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
       });
     }
     if (!items.length) return { ok: false, error: 'Nothing to back up: those files are already backed up, skipped or no longer found.' };
+    // One vault item per title: pass/gopass insert -f would overwrite an item another file owns.
+    const owners = new Map(Object.entries(record.load().entries).map(([real, e]) => [e && e.title, real]));
+    const titles = new Set();
+    for (const { cand } of items) {
+      const other = owners.get(cand.title);
+      if (titles.has(cand.title) || (other && other !== cand.real)) return { ok: false, error: CLASH(cand.title) };
+      titles.add(cand.title);
+    }
     const token = 's:' + crypto.randomBytes(16).toString('hex');
     plans.set(token, { at: now, l, bin: bin.path, ws, items });
     const where = l.tool === 'keepassxc' ? `${l.target.db}, group ${l.target.group}` : l.target || 'default';
@@ -343,4 +358,4 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
   return { tools, link, test, scan, plan, apply, verify, skip, unskip, PLAN_TTL };
 }
 
-module.exports = { createSecretsCtl, scrub, findBin, PLAN_TTL, MCP_REFUSAL };
+module.exports = { createSecretsCtl, scrub, findBin, repoLabel, PLAN_TTL, MCP_REFUSAL };

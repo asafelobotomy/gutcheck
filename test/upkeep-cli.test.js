@@ -4,6 +4,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { isolatedEnv } = require('./helpers/env');
 const { execFileSync } = require('node:child_process');
 const { main } = require('../src/cli');
 const { createEngine } = require('../src/engine');
@@ -27,7 +28,7 @@ const run = async (argv, env) => { const o = []; const e = []; const code = awai
 test('cli: ignore with a reason, list it, stop ignoring; drift after baseline init; new findings', async () => {
   const root = workspace();
   const data = tmp('gutcheck-updata-');
-  const env = { ...process.env, GUTCHECK_DATA_DIR: data };
+  const env = isolatedEnv({ GUTCHECK_DATA_DIR: data });
   try {
     const first = await run(['new', '--root', root], env);
     assert.match(first.out, /First scan/);
@@ -62,14 +63,14 @@ test('mcp engine: ignoring needs --allow-actions on the server; drift and new ar
   const root = workspace();
   const data = tmp('gutcheck-updata-');
   try {
-    const ro = createEngine({ env: { ...process.env, GUTCHECK_DATA_DIR: data }, via: 'mcp' });
+    const ro = createEngine({ env: isolatedEnv({ GUTCHECK_DATA_DIR: data }), via: 'mcp' });
     await ro.scan({ root });
     const { TOOLS } = require('../src/mcp');
     const tool = (n) => TOOLS.find((t) => t.name === n);
     assert.match((await tool('gutcheck_ignore').run(ro, { repo: 'alpha', finding: 'no-remote', reason: 'x' })).error, /read-only/);
     assert.equal((await tool('gutcheck_drift').run(ro, {})).baseline, null);
     assert.equal((await tool('gutcheck_new').run(ro, {}, () => {})).compared, false);
-    const rw = createEngine({ env: { ...process.env, GUTCHECK_DATA_DIR: data }, via: 'mcp', allowActions: true });
+    const rw = createEngine({ env: isolatedEnv({ GUTCHECK_DATA_DIR: data }), via: 'mcp', allowActions: true });
     await rw.scan({ root });
     assert.equal((await tool('gutcheck_ignore').run(rw, { repo: 'alpha', finding: 'no-remote', reason: 'scratch' })).ok, true);
     const d = await rw.repoDetail({ repo: 'alpha' });

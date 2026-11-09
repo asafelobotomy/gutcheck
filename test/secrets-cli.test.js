@@ -65,3 +65,38 @@ test('cli: gutcheck secrets lists files by title and status, never contents or h
     assert.match(rec, /kept in the team vault/);
   } finally { w.cleanup(); }
 });
+
+test('report: same-named nested repos each get their own secret step; a one-repo report skips the home scan', async () => {
+  const { createEngine } = require('../src/engine');
+  const { isolatedEnv } = require('./helpers/env');
+  const root = tmp('gutcheck-secnest-');
+  const data = tmp('gutcheck-secnestdata-');
+  try {
+    for (const side of ['a', 'b']) {
+      const d = path.join(root, side, 'api');
+      fs.mkdirSync(d, { recursive: true });
+      sh(d, 'init', '-q', '-b', 'main');
+      sh(d, 'config', 'user.email', 't@t');
+      sh(d, 'config', 'user.name', 't');
+      sh(d, 'commit', '-q', '--allow-empty', '-m', 'init');
+      fs.writeFileSync(path.join(d, `.env.${side}`), 'K=nest-hunter5\n');
+    }
+    const env = isolatedEnv({ GUTCHECK_DATA_DIR: data });
+    fs.mkdirSync(path.join(env.HOME, '.aws'));
+    fs.writeFileSync(path.join(env.HOME, '.aws', 'credentials'), '[default]\nk=v\n');
+    const e = createEngine({ env, via: 'cli' });
+    assert.ok((await e.scan({ root })).ok);
+    const titles = (await e.secrets()).items.map((x) => x.title).sort();
+    assert.deepEqual(titles, ['gutcheck: a/api/.env.a', 'gutcheck: b/api/.env.b', 'gutcheck: ~/.aws/credentials']);
+    const md = (await e.report()).text;
+    const sections = md.split(/^### api$/m).slice(1);
+    assert.equal(sections.length, 2);
+    assert.ok(sections.every((s) => /gutcheck secrets --backup/.test(s.split(/^## /m)[0])), 'each repo section has its own step');
+    assert.ok(!sections.some((s) => s.split(/^## /m)[0].includes('.env.a') && s.split(/^## /m)[0].includes('.env.b')), 'no mixing');
+    assert.match(md, /Workspace-level tidy-up[\s\S]*~\/\.aws\/credentials/);
+    const one = (await e.report({ repo: path.join(root, 'a', 'api') })).text;
+    assert.match(one, /\.env\.a/);
+    assert.ok(!one.includes('.aws'));
+    assert.ok(!md.includes('hunter5') && !one.includes('hunter5'));
+  } finally { for (const d of [root, data]) fs.rmSync(d, { recursive: true, force: true }); }
+});

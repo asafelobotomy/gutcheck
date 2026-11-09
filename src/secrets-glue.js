@@ -3,7 +3,7 @@
 // each surface may see (never contents or hashes; MCP gets no absolute paths) and gates writes.
 const fs = require('node:fs');
 const path = require('node:path');
-const { MCP_REFUSAL } = require('./secrets-ctl');
+const { MCP_REFUSAL, repoLabel } = require('./secrets-ctl');
 
 const READ_ONLY = 'Read-only mode is on.';
 const SCAN_FIRST = 'Scan a workspace first.';
@@ -56,10 +56,10 @@ function createSecretsService({ ctl, known, settings }) {
   const need = (fn) => (...a) => (ready() ? fn(...a) : { ok: false, error: SCAN_FIRST });
 
   // Read-only. `dirs` limits the repos (no workspace root then); home files are always included.
-  async function scan(dirs) {
+  async function scan(dirs, { home = true } = {}) {
     const d = Array.isArray(dirs) && dirs.length ? dirs : null;
     if (!d && !ready()) return { ok: false, error: SCAN_FIRST };
-    return view(await ctl.scan(d ? { repos: repos(d), root: null } : ws()));
+    return view(await ctl.scan(d ? { repos: repos(d), root: null, home } : { ...ws(), home }));
   }
 
   function skip(p, reason, remove = false) {
@@ -76,9 +76,10 @@ function createSecretsService({ ctl, known, settings }) {
     const byPath = new Map();
     let workspace = [];
     try {
-      const res = await scan(dir ? [dir] : undefined);
+      const res = await scan(dir ? [dir] : undefined, { home: !dir }); // one repo: no workspace section, so no home scan
       if (!res.ok) return { byPath, workspace };
-      for (const r of repos(dir ? [dir] : null)) byPath.set(r.path, { advice: res.advice.filter((a) => a.repo === path.basename(r.path)) });
+      const root = dir ? null : settings().root || null; // labels as ctl.scan made them
+      for (const r of repos(dir ? [dir] : null)) byPath.set(r.path, { advice: res.advice.filter((a) => a.repo === repoLabel(r.path, root)) });
       if (!dir) workspace = res.advice.filter((a) => !a.repo);
     } catch { /* no secrets section */ }
     return { byPath, workspace };

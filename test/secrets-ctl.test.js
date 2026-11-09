@@ -267,3 +267,50 @@ test('a FIFO at the planned path fails fast', { timeout: 5000 }, async (t) => {
   assert.match(r.results[0].out, /regular file/);
   assert.equal(calls.length, 0);
 });
+
+// A repo with an ignored .env, for the title tests.
+function addRepo(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  execFileSync('git', ['init', '-q', dir]);
+  fs.writeFileSync(path.join(dir, '.gitignore'), '.env\n');
+  fs.writeFileSync(path.join(dir, '.env'), 'K=' + dir + '\n');
+  return dir;
+}
+
+test('titles: two nested repos with the same folder name get distinct titles; a title clash refuses the plan', async () => {
+  const { tmp, mkCtl, record } = setup();
+  const root = path.join(tmp, 'ws2');
+  const a = addRepo(path.join(root, 'a', 'api'));
+  const b = addRepo(path.join(root, 'b', 'api'));
+  const ctl = mkCtl({ run: okRun() });
+  ctl.link({ tool: 'proton', target: 'Dev' });
+  const nested = { repos: [{ path: a, name: 'api' }, { path: b, name: 'api' }], root };
+  const s = await ctl.scan(nested);
+  const titles = s.items.filter((i) => i.scope === 'repo').map((i) => i.title).sort();
+  assert.deepEqual(titles, ['gutcheck: a/api/.env', 'gutcheck: b/api/.env']);
+  assert.deepEqual(s.advice.map((x) => x.repo).filter(Boolean).sort(), ['a/api', 'b/api']);
+  assert.equal((await ctl.plan([path.join(a, '.env'), path.join(b, '.env')], { via: 'app', ...nested })).ok, true);
+
+  // Repos outside any root fall back to the folder name, so both would be "api/.env": refused.
+  const loose = { repos: [{ path: a, name: 'api' }, { path: b, name: 'api' }], root: tmp + '/elsewhere' };
+  fs.mkdirSync(loose.root);
+  const clash = await ctl.plan([path.join(a, '.env'), path.join(b, '.env')], { via: 'app', ...loose });
+  assert.deepEqual(clash, { ok: false, error: 'Two files would get the same vault item title: gutcheck: api/.env. Rename one or skip it.' });
+
+  // A title already recorded for another file is refused too.
+  const p = await ctl.plan([path.join(a, '.env')], { via: 'app', ...loose });
+  assert.ok(p.ok, p.error);
+  assert.equal((await ctl.apply(p.token, { via: 'app' })).ok, true);
+  assert.equal(record().entries[path.join(a, '.env')].title, 'gutcheck: api/.env');
+  const again = await ctl.plan([path.join(b, '.env')], { via: 'app', ...loose });
+  assert.equal(again.error, 'Two files would get the same vault item title: gutcheck: api/.env. Rename one or skip it.');
+});
+
+test('scan with home: false leaves out the home folder', async () => {
+  const { home, ws, mkCtl } = setup();
+  fs.mkdirSync(path.join(home, '.aws'));
+  fs.writeFileSync(path.join(home, '.aws', 'credentials'), '[default]\nk=v\n');
+  const ctl = mkCtl({ run: okRun() });
+  assert.ok((await ctl.scan(ws)).items.some((i) => i.scope === 'home'));
+  assert.ok(!(await ctl.scan({ ...ws, home: false })).items.some((i) => i.scope === 'home'));
+});
