@@ -132,14 +132,16 @@ test('pr-merge builds the exact gh command and rejects bad PRs', async () => {
 
 test('remote branch deletion is guarded', async () => {
   const repo = ghRepo();
-  const ok = await plan(repo, { type: 'delete-remote', branch: 'old' });
+  // No real repo behind ghRepo: a runner that answers the plan-time hooks-folder lookup.
+  const ctx = { run: async (cmd, args) => ({ ok: true, stdout: args.includes('--git-common-dir') ? '.git\n' : '', stderr: '' }) };
+  const ok = await plan(repo, { type: 'delete-remote', branch: 'old' }, ctx);
   assert.equal(ok.risk, 'danger');
   assert.equal(ok.confirmName, 'demo');
-  assert.deepEqual(ok.steps[0].args.slice(-4), ['push', 'origin', '--delete', 'old']);
-  assert.equal((await plan(repo, { type: 'delete-remote', branch: 'main' })).ok, false); // default
-  assert.equal((await plan(repo, { type: 'delete-remote', branch: 'topic' })).ok, false); // has open PR
-  assert.equal((await plan(repo, { type: 'delete-remote', branch: 'nope' })).ok, false);
-  assert.equal((await plan(repo, { type: 'delete-remote', branch: '--force' })).ok, false);
+  assert.deepEqual(ok.steps[0].args.slice(-6), ['push', '--no-follow-tags', '--recurse-submodules=no', '--', 'origin', ':refs/heads/old']);
+  assert.equal((await plan(repo, { type: 'delete-remote', branch: 'main' }, ctx)).ok, false); // default
+  assert.equal((await plan(repo, { type: 'delete-remote', branch: 'topic' }, ctx)).ok, false); // has open PR
+  assert.equal((await plan(repo, { type: 'delete-remote', branch: 'nope' }, ctx)).ok, false);
+  assert.equal((await plan(repo, { type: 'delete-remote', branch: '--force' }, ctx)).ok, false);
 });
 
 test('branch protection sends a JSON body on stdin and needs admin', async () => {

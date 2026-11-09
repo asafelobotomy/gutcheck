@@ -15,6 +15,7 @@ Object.assign(process.env, { HOME: path.join(ROOT, 'home'), GIT_CONFIG_GLOBAL: G
 test.after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
 
 const { plan, apply } = require('../src/actions');
+const { sshUrl } = require('./helpers/fake-ssh');
 const { scanRepo } = require('../src/scanner');
 
 let n = 0;
@@ -33,7 +34,7 @@ function setup() {
   fs.writeFileSync(path.join(d, 'a.txt'), '1\n');
   sh(d, 'add', '-A');
   sh(d, 'commit', '-qm', 'one');
-  sh(d, 'remote', 'add', 'origin', bare);
+  sh(d, 'remote', 'add', 'origin', sshUrl(bare));
   sh(d, 'push', '-q', 'origin', 'main:other', 'main:keep');
   sh(d, 'push', '-q', '-u', 'origin', 'main');
   commit(d, '2\n');

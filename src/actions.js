@@ -11,13 +11,13 @@ const { detectStacks } = require('./tests/stack');
 const { IGNORE_OK } = require('./clutter');
 const { looksSecret } = require('./secret-patterns');
 const { planTestRun } = require('./tests/runs');
+const { validBranch, validRemote, inspect } = require('./git-safety');
 
 class PlanError extends Error {}
 const fail = (msg) => { throw new PlanError(msg); };
+// Not an error: there is nothing for the action to do (the app shows it as a note, not a failure).
+const nothing = (msg) => { const e = new PlanError(msg); e.nothing = true; throw e; };
 
-const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
-const validBranch = (b) => typeof b === 'string' && BRANCH_RE.test(b) && !b.includes('..') && !b.includes('//') && !/(\.lock|[./])$/.test(b);
-const REMOTE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const cleanText = (s, max) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) : '');
 
 // Read-only git for planning: the scans' guards (no hooks, fsmonitor, repo drivers or lazy fetch).
@@ -30,8 +30,17 @@ const show = (cmd, args) => `${cmd} ${args.map(quote).join(' ')}`;
 
 // Step builders. `display` is what the user sees in the confirm dialog. Every git step runs with
 // fixed options a repo's config cannot undo: no fsmonitor, no ext:: or fd:: transport, no
-// signature checks (gpg programs). `pre` adds per-step -c options, also left out of `display`.
-const GIT_STEP = ['-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'protocol.fd.allow=never', '-c', 'log.showSignature=false', '-c', 'gpg.program=false', '-c', 'gpg.ssh.program=false', '-c', 'gpg.x509.program=false'];
+// signature checks or signing (gpg programs, the ssh signing-key command), no alternate-refs
+// command, no recursion into submodules (their own config runs their filters and hooks), and no
+// auto gc (gc.recentObjectsHook and the pre-auto-gc hook). `pre` adds per-step -c options, also
+// left out of `display`.
+const GIT_STEP = [
+  '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'protocol.fd.allow=never',
+  '-c', 'log.showSignature=false', '-c', 'gpg.program=false', '-c', 'gpg.ssh.program=false', '-c', 'gpg.x509.program=false',
+  '-c', 'commit.gpgSign=false', '-c', 'tag.gpgSign=false', '-c', 'gpg.ssh.defaultKeyCommand=',
+  '-c', 'core.alternateRefsCommand=true', '-c', 'core.alternateRefsPrefixes=', // true: lists no refs (an empty command makes git print "cannot run")
+  '-c', 'submodule.recurse=false', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false',
+];
 const git = (args, dir, note, pre = []) => ({ kind: 'cmd', cmd: 'git', args: [...GIT_STEP, ...pre, ...args], cwd: dir, display: show('git', args), note });
 const gh = (args, dir, input) => ({ kind: 'cmd', cmd: 'gh', args, cwd: dir, input, display: show('gh', args) + (input ? '   # with JSON body' : '') });
 
@@ -41,20 +50,58 @@ function needRemote(repo) {
   if (!repo.remote || repo.remote.unreachable) fail('This repo has no reachable GitHub remote.');
   return `${repo.remote.owner}/${repo.remote.name}`;
 }
-const localBranch = (repo, b) => (repo.git.branches || []).find((x) => x.name === b) || fail(`No local branch "${b}" in the last scan.`);
+const localBranch = (repo, b) => (repo.git.branches || []).find((x) => x.name === b) || fail(`No local branch "${cleanText(String(b), 60)}" in the last scan.`);
+// A name from a scan goes on a git command line only if it cannot be read as an option (B6, B7).
+const safeName = (b, verb = 'Refusing') => (validBranch(b) ? b : fail(`${verb}: "${cleanText(String(b), 60)}" is not a safe branch name.`));
+// The current branch's upstream as git has it now: the remote and the branch there (B5, B8).
+async function upstreamOf(r, b, ctx, verb) {
+  const u = await readGit(ctx, ['for-each-ref', '--format=%(upstream:remotename)%00%(upstream:remoteref)', `refs/heads/${b}`], r.path);
+  const [remote, ref] = u.ok ? u.stdout.replace(/\n$/, '').split('\0') : [];
+  if (!remote || !ref || !ref.startsWith('refs/heads/')) fail(`Could not read where this branch ${verb}s. Rescan and try again.`);
+  const dest = ref.slice('refs/heads/'.length);
+  if (`${remote}/${dest}` !== r.git.upstream) fail('The upstream changed since the scan. Rescan and try again.');
+  if (!validRemote(remote)) fail(`Refusing to ${verb}: "${cleanText(remote, 60)}" is not a safe remote name.`);
+  return { remote, dest: safeName(dest, `Refusing to ${verb}`) };
+}
 const defaultBranch = (repo) => (repo.remote && repo.remote.defaultBranch) || null;
 
 // Each action: plan(repo, params, ctx) -> { risk, title, steps, undo?, warnings? }
 // The path in a `git status --short` line ("XY path", "R  old -> new", "\"quoted path\"").
 const statusPath = (l) => { const p = l.slice(3).split(' -> ').pop(); return p.startsWith('"') ? p.slice(1, -1) : p; };
 
+// `uses` names the kinds of git step a plan runs (git-safety.js): plan() refuses network steps
+// whose programs the repo's config names, and rates steps that run its hooks or drivers caution.
 const ACTIONS = {
-  fetch: { plan: (r) => ({ risk: 'safe', title: 'Fetch all remotes and prune deleted branches', steps: [git(['fetch', '--all', '--prune'], r.path)] }) },
+  // Each remote fetched into refs/remotes/<r>/ only, by an explicit refspec: a repo's
+  // remote.<r>.fetch could map remote branches onto local ones, and --prune would then delete
+  // every local branch (B8). --refmap= stops the configured refspecs being applied as well.
+  fetch: {
+    async plan(r, p, ctx) {
+      const l = await readGit(ctx, ['remote'], r.path);
+      if (!l.ok) fail('Could not list this repo\'s remotes.');
+      const names = l.stdout.split('\n').filter(Boolean);
+      const ok = names.filter(validRemote);
+      if (!names.length) nothing('Nothing to fetch: this repo has no remotes.');
+      if (!ok.length) fail('None of this repo\'s remotes has a name GutCheck can use safely.');
+      const steps = ok.map((rn) => git(['fetch', '--prune', '--no-prune-tags', '--no-recurse-submodules', '--refmap=', '--', rn, `+refs/heads/*:refs/remotes/${rn}/*`], r.path));
+      const skipped = names.length - ok.length;
+      return { risk: 'safe', title: 'Fetch all remotes and prune deleted branches', steps, uses: ['fetch'], remotes: ok, warnings: skipped ? [`Skipped ${skipped} remote${skipped > 1 ? 's' : ''} whose name could be read as an option.`] : [] };
+    },
+  },
 
+  // `git pull` fetches with the configured refspecs (B8): fetch just the upstream into its
+  // remote-tracking branch, then fast-forward to that. branch.<b>.mergeOptions is the repo's too.
   pull: {
-    plan(r) {
+    async plan(r, p, ctx) {
       if (!r.git.upstream) fail('Current branch has no upstream to pull from.');
-      return { risk: 'safe', title: `Fast-forward ${r.git.branch} from ${r.git.upstream}`, steps: [git(['pull', '--ff-only'], r.path)] };
+      if (r.git.detached || !r.git.branch) fail('Detached HEAD: nothing to pull into.');
+      const b = safeName(r.git.branch, 'Refusing to pull');
+      const { remote, dest } = await upstreamOf(r, b, ctx, 'pull');
+      const track = `refs/remotes/${remote}/${dest}`;
+      return {
+        risk: 'safe', title: `Fast-forward ${b} from ${r.git.upstream}`, uses: ['pull'], remotes: [remote],
+        steps: [git(['fetch', '--no-prune', '--no-recurse-submodules', '--refmap=', '--', remote, `+refs/heads/${dest}:${track}`], r.path), git(['merge', '--ff-only', '--end-of-options', track], r.path, undefined, ['-c', `branch.${b}.mergeOptions=`])],
+      };
     },
   },
 
@@ -64,31 +111,19 @@ const ACTIONS = {
   push: {
     async plan(r, p, ctx) {
       if (r.git.detached || !r.git.branch) fail('Detached HEAD: nothing to push.');
-      const b = r.git.branch;
-      if (!validBranch(b)) fail(`Refusing to push: "${cleanText(b, 60)}" is not a safe branch name.`);
-      let remote = 'origin';
-      let dest = b;
-      if (r.git.upstream) {
-        const u = await readGit(ctx, ['for-each-ref', '--format=%(upstream:remotename)%00%(upstream:remoteref)', `refs/heads/${b}`], r.path);
-        const [rn, ref] = u.ok ? u.stdout.replace(/\n$/, '').split('\0') : [];
-        if (!rn || !ref || !ref.startsWith('refs/heads/')) fail('Could not read where this branch pushes to. Rescan and try again.');
-        remote = rn;
-        dest = ref.slice('refs/heads/'.length);
-        if (`${remote}/${dest}` !== r.git.upstream) fail('The upstream changed since the scan. Rescan and try again.');
-      }
-      if (!REMOTE_RE.test(remote)) fail(`Refusing to push: "${cleanText(remote, 60)}" is not a safe remote name.`);
-      if (!validBranch(dest)) fail(`Refusing to push: "${cleanText(dest, 60)}" is not a safe branch name.`);
+      const b = safeName(r.git.branch, 'Refusing to push');
+      const { remote, dest } = r.git.upstream ? await upstreamOf(r, b, ctx, 'push') : { remote: 'origin', dest: b };
       // No tags or submodules either: push.followTags and push.recurseSubmodules would add them.
       const args = ['push', '--no-follow-tags', '--recurse-submodules=no', ...(r.git.upstream ? [] : ['-u']), '--', remote, `refs/heads/${b}:refs/heads/${dest}`];
-      return { risk: 'safe', title: `Push ${b}`, steps: [git(args, r.path, undefined, ['-c', `remote.${remote}.mirror=false`, '-c', 'push.default=simple'])] };
+      return { risk: 'safe', title: `Push ${b}`, uses: ['push'], remotes: [remote], pushes: true, steps: [git(args, r.path, undefined, ['-c', `remote.${remote}.mirror=false`, '-c', 'push.default=simple'])] };
     },
   },
 
   checkout: {
     plan(r, p) {
-      localBranch(r, p.branch);
+      const b = safeName(localBranch(r, p.branch).name);
       if (r.git.dirty > 0) fail('Uncommitted changes: commit them first.');
-      return { risk: 'safe', title: `Switch to ${p.branch}`, steps: [git(['switch', p.branch], r.path)] };
+      return { risk: 'safe', title: `Switch to ${b}`, uses: ['switch'], target: `refs/heads/${b}`, steps: [git(['switch', '--no-recurse-submodules', '--end-of-options', b], r.path)] };
     },
   },
 
@@ -96,8 +131,8 @@ const ACTIONS = {
     plan(r, p) {
       if (!validBranch(p.name)) fail('Invalid branch name.');
       if ((r.git.branches || []).some((b) => b.name === p.name)) fail(`Branch "${p.name}" already exists.`);
-      const from = p.from ? localBranch(r, p.from).name : null;
-      return { risk: 'safe', title: `Create and switch to ${p.name}${from ? ` from ${from}` : ''}`, steps: [git(['switch', '-c', p.name, ...(from ? [from] : [])], r.path)], undo: `git switch ${r.git.branch || '-'} && git branch -d ${p.name}` };
+      const from = p.from ? safeName(localBranch(r, p.from).name) : null;
+      return { risk: 'safe', title: `Create and switch to ${p.name}${from ? ` from ${from}` : ''}`, uses: ['switch'], target: from ? `refs/heads/${from}` : null, steps: [git(['switch', '--no-recurse-submodules', '-c', p.name, ...(from ? ['--end-of-options', from] : [])], r.path)], undo: `git switch ${r.git.branch || '-'} && git branch -d ${p.name}` };
     },
   },
 
@@ -106,12 +141,14 @@ const ACTIONS = {
       if (r.git.detached) fail('Detached HEAD.');
       const b = localBranch(r, p.branch);
       if (b.current) fail('Cannot merge a branch into itself.');
+      const name = safeName(b.name);
+      const cur = safeName(r.git.branch, 'Refusing to merge into it');
       if (r.git.dirty > 0) fail('Uncommitted changes: commit them first.');
       const noff = p.mode === 'no-ff';
       return {
-        risk: 'caution',
-        title: `Merge ${b.name} into ${r.git.branch}${noff ? ' (merge commit)' : ' (fast-forward only)'}`,
-        steps: [git(noff ? ['merge', '--no-ff', '--no-edit', b.name] : ['merge', '--ff-only', b.name], r.path)],
+        risk: 'caution', uses: ['merge'], target: `refs/heads/${name}`,
+        title: `Merge ${name} into ${cur}${noff ? ' (merge commit)' : ' (fast-forward only)'}`,
+        steps: [git([...(noff ? ['merge', '--no-ff', '--no-edit'] : ['merge', '--ff-only']), '--end-of-options', name], r.path, undefined, ['-c', `branch.${cur}.mergeOptions=`])],
         undo: 'git reset --hard ORIG_HEAD   (only if you have not made further commits)',
       };
     },
@@ -121,10 +158,11 @@ const ACTIONS = {
     async plan(r, p, ctx) {
       const b = localBranch(r, p.branch);
       if (b.current) fail('Cannot delete the branch you are on.');
+      const name = safeName(b.name);
       const force = !!p.force;
-      if (!force && !(r.git.mergedBranches || []).includes(b.name)) fail(`"${b.name}" is not merged into the default branch. Use force delete if you are sure.`);
-      const sha = (await readGit(ctx, ['rev-parse', '--short', b.name], r.path)).stdout.trim();
-      return { risk: force ? 'danger' : 'caution', title: `${force ? 'FORCE ' : ''}delete local branch ${b.name}`, steps: [git(['branch', force ? '-D' : '-d', '--', b.name], r.path)], undo: sha ? `git branch ${b.name} ${sha}` : undefined };
+      if (!force && !(r.git.mergedBranches || []).includes(name)) fail(`"${name}" is not merged into the default branch. Use force delete if you are sure.`);
+      const sha = (await readGit(ctx, ['rev-parse', '--verify', '--quiet', '--short', `refs/heads/${name}`], r.path)).stdout.trim();
+      return { risk: force ? 'danger' : 'caution', title: `${force ? 'FORCE ' : ''}delete local branch ${name}`, uses: ['ref-update'], steps: [git(['branch', force ? '-D' : '-d', '--', name], r.path)], undo: sha ? `git branch ${name} ${sha}` : undefined };
     },
   },
 
@@ -133,18 +171,21 @@ const ACTIONS = {
       const names = Array.isArray(p.branches) ? p.branches : [];
       const merged = r.git.mergedBranches || [];
       if (!names.length || !names.every((b) => merged.includes(b) && validBranch(b))) fail('Branch list does not match the merged branches found in the last scan.');
-      return { risk: 'caution', title: `Delete ${names.length} merged local branch${names.length > 1 ? 'es' : ''}`, steps: [git(['branch', '-d', '--', ...names], r.path)], warnings: [names.join(', ')] };
+      return { risk: 'caution', title: `Delete ${names.length} merged local branch${names.length > 1 ? 'es' : ''}`, uses: ['ref-update'], steps: [git(['branch', '-d', '--', ...names], r.path)], warnings: [names.join(', ')] };
     },
   },
 
   'delete-remote': {
     plan(r, p) {
       needRemote(r);
-      const rb = (r.git.remoteBranches || []).find((x) => x.name === p.branch) || fail(`"${p.branch}" is not a known remote branch.`);
-      if (rb.name === defaultBranch(r)) fail('Refusing to delete the default branch.');
-      const pr = (r.prs || []).find((x) => x.headRefName === rb.name);
+      const rb = (r.git.remoteBranches || []).find((x) => x.name === p.branch) || fail(`"${cleanText(String(p.branch), 60)}" is not a known remote branch.`);
+      const name = safeName(rb.name);
+      if (name === defaultBranch(r)) fail('Refusing to delete the default branch.');
+      const pr = (r.prs || []).find((x) => x.headRefName === name);
       if (pr) fail(`PR #${pr.number} is open from this branch. Close or merge it first.`);
-      return { risk: 'danger', title: `Delete remote branch origin/${rb.name}`, steps: [git(['push', 'origin', '--delete', rb.name], r.path)], undo: `git push origin <sha>:refs/heads/${rb.name}   (find the sha with git reflog)` };
+      // An explicit delete refspec, and nothing else: no mirror, tags or submodules from config.
+      const args = ['push', '--no-follow-tags', '--recurse-submodules=no', '--', 'origin', `:refs/heads/${name}`];
+      return { risk: 'danger', title: `Delete remote branch origin/${name}`, uses: ['push'], remotes: ['origin'], pushes: true, steps: [git(args, r.path, undefined, ['-c', 'remote.origin.mirror=false'])], undo: `git push origin <sha>:refs/heads/${rb.name}   (find the sha with git reflog)` };
     },
   },
 
@@ -168,7 +209,7 @@ const ACTIONS = {
       const also = p.afterGitignore === true && !st.split('\n').some((l) => statusPath(l) === '.gitignore') ? [' M .gitignore', '?? .gitignore'] : [];
       const check = { kind: 'check', cmd: 'git', safeGit: true, args: ['status', '--short', '-uall', '--ignore-submodules=dirty'], cwd: r.path, expect: [st, ...also].join('\n'), subset: true, display: 'check no file outside the list below has changed' };
       const list = st.split('\n').slice(0, 40).join('\n') + (also.length ? '\n.gitignore (the rules added just before)' : '');
-      return { risk: 'caution', title: `Commit all changes on ${r.git.branch}`, steps: [check, git(['add', '-A'], r.path), git(['commit', '-m', msg], r.path)], warnings: ['Files to be committed:\n' + list], undo: 'git reset --soft HEAD~1' };
+      return { risk: 'caution', title: `Commit all changes on ${r.git.branch}`, uses: ['commit'], steps: [check, git(['add', '-A'], r.path), git(['commit', '-m', msg], r.path)], warnings: ['Files to be committed:\n' + list], undo: 'git reset --soft HEAD~1' };
     },
   },
 
@@ -189,7 +230,7 @@ const ACTIONS = {
       const content = t.build({ author: author || 'Author', name: path.basename(r.path), manifests, ecosystems: findEcosystems(r.path), stacks: detectStacks(r.path), owner: r.remote && r.remote.owner, hasWorkflows: !!r.hasWorkflows, branch: (r.remote && r.remote.defaultBranch) || r.git.branch || 'main' });
       const steps = [{ kind: 'write', root: r.path, path: target, content, display: `write ${t.file} (${content.length} bytes)`, preview: content.split('\n').slice(0, 14).join('\n') }];
       if (p.commit) steps.push(git(['add', '--', t.file], r.path), git(['commit', '-m', `Add ${t.label}`, '--', t.file], r.path));
-      return { risk: p.commit ? 'caution' : 'safe', title: `Add ${t.file}${p.commit ? ' and commit it' : ''}`, steps, undo: p.commit ? 'git reset --soft HEAD~1 && git rm --cached ' + t.file : `rm ${t.file}` };
+      return { risk: p.commit ? 'caution' : 'safe', title: `Add ${t.file}${p.commit ? ' and commit it' : ''}`, uses: p.commit ? ['commit'] : [], steps, undo: p.commit ? 'git reset --soft HEAD~1 && git rm --cached ' + t.file : `rm ${t.file}` };
     },
   },
 
@@ -271,7 +312,10 @@ async function plan(repo, action, ctx = {}) {
     if (!action || typeof action.type !== 'string' || !Object.prototype.hasOwnProperty.call(ACTIONS, action.type)) fail('Unknown action.');
     if (ctx.readOnly) fail('Read-only mode is on. Turn it off in the header to make changes.');
     const out = await ACTIONS[action.type].plan(repo, action, ctx);
-    const risk = out.risk;
+    // The repo's own network programs and non-network remotes refuse the plan; its hooks and
+    // drivers make it caution (B9, B10).
+    const code = await inspect(ctx, repo.path, out, fail);
+    const risk = code.runsRepoCode && RISK[out.risk] < RISK.caution ? 'caution' : out.risk;
     return {
       ok: true,
       type: action.type,
@@ -281,17 +325,34 @@ async function plan(repo, action, ctx = {}) {
       risk,
       steps: out.steps,
       display: out.steps.map((s) => ({ text: s.display, preview: s.preview, note: s.note })),
-      warnings: out.warnings || [],
+      warnings: [...(out.warnings || []), ...code.warnings],
+      // Fix all leaves these out of what it runs on its own (renderer/fix-all.js).
+      runsRepoCode: code.runsRepoCode,
+      // What recheck() inspects again just before the plan runs.
+      inspected: { uses: out.uses || [], remotes: out.remotes || [], pushes: !!out.pushes, target: out.target || null },
       undo: out.undo || null,
       body: out.body || null,
-      note: out.note || null,
+      note: [out.note, code.note].filter(Boolean).join(' ') || null,
       confirmName: RISK[risk] >= RISK.danger ? repo.name : null,
     };
   } catch (e) {
-    if (e instanceof PlanError || e instanceof AGENT.PlanError) return { ok: false, error: e.message };
+    if (e instanceof PlanError || e instanceof AGENT.PlanError) return { ok: false, error: e.message, ...(e.nothing ? { nothing: true } : {}) };
     return { ok: false, error: 'Could not plan action: ' + (e && e.message) };
   }
 }
 
+// Just before a stored plan runs: inspect the repo again, since an earlier plan in the same batch
+// (a pull) can bring files that add hooks, filters or settings. Returns why the plan is held, or null.
+async function recheck(p, ctx = {}) {
+  if (!p || !p.inspected) return null;
+  const held = (why) => `Held: the repo changed after the preview. ${why} Review it again.`;
+  try {
+    const code = await inspect(defaultCtx(ctx), p.repoPath, p.inspected, fail);
+    const fresh = code.warnings.filter((w) => !(p.warnings || []).includes(w));
+    if ((code.runsRepoCode && !p.runsRepoCode) || fresh.length) return held(fresh.join(' '));
+  } catch (e) { return held(e.message); }
+  return null;
+}
+
 // Execute a plan produced by plan(). Stops at the first failing step.
-module.exports = { plan, apply };
+module.exports = { plan, apply, recheck };

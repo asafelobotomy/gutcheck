@@ -21,7 +21,7 @@ const PLAN_TTL = 5 * 60 * 1000;
 const TREND_MAX = DAYS_PER_YEAR; // about a year of daily snapshots kept on disk
 const TREND_MERGE_MS = 10 * 60 * 1000; // scans closer together than this replace each other
 
-const publicPlan = (token, p) => ({ ok: true, token, type: p.type, repoPath: p.repoPath, repoName: p.repoName, title: p.title, risk: p.risk, display: p.display, warnings: p.warnings, undo: p.undo, body: p.body, note: p.note, confirmName: p.confirmName });
+const publicPlan = (token, p) => ({ ok: true, token, type: p.type, repoPath: p.repoPath, repoName: p.repoName, title: p.title, risk: p.risk, display: p.display, warnings: p.warnings, undo: p.undo, body: p.body, note: p.note, confirmName: p.confirmName, runsRepoCode: !!p.runsRepoCode });
 
 // deps: { known: Map(path -> scan result), settings: () => obj, audit: (entry) => void,
 //         trash: (path) => Promise, clipboard: { writeText }, rescan?: (dir) => Promise<result>,
@@ -106,6 +106,9 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
       if (busy.has(p.repoPath)) { note({ ok: false, repoName: p.repoName, title: p.title, error: 'Another action is running on this repo.' }, p); continue; }
       busy.add(p.repoPath);
       try {
+        // An earlier plan in the batch (a pull) may have brought hooks, filters or settings since the preview.
+        const held = await actions.recheck(p);
+        if (held) { note({ ok: false, held: true, repoName: p.repoName, title: p.title, error: held }, p); continue; }
         const r = await actions.apply(p, { trash });
         audit({ repo: p.repoName, path: p.repoPath, action: p.type, risk: p.risk, title: p.title, ok: r.ok, steps: r.results.map((x) => ({ cmd: x.text, ok: x.ok })) });
         let res = null;

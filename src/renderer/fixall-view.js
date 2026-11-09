@@ -65,5 +65,5 @@ async function fixAllIssues(r, all) {
   if (note) lead.push(note);
   if (left.length) lead.push(`Left for later: ${left.map((d) => d.title).join('; ')}.`);
   if (all.skipped.length) lead.push(`Not part of this repo: ${all.skipped.map((s) => `${s.title} (${s.reason})`).join('; ')}.`);
-  return runActions(actions.map((action) => ({ repo: r, action })), { ask: false, lead });
+  return runActions(actions.map((action) => ({ repo: r, action })), { ask: false, lead, hold: FixAll.automatic });
 }

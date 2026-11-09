@@ -38,9 +38,16 @@ function discover(root, maxDepth = 2) {
   return found.sort();
 }
 
+// Only GitHub itself (audit B13): the host must be github.com or www.github.com (any case), after
+// an https, http, git, ssh, git+ssh or ssh+git scheme with optional user info and port, or in the
+// scp form [user@]github.com:o/r. Not "github.com" elsewhere in an address, a lookalike host, a
+// <helper>:: address or a local folder, so those are never treated as GitHub. User info stops at
+// /, ?, # or \ (evil.com#@github.com is evil.com).
+const GITHUB_RE = /^(?:(?:https?|git|ssh|git\+ssh|ssh\+git):\/\/(?:[^@/?#\\]*@)?(?:www\.)?github\.com(?::\d+)?\/|(?:[A-Za-z0-9._-]+@)?(?:www\.)?github\.com:)([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/i;
 function parseGithubRemote(url) {
-  const m = /github\.com[:/]([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(url || '');
-  return m ? { owner: m[1], name: m[2] } : null;
+  const m = GITHUB_RE.exec(url || '');
+  // "." and ".." are path steps, not names (https://github.com/../n).
+  return m && ![m[1], m[2]].some((x) => x === '.' || x === '..') ? { owner: m[1], name: m[2] } : null;
 }
 
 async function collectGit(dir) {
@@ -75,6 +82,8 @@ async function collectGit(dir) {
   // Branches checked out in another worktree cannot be deleted or switched to from here.
   const wt = await git(['worktree', 'list', '--porcelain'], { cwd: dir });
   g.worktreeBranches = wt.stdout.split('\n').filter((l) => l.startsWith('branch refs/heads/')).map((l) => l.slice(18)).filter((b) => b !== g.branch);
+  // Remote names (Fetch is offered only when there is one).
+  g.remotes = (await git(['remote'], { cwd: dir })).stdout.split('\n').filter(Boolean);
   const rrefs = await git(['for-each-ref', '--format=%(refname:short)\t%(committerdate:iso-strict)', 'refs/remotes/origin'], { cwd: dir });
   g.remoteBranches = rrefs.stdout
     .split('\n')

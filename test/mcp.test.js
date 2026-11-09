@@ -198,7 +198,7 @@ test('cli: argument parsing, help, version, unknown command, fix previews withou
     assert.match((await run(['bogus', '--root', root], env)).err, /unknown command "bogus"/);
     const prev = await run(['fix', 'alpha', 'create-branch', 'name=feat', '--root', root], env);
     assert.equal(prev.code, 0);
-    assert.match(prev.out, /\$ git switch -c feat/);
+    assert.match(prev.out, /\$ git switch --no-recurse-submodules -c feat/);
     assert.match(prev.out, /Nothing was run/);
     assert.doesNotMatch(sh(path.join(root, 'alpha'), 'branch'), /feat/);
     const ran = await run(['fix', 'alpha', 'create-branch', 'name=feat', '--root', root, '--yes'], env);

@@ -41,6 +41,8 @@ const READONLY_GIT = [
   // Scans make no network calls; if one ever authenticated (git-lfs reads these too), it must not
   // run the repo's askpass program or credential helper.
   '-c', 'core.askPass=', '-c', 'credential.helper=',
+  // Run when git lists an alternate object store's refs (fetch negotiation, connectivity checks).
+  '-c', 'core.alternateRefsCommand=true', '-c', 'core.alternateRefsPrefixes=', // true lists none; empty prints "cannot run"
 ];
 
 // No lazy fetch: in a partial clone a missing object would be fetched, which runs the repo's
@@ -64,4 +66,4 @@ async function git(args, opts = {}) {
   return run('git', [...READONLY_GIT, ...extra, ...alias, ...args], { ...opts, env: { ...(opts.env || {}), ...SAFE_GIT_ENV } });
 }
 
-module.exports = { run, json, git, READONLY_GIT, SAFE_GIT_ENV, forgetGitDrivers: (dir) => drivers.forget(dir) };
+module.exports = { run, json, git, READONLY_GIT, SAFE_GIT_ENV, forgetGitDrivers: (dir) => drivers.forget(dir), configEntries: (dir, keys) => drivers.configEntries(dir, keys) };

@@ -91,13 +91,18 @@ function watchedFiles(top, all) {
 
 const cmpVer = (a, b) => (a[0] - b[0]) || (a[1] - b[1]);
 
+// The entries the user's own config does not also set to that value (the command line counts as
+// the user's): the ones the repo's own config, or a file it includes, decided.
+function untrustedOf(all, trusted) {
+  const ok = new Set(trusted.map((e) => `${e.key}\n${e.value}`));
+  return all.filter((e) => e.origin !== 'command line:' && !ok.has(`${e.key}\n${e.value}`));
+}
+
 // The -c options that blank every driver the user's own config does not also set to that value.
 function overridesFrom(all, trusted, gitVersion) {
-  const ok = new Set(trusted.map((e) => `${e.key}\n${e.value}`));
   const out = [];
   const required = new Set();
-  for (const e of all) {
-    if (e.origin === 'command line:' || ok.has(`${e.key}\n${e.value}`)) continue;
+  for (const e of untrustedOf(all, trusted)) {
     if (e.key === 'extensions.partialclone' || (/^remote\..+\.promisor$/.test(e.key) && !/^(false|no|off|0)$/i.test(e.value || ''))) {
       if (cmpVer(gitVersion, LAZY_FETCH_GIT) < 0) throw new Error(`this repo is a partial clone, and git ${gitVersion.join('.')} cannot stop it fetching (git 2.44 or newer can)`);
       continue;
@@ -129,11 +134,11 @@ module.exports = (run, READONLY_GIT, SAFE_ENV) => {
     return [Number(m[1]), Number(m[2])];
   }));
 
-  async function query(cwd, env, scope) {
-    const r = await run('git', [...READONLY_GIT, 'config', '-z', '--show-origin', '--includes', ...scope, '--get-regexp', KEYS], { cwd, env: { ...env, ...SAFE_ENV }, timeout: 15000 });
+  async function query(cwd, env, scope, keys = KEYS) {
+    const r = await run('git', [...READONLY_GIT, 'config', '-z', '--show-origin', '--includes', ...scope, '--get-regexp', keys], { cwd, env: { ...env, ...SAFE_ENV }, timeout: 15000 });
     if (r.ok) return entries(r.stdout);
     if (r.code === 1 && !r.stdout) return []; // no such keys (or no such file)
-    throw new Error(`could not read its filter and diff drivers (${(r.stderr || '').trim().split('\n')[0].slice(0, 120)})`);
+    throw new Error(`could not read its git config (${(r.stderr || '').trim().split('\n')[0].slice(0, 120)})`);
   }
 
   async function lookup(cwd, top, env) {
@@ -158,11 +163,19 @@ module.exports = (run, READONLY_GIT, SAFE_ENV) => {
     return entry.p;
   }
 
+  // Plan-time checks for actions (git-safety.js): every entry for these keys (a --get-regexp
+  // pattern on git's lower-cased names), in the order git reads them, and the ones the user's own
+  // config does not also set to that value. Not cached: an action plans once.
+  async function configEntries(cwd, keys) {
+    const [all, global, system] = await Promise.all([query(cwd, undefined, [], keys), query(cwd, undefined, ['--global'], keys), query(cwd, undefined, ['--system'], keys)]);
+    return { all, untrusted: untrustedOf(all, [...global, ...system]) };
+  }
+
   // Drop what is cached for a repo folder (and folders inside it): before a scan, after an action.
   function forget(dir) {
     const root = path.resolve(dir);
     for (const k of cache.keys()) { const c = path.resolve(k.split('\0')[0]); if (c === root || c.startsWith(root + path.sep)) cache.delete(k); }
   }
 
-  return { driverOverrides, forget, DRIVER_TTL_MS };
+  return { driverOverrides, configEntries, forget, DRIVER_TTL_MS };
 };

@@ -95,7 +95,7 @@ test('scans and actions drop a repo\'s cached drivers before they start and afte
   try {
     await collectLocal(d, {});
     assert.deepEqual(seen, [d], 'collectLocal forgets first');
-    const p = await plan(await scanRepo(d, {}), { type: 'fetch' });
+    const p = await plan(await scanRepo(d, {}), { type: 'worktree-prune' });
     seen.length = 0;
     await apply(p, { run: async () => ({ ok: true, stdout: '', stderr: '' }) });
     assert.deepEqual(seen, [d], 'apply forgets afterwards');
