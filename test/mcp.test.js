@@ -229,7 +229,7 @@ test('secrets over MCP: read-only list with titles and statuses only; backing up
     const d = data(r);
     assert.equal(d.linked, false);
     const titles = d.items.map((x) => x.title).sort();
-    assert.deepEqual(titles, ['gutcheck: alpha/.env', 'gutcheck: ~/.aws/credentials']);
+    assert.deepEqual(titles, ['gutcheck: home ~/.aws/credentials', 'gutcheck: repo alpha/.env']);
     for (const x of d.items) assert.deepEqual(Object.keys(x).sort(), ['confidence', 'kind', 'status', 'title']);
     const txt = r.content[0].text;
     for (const bad of [root, home, 'sha256', 'hunter']) assert.ok(!txt.includes(bad), bad);

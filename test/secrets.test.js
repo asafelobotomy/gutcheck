@@ -94,7 +94,7 @@ test('repo: ignored and untracked secrets found; committed, template, big and no
     assert.equal(c.find((x) => x.rel === 'test/fixtures/id_rsa').confidence, 'low');
     assert.equal(c.find((x) => x.rel === '.env').confidence, 'high');
     assert.match(c[0].sha256, /^[0-9a-f]{64}$/);
-    assert.equal(c.find((x) => x.rel === '.env').title, `gutcheck: ${path.basename(dir)}/.env`);
+    assert.equal(c.find((x) => x.rel === '.env').title, `gutcheck: repo ${path.basename(dir)}/.env`);
     assert.equal(c.find((x) => x.rel === '.env').repo, path.basename(dir));
     assert.equal(c.find((x) => x.rel === '.env').kind, 'file');
     assert.equal(c.find((x) => x.rel === 'test/fixtures/id_rsa').kind, 'ssh');
@@ -139,7 +139,7 @@ test('workspace: loose .env files only, not templates or other files', async () 
     put(root, '.env.example', 'A=');
     put(root, 'server.key', 'k');
     const c = await S.findWorkspaceSecrets(root);
-    assert.deepEqual(c.map((x) => x.title), ['gutcheck: workspace/.env']);
+    assert.deepEqual(c.map((x) => x.title), ['gutcheck: root .env']);
     assert.equal(c[0].scope, 'workspace');
     assert.equal(c[0].repo, null);
     assert.deepEqual(await S.findWorkspaceSecrets('/nonexistent-gc'), []);
@@ -159,8 +159,8 @@ test('home: fixed list only, content-gated, unreadable files skipped', async () 
     put(home, '.aws/credentials', '[default]\n');
     fs.chmodSync(path.join(home, '.aws/credentials'), 0);
     const c = await S.findHomeSecrets({ home, env: {} });
-    const want = ['gutcheck: ~/.pypirc', 'gutcheck: ~/.ssh/id_ed25519'];
-    if (process.getuid && process.getuid() === 0) want.unshift('gutcheck: ~/.aws/credentials');
+    const want = ['gutcheck: home ~/.pypirc', 'gutcheck: home ~/.ssh/id_ed25519'];
+    if (process.getuid && process.getuid() === 0) want.unshift('gutcheck: home ~/.aws/credentials');
     assert.deepEqual(c.map((x) => x.title).sort(), want.sort());
     const k = c.find((x) => x.kind === 'ssh');
     assert.equal(k.fingerprint.startsWith('SHA256:'), true);
@@ -179,8 +179,8 @@ test('home: .npmrc with _authToken and docker auths with auth are found', async 
     put(home, '.android/debug.keystore', 'k');
     const c = await S.findHomeSecrets({ home, env: {} });
     assert.deepEqual(c.map((x) => x.title).sort(), [
-      'gutcheck: ~/.android/debug.keystore', 'gutcheck: ~/.config/gcloud/application_default_credentials.json',
-      'gutcheck: ~/.docker/config.json', 'gutcheck: ~/.npmrc']);
+      'gutcheck: home ~/.android/debug.keystore', 'gutcheck: home ~/.config/gcloud/application_default_credentials.json',
+      'gutcheck: home ~/.docker/config.json', 'gutcheck: home ~/.npmrc']);
     // XDG_CONFIG_HOME moves the gcloud lookup
     const x = await S.findHomeSecrets({ home, env: { XDG_CONFIG_HOME: path.join(home, 'nowhere') } });
     assert.ok(!x.some((i) => /gcloud/.test(i.title)));
@@ -194,7 +194,7 @@ test('home: gnupg private-keys folder is one entry whose hash changes with its k
     assert.deepEqual(await S.findHomeSecrets({ home, env: {} }), []);
     put(home, '.gnupg/private-keys-v1.d/a.key', 'one');
     const a = (await S.findHomeSecrets({ home, env: {} }))[0];
-    assert.equal(a.title, 'gutcheck: ~/.gnupg/private-keys-v1.d');
+    assert.equal(a.title, 'gutcheck: home ~/.gnupg/private-keys-v1.d');
     assert.equal(a.kind, 'file');
     put(home, '.gnupg/private-keys-v1.d/b.key', 'two');
     const b = (await S.findHomeSecrets({ home, env: {} }))[0];
@@ -272,8 +272,8 @@ test('advice: grouping, changed, workspace, unlinked, low-only and empty groups'
     cand({ real: '/r/old', rel: 'old' }), cand({ real: '/r/gone', rel: 'gone', sha256: 'c'.repeat(64) }),
     cand({ real: '/r/ok', rel: 'ok', sha256: 'e'.repeat(64) }), cand({ real: '/r/skip', rel: 'skip' }),
     cand({ real: '/q/.env', repo: 'q', rel: '.env', sha256: 'f'.repeat(64), confidence: 'low' }),
-    cand({ real: '/w/a.pem', scope: 'workspace', repo: null, rel: 'a.pem', title: 'gutcheck: workspace/a.pem', sha256: '1'.repeat(64) }),
-    cand({ real: '/h/.npmrc', scope: 'home', repo: null, rel: '.npmrc', title: 'gutcheck: ~/.npmrc', sha256: '2'.repeat(64) })];
+    cand({ real: '/w/a.pem', scope: 'workspace', repo: null, rel: 'a.pem', title: 'gutcheck: root a.pem', sha256: '1'.repeat(64) }),
+    cand({ real: '/h/.npmrc', scope: 'home', repo: null, rel: '.npmrc', title: 'gutcheck: home ~/.npmrc', sha256: '2'.repeat(64) })];
   const a = R.secretAdvice(cs, rec, { linked: false });
   assert.deepEqual(a.map((x) => x.id).sort(), ['secret-changed', 'secret-unbacked', 'secret-unbacked', 'ws-secret-unbacked']);
   const ch = a.find((x) => x.id === 'secret-changed');

@@ -161,6 +161,17 @@ test('slug is injective: spaces, underscores, %, ~ and non-ASCII never meet', ()
   assert.equal(new Set(slugs).size, titles.length, slugs.join(' '));
   assert.equal(slug('gutcheck: my app/.env'), 'my%20app/.env');
   assert.equal(slug('gutcheck: ~/.netrc'), '%7E/.netrc');
+  // Scoped titles: the scope word becomes a folder; repo, home and root names never meet.
+  const scoped = ['gutcheck: repo workspace/.env', 'gutcheck: root .env', 'gutcheck: repo ~/.netrc', 'gutcheck: home ~/.netrc',
+    'gutcheck: repo home/.netrc', 'gutcheck: repo root/.env', 'gutcheck: repo my app/.env', 'gutcheck: repo my_app/.env', 'gutcheck: repo a/b c', 'gutcheck: repo a b/c'];
+  assert.equal(new Set(scoped.map(slug)).size, scoped.length, scoped.map(slug).join(' '));
+  assert.equal(slug('gutcheck: repo my app/.env'), '@repo/my%20app/.env');
+  assert.equal(slug('gutcheck: home ~/.netrc'), '@home/%7E/.netrc');
+  assert.equal(slug('gutcheck: root .env'), '@root/.env');
+  for (const id of ['pass', 'gopass', 'keepassxc']) {
+    const k = (t) => ADAPTERS[id].saveCmd({ ...c, title: t }, tgt(id)).key;
+    assert.equal(new Set(scoped.map(k)).size, scoped.length, id);
+  }
   for (const id of ['pass', 'gopass', 'keepassxc']) {
     const k = (t) => ADAPTERS[id].saveCmd({ ...c, title: t }, tgt(id)).key;
     assert.notEqual(k('gutcheck: my app/.env'), k('gutcheck: my_app/.env'), id);

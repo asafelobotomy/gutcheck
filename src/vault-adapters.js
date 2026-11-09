@@ -21,11 +21,17 @@ const lines = (s) => String(s || '').split('\n').map((l) => l.trim()).filter(Boo
 const baseName = (rel) => path.basename(String(rel || 'file'));
 
 // The title without "gutcheck: ", with every byte outside [A-Za-z0-9_./-] percent-encoded (UTF-8),
-// "%" and "~" included. Injective: "my app" -> "my%20app" never meets "my_app", and "~/.netrc" ->
-// "%7E/.netrc" never meets a repo named "home".
+// "%" and "~" included, and the scope word as an "@" folder: "gutcheck: repo my app/.env" ->
+// "@repo/my%20app/.env", "gutcheck: home ~/.netrc" -> "@home/%7E/.netrc", "gutcheck: root .env" ->
+// "@root/.env". Injective: the encoding is, and the scope words are fixed and hold no "/". A title
+// from before the scope words (still in an old record) is encoded whole, as it was then; that
+// encoding writes "@" as "%40", so old names never meet the "@" folders.
 function slug(title) {
   const hex = (b) => '%' + b.toString(16).toUpperCase().padStart(2, '0');
-  return String(title).replace(/^gutcheck:\s*/, '').replace(/[^\w./-]/gu, (ch) => [...Buffer.from(ch, 'utf8')].map(hex).join(''));
+  const enc = (s) => s.replace(/[^\w./-]/gu, (ch) => [...Buffer.from(ch, 'utf8')].map(hex).join(''));
+  const t = String(title).replace(/^gutcheck:\s*/, '');
+  const m = /^(repo|home|root) ([\s\S]*)$/.exec(t);
+  return m ? `@${m[1]}/${enc(m[2])}` : enc(t);
 }
 
 // UTF-8 text without NULs, else "base64:\n<b64>" (for text-only tools).
@@ -129,8 +135,9 @@ const keepassxc = make('keepassxc', 'keepassxc-cli', 'Path to the .kdbx file, it
   named: true,
   // { update, itemId }: the entry this file was saved to before. It exists, so no add, and -f
   // replaces the attachment (attachment-import refuses an existing one without it).
-  saveCmd(cand, t, { update = false, itemId = null } = {}) {
-    const entry = update && itemId ? itemId : kpEntry(cand, t);
+  saveCmd(cand, t, o = {}) {
+    const { update = false, itemId = null } = o;
+    const entry = update && itemId ? itemId : kpEntry(cand, t) + suffixOf(o);
     const [noPw, k, key, db] = kpBase(t);
     const imp = { args: ['attachment-import', ...(update ? ['-f'] : []), noPw, k, key, db, entry, baseName(cand.rel), '/dev/stdin'], stdin: true, stdinPath: true, encode: (buf) => buf };
     return { key: entry, steps: update ? [imp] : [{ args: ['add', noPw, k, key, db, entry] }, imp], parseId: () => entry };
@@ -146,13 +153,18 @@ const keepassxc = make('keepassxc', 'keepassxc-cli', 'Path to the .kdbx file, it
   },
 });
 
+// { suffix }: "~" and 8 hex, added to a new name whose plain form a gone file's backup still holds.
+// slug() writes "~" as %7E, so a suffixed name never equals a plain one.
+const suffixOf = (o) => (o && /^~[0-9a-f]{8}$/.test(o.suffix || '') ? o.suffix : '');
+
 function passLike(id, bin, insertFlags, extra) {
   const sub = (t) => String(t || '').replace(/^\/+|\/+$/g, '') || 'gutcheck';
   return make(id, bin, 'Subfolder (optional, default gutcheck)', {
     named: true,
     // A file saved before keeps its name (itemId); insert -f overwrites that item.
-    saveCmd(cand, t, { update = false, itemId = null } = {}) {
-      const name = update && itemId ? itemId : `${sub(t)}/${slug(cand.title)}`;
+    saveCmd(cand, t, o = {}) {
+      const { update = false, itemId = null } = o;
+      const name = update && itemId ? itemId : `${sub(t)}/${slug(cand.title)}${suffixOf(o)}`;
       return { key: name, args: ['insert', ...insertFlags, name], encode: (buf) => textOf(buf), parseId: () => name };
     },
     ...extra,
@@ -176,6 +188,22 @@ const gopass = passLike('gopass', 'gopass', ['-f'], {
   parseList: (o) => { const ls = nameLines(o); return ls ? new Set(ls) : null; },
 });
 
+// Where a tool's items live, in a comparable form: two links with equal stores share item names.
+// pass and gopass: one store (the subfolder is part of each name); KeePassXC: the database's real path.
+function storeOf(tool, t) {
+  if (tool === 'pass' || tool === 'gopass') return '';
+  if (tool !== 'keepassxc') return JSON.stringify(t == null ? '' : t);
+  let db = t && typeof t === 'object' ? String(t.db || '') : '';
+  try { db = fs.realpathSync(db); } catch { /* a missing database keeps its path */ }
+  return db;
+}
+// A link's target, normalised: "", "gutcheck" and "/gutcheck/" are one pass folder, "g" and "g/" one group.
+function targetKey(tool, t) {
+  if (tool === 'pass' || tool === 'gopass') return String(t || '').replace(/^\/+|\/+$/g, '') || 'gutcheck';
+  if (tool === 'keepassxc') return JSON.stringify([storeOf(tool, t), String((t && t.group) || 'gutcheck').replace(/\/+$/, '')]);
+  return storeOf(tool, t);
+}
+
 const ADAPTERS = { proton, '1password': onepassword, bitwarden, keepassxc, pass, gopass };
 
-module.exports = { ADAPTERS, TOOL_INFO, BW_NOTE_MAX, slug, textOf };
+module.exports = { storeOf, targetKey, ADAPTERS, TOOL_INFO, BW_NOTE_MAX, slug, textOf };

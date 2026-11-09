@@ -93,7 +93,7 @@ Copies count once: when a file's hash matches any backed entry, it is shown as `
 - Steps per file:
   - A `check` step: the file's sha256 still equals the one the plan was built with.
   - A `vault-save` step `{ tool, title, path, sha256, cmd, args }`. The preview shows `pass-cli item create note --vault-name "Dev secrets" --from-template -  ← contents of .env (412 bytes)`.
-- Item title: `gutcheck: <repo-name>/<rel-path>`, `gutcheck: ~/<rel-to-home>`, or `gutcheck: workspace/<name>`.
+- Item title: `gutcheck: repo <repo-label>/<rel-path>`, `gutcheck: home ~/<rel-to-home>`, or `gutcheck: root <name>` (a fixed scope word, so scopes never share a title; titles before 2026-11-09 had no scope word and stay valid through the recorded key and item ID).
 - The item's note field also records the host name and the absolute path, so the user knows where it came from. This is metadata, not the secret.
 - Risk is `caution`, and the note reads: "Copies the file's contents into <tool> (<target>). The local file is not changed."
 

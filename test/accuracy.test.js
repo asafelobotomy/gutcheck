@@ -301,3 +301,17 @@ test('secrets false alarms: templates and public keys are not secrets, committed
     assert.deepEqual(await findRepoSecrets(plain), [], 'not a git repo: the tracked set is unknown, so nothing is offered');
   } finally { rm(d); rm(plain); }
 });
+
+test('secrets: a nested repo\'s committed .env is not reported as unbacked in the parent (audit A3)', async () => {
+  const d = repo();
+  try {
+    const inner = path.join(d, 'tools', 'inner');
+    fs.mkdirSync(inner, { recursive: true });
+    sh(inner, 'init', '-q', '-b', 'main');
+    put(inner, '.env', 'INNER=1\n');
+    sh(inner, 'add', '.env');
+    sh(inner, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'c');
+    put(d, '.env', 'A=1\n');
+    assert.deepEqual((await findRepoSecrets(d)).map((c) => c.rel), ['.env'], 'committed in the nested repo, so git already keeps it');
+  } finally { rm(d); }
+});

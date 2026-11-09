@@ -222,7 +222,7 @@ function createEngine(opts = {}) {
       }
       if (it && it.secretBackup !== undefined) { // { secretBackup: [paths] }: the CLI's own backup preview
         const p = await secrets.plan(it.secretBackup);
-        errors.push(p.ok ? { ok: true, token: p.token, repo: 'Secrets', title: p.title, risk: p.risk, commands: p.display.map((d) => d.text), note: p.note } : { ok: false, repoName: 'Secrets', error: p.error });
+        errors.push(p.ok ? { ok: true, token: p.token, repo: 'Secrets', title: p.title, risk: p.risk, commands: p.display.map((d) => d.text), note: [p.note, ...(p.warnings || [])].join(' ') } : { ok: false, repoName: 'Secrets', error: p.error });
         continue;
       }
       const x = resolve(it && it.repo);

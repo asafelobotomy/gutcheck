@@ -34,14 +34,14 @@ function adviceView(advice, items) {
 function view(res) {
   if (!res || !res.ok) return res;
   const items = res.items.map(itemView);
-  return { ok: true, linked: res.linked, tool: res.tool, target: res.target, items, advice: adviceView(res.advice, items) }; // mcpView leaves target out
+  return { ok: true, linked: res.linked, tool: res.tool, target: res.target, items, advice: adviceView(res.advice, items), problems: res.problems || [] }; // mcpView leaves target out
 }
 
 // What the MCP server may return: titles, statuses, kinds and confidence. No paths, no hashes.
 function mcpView(res) {
   if (!res || !res.ok) return res;
   return {
-    ok: true, linked: res.linked, tool: res.tool,
+    ok: true, linked: res.linked, tool: res.tool, problems: res.problems || [],
     items: res.items.map((i) => ({ title: i.title, status: i.status, kind: i.kind, confidence: i.confidence })),
     advice: res.advice.map(({ fix, ...a }) => ({ ...a, ...(fix ? { fix: { type: fix.type } } : {}) })),
   };

@@ -26,10 +26,10 @@ test('pass: "my app" and "my_app" get distinct item names, so neither overwrites
   const ws = { repos: [{ path: path.dirname(a), name: 'my app' }, { path: path.dirname(b), name: 'my_app' }], root };
   const p = await ctl.plan([a, b], { via: 'app', ...ws });
   assert.ok(p.ok, p.error);
-  assert.deepEqual(p.display.map((d) => d.text.split('  ←')[0]).sort(), ['pass insert -m -f gutcheck/my%20app/.env', 'pass insert -m -f gutcheck/my_app/.env']);
+  assert.deepEqual(p.display.map((d) => d.text.split('  ←')[0]).sort(), ['pass insert -m -f gutcheck/@repo/my%20app/.env', 'pass insert -m -f gutcheck/@repo/my_app/.env']);
 });
 
-test('a key clash is refused: two planned files with one key, or a key recorded for another file', async () => {
+test('a key clash drops the second file of two with one key; a key recorded for another file is refused', async () => {
   const { repo, envPath, ws, mkCtl, dataDir } = setup();
   const local = path.join(repo, '.env.local');
   fs.writeFileSync(local, 'L=1\n');
@@ -39,12 +39,18 @@ test('a key clash is refused: two planned files with one key, or a key recorded 
   ADAPTERS.pass.saveCmd = (c, t, o) => ({ ...orig(c, t, o), key: 'gutcheck/same' }); // as if two titles slugged alike
   try {
     const r = await ctl.plan([envPath, local], { via: 'app', ...ws });
-    assert.equal(r.error, 'Two files would get the same vault item name: gutcheck/same. Rename one or skip it.');
+    assert.ok(r.ok, r.error);
+    assert.match(r.title, /^Back up 1 secret file/);
+    assert.deepEqual(r.display.map((d) => d.text.split('  ←')[0]), ['pass insert -m -f gutcheck/@repo/api/.env']);
+    assert.deepEqual(r.warnings, ['skipped: repo api/.env.local: another file already uses the vault item name gutcheck/same']);
+    assert.equal(r.skipped, 1);
   } finally { ADAPTERS.pass.saveCmd = orig; }
   const rec = require('../src/secret-status').createRecord(path.join(dataDir, 'secret-backups.json'));
-  rec.update((x) => { x.entries['/elsewhere/.env'] = { sha256: 'f', tool: 'pass', target: '', itemId: 'gutcheck/api/.env', title: 'gutcheck: old' }; });
+  const elsewhere = path.join(dataDir, 'elsewhere.env'); // still on disk, so it still owns the name
+  fs.writeFileSync(elsewhere, 'E=1\n');
+  rec.update((x) => { x.entries[elsewhere] = { sha256: 'f', tool: 'pass', target: '', itemId: 'gutcheck/@repo/api/.env', title: 'gutcheck: old' }; });
   const r2 = await ctl.plan([envPath], { via: 'app', ...ws });
-  assert.equal(r2.error, 'Two files would get the same vault item name: gutcheck/api/.env. Rename one or skip it.');
+  assert.equal(r2.error, 'Two files would get the same vault item name: gutcheck/@repo/api/.env. Rename one or skip it.');
   assert.equal((await ctl.plan([local], { via: 'app', ...ws })).ok, true);
 });
 
@@ -59,14 +65,14 @@ test('a symlinked ~/.npmrc (dotfiles) is named by the link, saved from its targe
   const ctl = mkCtl({ run: okRun(calls) });
   ctl.link({ tool: 'proton', target: 'Dev' });
   const item = (await ctl.scan(ws)).items.find((i) => i.scope === 'home');
-  assert.deepEqual([item.title, item.rel, item.real], ['gutcheck: ~/.npmrc', '.npmrc', target]);
+  assert.deepEqual([item.title, item.rel, item.real], ['gutcheck: home ~/.npmrc', '.npmrc', target]);
   assert.ok(!(await ctl.scan(ws)).items.some((i) => i.rel === '.netrc'));
   const p = await ctl.plan([path.join(home, '.npmrc')], { via: 'app', ...ws });
   assert.ok(p.ok, p.error);
   const r = await ctl.apply(p.token, { via: 'app' });
   assert.ok(r.ok, JSON.stringify(r));
   assert.ok(calls[0].input.includes('npm-hunter3'));
-  assert.equal(record().entries[target].title, 'gutcheck: ~/.npmrc');
+  assert.equal(record().entries[target].title, 'gutcheck: home ~/.npmrc');
   assert.equal((await ctl.scan(ws)).items.find((i) => i.real === target).status, 'backed');
 });
 
@@ -119,7 +125,7 @@ test('KeePassXC: a changed file is re-backed up with attachment-import -f onto i
   const saves = () => calls.filter((c) => c.args[0] !== 'ls').map((c) => (c.cmd === '/bin/sh' ? c.args.slice(3) : c.args));
   assert.deepEqual(saves().map((a) => a[0]), ['add', 'attachment-import']);
   const entry = record().entries[envPath].itemId;
-  assert.equal(entry, 'gutcheck/api%2F.env');
+  assert.equal(entry, 'gutcheck/@repo%2Fapi%2F.env');
   fs.appendFileSync(envPath, 'NEW=1\n');
   calls.length = 0;
   const p2 = await ctl.plan([envPath], { via: 'app', ...ws });
@@ -166,7 +172,7 @@ test('the audit says "Back up" for a failed save and "Backed up" for a saved one
   await ctl.apply((await ctl.plan([envPath], { via: 'app', ...ws })).token, { via: 'app' });
   ok = true;
   await ctl.apply((await ctl.plan([envPath], { via: 'app', ...ws })).token, { via: 'app' });
-  assert.deepEqual(log.map((e) => [e.ok, e.title]), [[false, 'Back up gutcheck: api/.env to Proton Pass'], [true, 'Backed up gutcheck: api/.env to Proton Pass']]);
+  assert.deepEqual(log.map((e) => [e.ok, e.title]), [[false, 'Back up gutcheck: repo api/.env to Proton Pass'], [true, 'Backed up gutcheck: repo api/.env to Proton Pass']]);
 });
 
 test('a record with null or non-object entries loads and scans without crashing', async () => {

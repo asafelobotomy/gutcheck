@@ -7,8 +7,8 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const exec = require('./exec');
-const { plural } = require('./util');
-const { ADAPTERS, TOOL_INFO } = require('./vault-adapters');
+const { plural, printable, sq } = require('./util');
+const { ADAPTERS, TOOL_INFO, storeOf, targetKey } = require('./vault-adapters');
 const { findRepoSecrets, findWorkspaceSecrets, findHomeSecrets } = require('./secrets');
 const { createRecord, statusOf, secretAdvice } = require('./secret-status');
 const { scrub, findBin, containing, safePath, readPlanned } = require('./secrets-io');
@@ -20,12 +20,19 @@ const NOT_LINKED = 'Link a password manager first (Secrets > Password manager…
 const SCAN_FIRST = 'Scan a workspace first.';
 const lockedText = (l, s) => (s.locked ? `${l.info.label} is locked or not signed in. ` : '') + (s.hint || l.info.unlockHint);
 // Names the clashing item: its title for id-based tools, else its pass/gopass name or KeePassXC entry.
-const CLASH = (cand, key) => `Two files would get the same vault item ${key === cand.title ? 'title' : 'name'}: ${key}. Rename one or skip it.`;
+const keyWord = (cand, key) => (key === cand.title ? 'title' : 'name');
+const CLASH = (cand, key) => `Two files would get the same vault item ${keyWord(cand, key)}: ${key}. Rename one or skip it.`;
+const shortName = (cand) => cand.title.replace(/^gutcheck: /, '');
 const GOOGLE = { id: 'google', label: 'Google Password Manager', found: false, reason: 'No CLI or write API' };
 
 const refused = (via) => (via === 'mcp' ? { ok: false, error: MCP_REFUSAL } : null);
-const quote = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : '"' + String(s).replace(/(["\\$`])/g, '\\$1') + '"');
+// One argument as the preview shows it: escaped by printable (so a "\" shows once, as "\\"), then
+// single-quoted unless it is plain, so a pasted copy cannot expand.
+const quoteArg = (s) => { const p = printable(s); return /^[\w@%+=:,./-][\w@%+=:,./~-]*$/.test(p) ? p : sq(p); };
 const isText = (s) => typeof s === 'string' && s.length <= 300 && !/[\0-\x1f\x7f]/.test(s) && !s.startsWith('-');
+// A recorded item name: our own pass/gopass name or KeePassXC entry, which can be long.
+const isName = (s) => typeof s === 'string' && s.length <= 4096 && !/[\0-\x1f\x7f]/.test(s) && !s.startsWith('-');
+const tagOf = (real) => '~' + crypto.createHash('sha256').update(real).digest('hex').slice(0, 8);
 const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
 // A repo's label in titles: its path under the workspace root (posix), else its folder name.
 function repoLabel(repoPath, root) {
@@ -125,7 +132,8 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     const list = (Array.isArray(repos) ? repos : []).filter((r) => r && typeof r.path === 'string');
     last = { repos: list, root: typeof root === 'string' ? root : null };
     const found = [];
-    for (const r of list) found.push(...await findRepoSecrets(r.path, { name: repoLabel(r.path, last.root) }));
+    const problems = []; // { repo, error }: a repo whose secrets could not be checked
+    for (const r of list) found.push(...await findRepoSecrets(r.path, { name: repoLabel(r.path, last.root), problems }));
     if (last.root) found.push(...await findWorkspaceSecrets(last.root));
     if (withHome !== false) found.push(...await findHomeSecrets({ home, env }));
     const byReal = new Map();
@@ -136,7 +144,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     return {
       ok: true, linked: !!l, tool: l ? l.tool : null, target: l ? l.target : null, // where items go (a vault name or paths), for the app's panel
       items: cands.map((c) => ({ ...c, ...statusOf(c, rec) })),
-      advice: secretAdvice(cands, rec, { linked: !!l }),
+      advice: secretAdvice(cands, rec, { linked: !!l }), problems,
     };
   }
 
@@ -159,40 +167,76 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     const fresh = await scan(ws);
     const rec = record.load();
     // Entries this link wrote: same tool and target. A named item (pass, gopass, KeePassXC) keeps its name.
-    const ours = (e) => !!e && typeof e === 'object' && e.tool === l.tool && JSON.stringify(e.target == null ? '' : e.target) === JSON.stringify(l.target == null ? '' : l.target);
+    // Targets are compared normalised, so relinking "" as "gutcheck" (or group "g" as "g/") keeps ownership.
+    const ours = (e) => !!e && typeof e === 'object' && e.tool === l.tool && targetKey(e.tool, e.target) === targetKey(l.tool, l.target);
+    // One vault item per key (the title, or the pass/gopass name or KeePassXC entry): insert -f and
+    // attachment-import -f would overwrite an item another file owns. A file whose key is taken is
+    // left out of this plan, with a "skipped:" warning; the rest go ahead.
+    const keyOf = (e) => e.key || (l.a.named ? e.itemId : e.title);
+    // Owners by the item they hold. A named tool's key is the full name (folder or group included), so
+    // every entry of the tool in the same store counts, whatever target it was saved under.
+    const inStore = (e) => (l.a.named ? !!e && typeof e === 'object' && e.tool === l.tool && storeOf(e.tool, e.target) === storeOf(l.tool, l.target) : ours(e));
+    const byKey = new Map(); // key -> [{ real, e }]
+    for (const [real, e] of Object.entries(rec.entries)) {
+      if (!inStore(e)) continue;
+      if (!byKey.has(keyOf(e))) byKey.set(keyOf(e), []);
+      byKey.get(keyOf(e)).push({ real, e });
+    }
+    const othersOf = (key, real) => (byKey.get(key) || []).filter((o) => o.real !== real);
+    // An owner is gone when its file is not found (a renamed workspace, or an unmounted disk), or when
+    // it was a home file whose name now leads elsewhere (a repointed dotfiles link). Its backup may be
+    // the only copy, so it is never overwritten: a named tool saves this file under a new name.
+    const homeAt = new Map(fresh.items.filter((c) => c.scope === 'home').map((c) => [c.title, c.real]));
+    const gone = (o) => {
+      if (!fs.existsSync(o.real)) return 'no longer found';
+      const now = homeAt.get(o.e.title);
+      return now && now !== o.real ? `${o.e.title.replace(/^gutcheck: home /, '')} no longer points to it` : null;
+    };
+    const keys = new Set();
     const items = [];
     const display = [];
+    const warnings = [];
+    let clash = null;
     for (const c of fresh.items) {
       if (!wanted.has(c.real) || c.status === 'backed' || c.status === 'skipped' || !isFile(c.real)) continue;
       const prev = rec.entries[c.real];
-      const again = l.a.named && ours(prev) && !prev.missing && isText(prev.itemId) ? { update: true, itemId: prev.itemId } : {};
-      const save = l.a.saveCmd(c, l.target, again);
+      const again = l.a.named && ours(prev) && !prev.missing && isName(prev.itemId) ? { update: true, itemId: prev.itemId } : {};
+      let save = l.a.saveCmd(c, l.target, again);
       if (save.error) return { ok: false, error: save.error };
+      const others = othersOf(save.key, c.real);
+      let kept = null;
+      // An id-based tool only ever creates, so a gone owner's title is no clash. A named tool gets a
+      // new name, suffixed with a hash of this file's path.
+      if (others.length && l.a.named && others.every(gone)) {
+        kept = others[0];
+        save = l.a.saveCmd(c, l.target, { suffix: tagOf(c.real) });
+      }
+      const live = othersOf(save.key, c.real).some((o) => (l.a.named ? true : !gone(o)));
+      if (keys.has(save.key) || live) {
+        clash = clash || CLASH(c, save.key);
+        warnings.push(printable(`skipped: ${shortName(c)}: another file already uses the vault item ${keyWord(c, save.key)} ${save.key}`));
+        continue;
+      }
+      // The invariant: a named save never reuses a name recorded for another file.
+      if (l.a.named && othersOf(save.key, c.real).length) return { ok: false, error: 'GutCheck refused this backup: a save would reuse the vault item of another file. Nothing was planned.' };
+      keys.add(save.key);
+      if (kept) warnings.push(printable(`${shortName(c)} is saved as a new item; the backup of ${kept.real} (${gone(kept)}) is kept as ${kept.e.itemId || keyOf(kept.e)}.`));
       items.push({ cand: c, sha256: c.sha256, save });
       const steps = save.steps || [save];
       steps.forEach((s, i) => {
-        const cmd = [l.a.bin, ...s.args.map(quote)].join(' ');
-        const tail = i === steps.length - 1 ? `  ← contents of ${c.title.replace(/^gutcheck: /, '')} (${c.size} bytes)` : '';
+        const cmd = [l.a.bin, ...s.args.map(quoteArg)].join(' ');
+        const tail = i === steps.length - 1 ? `  ← contents of ${printable(shortName(c))} (${c.size} bytes)` : '';
         display.push({ text: cmd + tail });
       });
     }
-    if (!items.length) return { ok: false, error: 'Nothing to back up: those files are already backed up, skipped or no longer found.' };
-    // One vault item per key (the title, or the pass/gopass name or KeePassXC entry): insert -f and
-    // attachment-import -f would overwrite an item another file owns.
-    const keyOf = (e) => e.key || (l.a.named ? e.itemId : e.title);
-    const owners = new Map(Object.entries(rec.entries).filter(([, e]) => ours(e)).map(([real, e]) => [keyOf(e), real]));
-    const keys = new Set();
-    for (const { cand, save } of items) {
-      const other = owners.get(save.key);
-      if (keys.has(save.key) || (other && other !== cand.real)) return { ok: false, error: CLASH(cand, save.key) };
-      keys.add(save.key);
-    }
+    if (!items.length) return { ok: false, error: clash || 'Nothing to back up: those files are already backed up, skipped or no longer found.' };
+    const skipped = warnings.filter((w) => w.startsWith('skipped: ')).length;
     const token = 's:' + crypto.randomBytes(16).toString('hex');
     plans.set(token, { at: now, l, bin: bin.path, ws, items });
     const where = l.tool === 'keepassxc' ? `${l.target.db}, group ${l.target.group}` : l.target || 'default';
     return {
-      ok: true, token, title: `Back up ${plural(items.length, 'secret file')} to ${l.info.label}`, risk: 'caution', display,
-      note: `Copies the file's contents into ${l.info.label} (${where}). The local file is not changed.`,
+      ok: true, token, title: `Back up ${plural(items.length, 'secret file')} to ${l.info.label}`, risk: 'caution', display, warnings, skipped,
+      note: printable(`Copies the file's contents into ${l.info.label} (${where}). The local file is not changed.`),
     };
   }
 
@@ -206,8 +250,8 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
   async function saveOne(p, it) {
     const { l } = p;
     const { cand } = it;
-    const text = `Back up ${cand.title} to ${l.info.label}`;
-    const fail = (out) => ({ text, ok: false, out });
+    const text = printable(`Back up ${cand.title} to ${l.info.label}`);
+    const fail = (out) => ({ text, ok: false, out: String(out).split('\n').map(printable).join('\n') });
     const got = await readPlanned(cand.real, it.sha256);
     if (got.error) return fail(got.error);
     const { buf } = got;
@@ -249,7 +293,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     for (const it of p.items) {
       const r = await saveOne(p, it);
       results.push(r);
-      audit({ ok: r.ok, repo: 'Secrets', title: `${r.ok ? 'Backed up' : 'Back up'} ${it.cand.title} to ${p.l.info.label}` });
+      audit({ ok: r.ok, repo: 'Secrets', title: printable(`${r.ok ? 'Backed up' : 'Back up'} ${it.cand.title} to ${p.l.info.label}`) });
       if (!r.ok) break;
     }
     return { ok: results.length === p.items.length && results.every((r) => r.ok), results };
@@ -322,4 +366,4 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
   return { tools, link, test, scan, plan, apply, verify, skip, unskip, PLAN_TTL };
 }
 
-module.exports = { createSecretsCtl, scrub, pipeCall, findBin, repoLabel, PLAN_TTL, MCP_REFUSAL, SCAN_FIRST };
+module.exports = { quoteArg, createSecretsCtl, scrub, pipeCall, findBin, repoLabel, PLAN_TTL, MCP_REFUSAL, SCAN_FIRST };
