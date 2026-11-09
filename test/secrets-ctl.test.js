@@ -16,7 +16,7 @@ test('plan/apply: content only on stdin, record written, results clean', async (
   assert.match(p.token, /^s:[0-9a-f]{32}$/);
   assert.equal(p.risk, 'caution');
   assert.ok(!JSON.stringify(p).includes('hunter2'));
-  assert.match(p.display[0].text, /^pass-cli item create note --vault-name Dev --from-template -  ← contents of api\/\.env \(\d+ bytes\)$/);
+  assert.match(p.display[0].text, /^pass-cli item create note --vault-name Dev --from-template -  ← contents of repo api\/\.env \(\d+ bytes\)$/);
   const r = await ctl.apply(p.token, { via: 'app' });
   assert.ok(r.ok && !JSON.stringify(r).includes('hunter2'));
   assert.ok(!JSON.stringify(r).includes(OK_ID)); // no stdout in results
@@ -248,7 +248,7 @@ function addRepo(dir) {
   return dir;
 }
 
-test('titles: two nested repos with the same folder name get distinct titles; a title clash refuses the plan', async () => {
+test('titles: two nested repos with the same folder name get distinct titles; a title clash drops one file', async () => {
   const { tmp, mkCtl, record } = setup();
   const root = path.join(tmp, 'ws2');
   const a = addRepo(path.join(root, 'a', 'api'));
@@ -258,23 +258,24 @@ test('titles: two nested repos with the same folder name get distinct titles; a 
   const nested = { repos: [{ path: a, name: 'api' }, { path: b, name: 'api' }], root };
   const s = await ctl.scan(nested);
   const titles = s.items.filter((i) => i.scope === 'repo').map((i) => i.title).sort();
-  assert.deepEqual(titles, ['gutcheck: a/api/.env', 'gutcheck: b/api/.env']);
+  assert.deepEqual(titles, ['gutcheck: repo a/api/.env', 'gutcheck: repo b/api/.env']);
   assert.deepEqual(s.advice.map((x) => x.repo).filter(Boolean).sort(), ['a/api', 'b/api']);
   assert.equal((await ctl.plan([path.join(a, '.env'), path.join(b, '.env')], { via: 'app', ...nested })).ok, true);
 
-  // Repos outside any root fall back to the folder name, so both would be "api/.env": refused.
+  // Repos outside any root fall back to the folder name, so both would be "repo api/.env": the second is left out.
   const loose = { repos: [{ path: a, name: 'api' }, { path: b, name: 'api' }], root: tmp + '/elsewhere' };
   fs.mkdirSync(loose.root);
   const clash = await ctl.plan([path.join(a, '.env'), path.join(b, '.env')], { via: 'app', ...loose });
-  assert.deepEqual(clash, { ok: false, error: 'Two files would get the same vault item title: gutcheck: api/.env. Rename one or skip it.' });
+  assert.equal(clash.title, 'Back up 1 secret file to Proton Pass');
+  assert.equal(clash.display[1].text, 'repo api/.env: skipped: another file already uses this vault item title');
 
   // A title already recorded for another file is refused too.
   const p = await ctl.plan([path.join(a, '.env')], { via: 'app', ...loose });
   assert.ok(p.ok, p.error);
   assert.equal((await ctl.apply(p.token, { via: 'app' })).ok, true);
-  assert.equal(record().entries[path.join(a, '.env')].title, 'gutcheck: api/.env');
+  assert.equal(record().entries[path.join(a, '.env')].title, 'gutcheck: repo api/.env');
   const again = await ctl.plan([path.join(b, '.env')], { via: 'app', ...loose });
-  assert.equal(again.error, 'Two files would get the same vault item title: gutcheck: api/.env. Rename one or skip it.');
+  assert.equal(again.error, 'Two files would get the same vault item title: gutcheck: repo api/.env. Rename one or skip it.');
 });
 
 test('scan with home: false leaves out the home folder', async () => {

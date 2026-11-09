@@ -18,6 +18,14 @@ const NO_DESCEND = new Set([...HEAVY_DIRS, '.git', '.venv', 'venv', '.next', '.n
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const posix = (p) => p.split(path.sep).join('/');
 
+// Item titles name their scope with one of three fixed words, so no two scopes share a title:
+// "gutcheck: repo <label>/<rel>", "gutcheck: home ~/<rel>", "gutcheck: root <name>".
+const TITLE = {
+  repo: (label, rel) => `gutcheck: repo ${label}/${rel}`,
+  home: (rel) => `gutcheck: home ~/${rel}`,
+  root: (name) => `gutcheck: root ${name}`,
+};
+
 // The tracked paths, and the gitlinks (submodules, mode 160000) among them. Read-only, via exec.git.
 async function trackedFiles(dir) {
   const r = await git(['ls-files', '-s', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
@@ -86,7 +94,7 @@ async function findRepoSecrets(dir, { name } = {}) {
     const rel = posix(path.relative(root, real));
     if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return; // target outside the repo
     if (tracked.has(rel) || found.has(real) || await inNested(rel)) return; // a link may point into a submodule
-    const c = await makeCandidate({ real, scope: 'repo', repo, rel, title: `gutcheck: ${repo}/${rel}` });
+    const c = await makeCandidate({ real, scope: 'repo', repo, rel, title: TITLE.repo(repo, rel) });
     if (c) found.set(real, c);
   };
 
@@ -119,7 +127,7 @@ async function findWorkspaceSecrets(root) {
     try { real = await fsp.realpath(path.join(root, e.name)); } catch { continue; }
     if (seen.has(real)) continue;
     seen.add(real);
-    const c = await makeCandidate({ real, scope: 'workspace', repo: null, rel: e.name, title: `gutcheck: workspace/${e.name}` });
+    const c = await makeCandidate({ real, scope: 'workspace', repo: null, rel: e.name, title: TITLE.root(e.name) });
     if (c) out.push(c);
   }
   return out;
@@ -143,7 +151,7 @@ async function findHomeSecrets({ home, env = {} }) {
     let real;
     try { real = await fsp.realpath(at); } catch { return; }
     const rel = posix(path.relative(home, at));
-    const c = await makeCandidate({ real, scope: 'home', repo: null, rel, title: `gutcheck: ~/${rel}`, ...opts });
+    const c = await makeCandidate({ real, scope: 'home', repo: null, rel, title: TITLE.home(rel), ...opts });
     if (c) out.push(c);
   };
   const entries = async (d) => { try { return await fsp.readdir(d, { withFileTypes: true }); } catch { return []; } };
@@ -174,8 +182,8 @@ async function gnupgCandidate(home) {
     let size = 0;
     for (const n of names) { const s = (await fsp.stat(path.join(dir, n))).size; size += s; lines.push(`${n}:${s}`); }
     const rel = '.gnupg/private-keys-v1.d';
-    return { abs: dir, real: dir, scope: 'home', repo: null, rel, title: `gutcheck: ~/${rel}`, size, sha256: sha256(lines.join('\n')), kind: 'file', fingerprint: null, keyType: null, confidence: 'high' };
+    return { abs: dir, real: dir, scope: 'home', repo: null, rel, title: TITLE.home(rel), size, sha256: sha256(lines.join('\n')), kind: 'file', fingerprint: null, keyType: null, confidence: 'high' };
   } catch { return null; }
 }
 
-module.exports = { findRepoSecrets, findWorkspaceSecrets, findHomeSecrets };
+module.exports = { TITLE, findRepoSecrets, findWorkspaceSecrets, findHomeSecrets };

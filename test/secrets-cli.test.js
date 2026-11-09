@@ -41,9 +41,9 @@ test('cli: gutcheck secrets lists files by title and status, never contents or h
     const r = JSON.parse(j.stdout);
     assert.equal(r.linked, false);
     const by = Object.fromEntries(r.items.map((x) => [x.title, x]));
-    assert.equal(by['gutcheck: alpha/.env'].status, 'unbacked');
-    assert.equal(by['gutcheck: ~/.aws/credentials'].status, 'unbacked');
-    assert.equal(by['gutcheck: ~/.gnupg/private-keys-v1.d'].saveable, false, 'a folder cannot be saved as one item');
+    assert.equal(by['gutcheck: repo alpha/.env'].status, 'unbacked');
+    assert.equal(by['gutcheck: home ~/.aws/credentials'].status, 'unbacked');
+    assert.equal(by['gutcheck: home ~/.gnupg/private-keys-v1.d'].saveable, false, 'a folder cannot be saved as one item');
 
     const t = w.run();
     assert.equal(t.status, 0, t.stderr);
@@ -60,7 +60,7 @@ test('cli: gutcheck secrets lists files by title and status, never contents or h
     const s = w.run('--skip', real, 'kept', 'in', 'the', 'team', 'vault');
     assert.equal(s.status, 0, s.stderr);
     const after = JSON.parse(w.run('--json').stdout);
-    assert.equal(after.items.find((x) => x.title === 'gutcheck: ~/.aws/credentials').status, 'skipped');
+    assert.equal(after.items.find((x) => x.title === 'gutcheck: home ~/.aws/credentials').status, 'skipped');
     const rec = fs.readFileSync(path.join(w.data, 'secret-backups.json'), 'utf8');
     assert.match(rec, /kept in the team vault/);
   } finally { w.cleanup(); }
@@ -87,7 +87,7 @@ test('report: same-named nested repos each get their own secret step; a one-repo
     const e = createEngine({ env, via: 'cli' });
     assert.ok((await e.scan({ root })).ok);
     const titles = (await e.secrets()).items.map((x) => x.title).sort();
-    assert.deepEqual(titles, ['gutcheck: a/api/.env.a', 'gutcheck: b/api/.env.b', 'gutcheck: ~/.aws/credentials']);
+    assert.deepEqual(titles, ['gutcheck: home ~/.aws/credentials', 'gutcheck: repo a/api/.env.a', 'gutcheck: repo b/api/.env.b']);
     const md = (await e.report()).text;
     const sections = md.split(/^### api$/m).slice(1);
     assert.equal(sections.length, 2);

@@ -20,7 +20,9 @@ const NOT_LINKED = 'Link a password manager first (Secrets > Password manager…
 const SCAN_FIRST = 'Scan a workspace first.';
 const lockedText = (l, s) => (s.locked ? `${l.info.label} is locked or not signed in. ` : '') + (s.hint || l.info.unlockHint);
 // Names the clashing item: its title for id-based tools, else its pass/gopass name or KeePassXC entry.
-const CLASH = (cand, key) => `Two files would get the same vault item ${key === cand.title ? 'title' : 'name'}: ${key}. Rename one or skip it.`;
+const keyWord = (cand, key) => (key === cand.title ? 'title' : 'name');
+const CLASH = (cand, key) => `Two files would get the same vault item ${keyWord(cand, key)}: ${key}. Rename one or skip it.`;
+const shortName = (cand) => cand.title.replace(/^gutcheck: /, '');
 const GOOGLE = { id: 'google', label: 'Google Password Manager', found: false, reason: 'No CLI or write API' };
 
 const refused = (via) => (via === 'mcp' ? { ok: false, error: MCP_REFUSAL } : null);
@@ -160,33 +162,37 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     const rec = record.load();
     // Entries this link wrote: same tool and target. A named item (pass, gopass, KeePassXC) keeps its name.
     const ours = (e) => !!e && typeof e === 'object' && e.tool === l.tool && JSON.stringify(e.target == null ? '' : e.target) === JSON.stringify(l.target == null ? '' : l.target);
+    // One vault item per key (the title, or the pass/gopass name or KeePassXC entry): insert -f and
+    // attachment-import -f would overwrite an item another file owns. A file whose key is taken is
+    // left out of this plan, with a note in the preview; the rest go ahead.
+    const keyOf = (e) => e.key || (l.a.named ? e.itemId : e.title);
+    const owners = new Map(Object.entries(rec.entries).filter(([, e]) => ours(e)).map(([real, e]) => [keyOf(e), real]));
+    const keys = new Set();
     const items = [];
     const display = [];
+    let clash = null;
     for (const c of fresh.items) {
       if (!wanted.has(c.real) || c.status === 'backed' || c.status === 'skipped' || !isFile(c.real)) continue;
       const prev = rec.entries[c.real];
       const again = l.a.named && ours(prev) && !prev.missing && isText(prev.itemId) ? { update: true, itemId: prev.itemId } : {};
       const save = l.a.saveCmd(c, l.target, again);
       if (save.error) return { ok: false, error: save.error };
+      const other = owners.get(save.key);
+      if (keys.has(save.key) || (other && other !== c.real)) {
+        clash = clash || CLASH(c, save.key);
+        display.push({ text: `${shortName(c)}: skipped: another file already uses this vault item ${keyWord(c, save.key)}` });
+        continue;
+      }
+      keys.add(save.key);
       items.push({ cand: c, sha256: c.sha256, save });
       const steps = save.steps || [save];
       steps.forEach((s, i) => {
         const cmd = [l.a.bin, ...s.args.map(quote)].join(' ');
-        const tail = i === steps.length - 1 ? `  ← contents of ${c.title.replace(/^gutcheck: /, '')} (${c.size} bytes)` : '';
+        const tail = i === steps.length - 1 ? `  ← contents of ${shortName(c)} (${c.size} bytes)` : '';
         display.push({ text: cmd + tail });
       });
     }
-    if (!items.length) return { ok: false, error: 'Nothing to back up: those files are already backed up, skipped or no longer found.' };
-    // One vault item per key (the title, or the pass/gopass name or KeePassXC entry): insert -f and
-    // attachment-import -f would overwrite an item another file owns.
-    const keyOf = (e) => e.key || (l.a.named ? e.itemId : e.title);
-    const owners = new Map(Object.entries(rec.entries).filter(([, e]) => ours(e)).map(([real, e]) => [keyOf(e), real]));
-    const keys = new Set();
-    for (const { cand, save } of items) {
-      const other = owners.get(save.key);
-      if (keys.has(save.key) || (other && other !== cand.real)) return { ok: false, error: CLASH(cand, save.key) };
-      keys.add(save.key);
-    }
+    if (!items.length) return { ok: false, error: clash || 'Nothing to back up: those files are already backed up, skipped or no longer found.' };
     const token = 's:' + crypto.randomBytes(16).toString('hex');
     plans.set(token, { at: now, l, bin: bin.path, ws, items });
     const where = l.tool === 'keepassxc' ? `${l.target.db}, group ${l.target.group}` : l.target || 'default';
