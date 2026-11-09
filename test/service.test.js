@@ -6,6 +6,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { createService } = require('../src/service');
 const { scanRepo } = require('../src/scanner');
+const { sshUrl } = require('./helpers/fake-ssh');
 
 const sh = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim();
 
@@ -150,7 +151,7 @@ test('a failed change stops the later ones for the same repo, shared across one-
     const name = path.basename(dir);
     // A real upstream, so pull plans fine; it is then removed, so the pull fails when applied.
     sh(bare, 'init', '-q', '--bare');
-    sh(dir, 'remote', 'add', 'origin', bare); sh(dir, 'push', '-q', '-u', 'origin', 'main');
+    sh(dir, 'remote', 'add', 'origin', sshUrl(bare)); sh(dir, 'push', '-q', '-u', 'origin', 'main');
     known.set(dir, await scanRepo(dir, {}));
     const breakUpstream = () => fs.rmSync(bare, { recursive: true, force: true });
     const plans = await svc.planActions([{ dir, action: { type: 'pull' } }, { dir, action: { type: 'clean-clutter', paths: ['.env.bak'] } }]);

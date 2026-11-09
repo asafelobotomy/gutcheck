@@ -15,6 +15,8 @@ const { validBranch, validRemote, inspect } = require('./git-safety');
 
 class PlanError extends Error {}
 const fail = (msg) => { throw new PlanError(msg); };
+// Not an error: there is nothing for the action to do (the app shows it as a note, not a failure).
+const nothing = (msg) => { const e = new PlanError(msg); e.nothing = true; throw e; };
 
 const cleanText = (s, max) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) : '');
 
@@ -28,8 +30,17 @@ const show = (cmd, args) => `${cmd} ${args.map(quote).join(' ')}`;
 
 // Step builders. `display` is what the user sees in the confirm dialog. Every git step runs with
 // fixed options a repo's config cannot undo: no fsmonitor, no ext:: or fd:: transport, no
-// signature checks (gpg programs). `pre` adds per-step -c options, also left out of `display`.
-const GIT_STEP = ['-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'protocol.fd.allow=never', '-c', 'log.showSignature=false', '-c', 'gpg.program=false', '-c', 'gpg.ssh.program=false', '-c', 'gpg.x509.program=false'];
+// signature checks or signing (gpg programs, the ssh signing-key command), no alternate-refs
+// command, no recursion into submodules (their own config runs their filters and hooks), and no
+// auto gc (gc.recentObjectsHook and the pre-auto-gc hook). `pre` adds per-step -c options, also
+// left out of `display`.
+const GIT_STEP = [
+  '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'protocol.fd.allow=never',
+  '-c', 'log.showSignature=false', '-c', 'gpg.program=false', '-c', 'gpg.ssh.program=false', '-c', 'gpg.x509.program=false',
+  '-c', 'commit.gpgSign=false', '-c', 'tag.gpgSign=false', '-c', 'gpg.ssh.defaultKeyCommand=',
+  '-c', 'core.alternateRefsCommand=', '-c', 'core.alternateRefsPrefixes=',
+  '-c', 'submodule.recurse=false', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false',
+];
 const git = (args, dir, note, pre = []) => ({ kind: 'cmd', cmd: 'git', args: [...GIT_STEP, ...pre, ...args], cwd: dir, display: show('git', args), note });
 const gh = (args, dir, input) => ({ kind: 'cmd', cmd: 'gh', args, cwd: dir, input, display: show('gh', args) + (input ? '   # with JSON body' : '') });
 
@@ -70,10 +81,11 @@ const ACTIONS = {
       if (!l.ok) fail('Could not list this repo\'s remotes.');
       const names = l.stdout.split('\n').filter(Boolean);
       const ok = names.filter(validRemote);
-      if (!ok.length) fail(names.length ? 'None of this repo\'s remotes has a name GutCheck can use safely.' : 'This repo has no remotes to fetch.');
+      if (!names.length) nothing('Nothing to fetch: this repo has no remotes.');
+      if (!ok.length) fail('None of this repo\'s remotes has a name GutCheck can use safely.');
       const steps = ok.map((rn) => git(['fetch', '--prune', '--no-prune-tags', '--no-recurse-submodules', '--refmap=', '--', rn, `+refs/heads/*:refs/remotes/${rn}/*`], r.path));
       const skipped = names.length - ok.length;
-      return { risk: 'safe', title: 'Fetch all remotes and prune deleted branches', steps, uses: ['fetch'], warnings: skipped ? [`Skipped ${skipped} remote${skipped > 1 ? 's' : ''} whose name could be read as an option.`] : [] };
+      return { risk: 'safe', title: 'Fetch all remotes and prune deleted branches', steps, uses: ['fetch'], remotes: ok, warnings: skipped ? [`Skipped ${skipped} remote${skipped > 1 ? 's' : ''} whose name could be read as an option.`] : [] };
     },
   },
 
@@ -87,7 +99,7 @@ const ACTIONS = {
       const { remote, dest } = await upstreamOf(r, b, ctx, 'pull');
       const track = `refs/remotes/${remote}/${dest}`;
       return {
-        risk: 'safe', title: `Fast-forward ${b} from ${r.git.upstream}`, uses: ['pull'],
+        risk: 'safe', title: `Fast-forward ${b} from ${r.git.upstream}`, uses: ['pull'], remotes: [remote],
         steps: [git(['fetch', '--no-prune', '--no-recurse-submodules', '--refmap=', '--', remote, `+refs/heads/${dest}:${track}`], r.path), git(['merge', '--ff-only', '--end-of-options', track], r.path, undefined, ['-c', `branch.${b}.mergeOptions=`])],
       };
     },
@@ -103,7 +115,7 @@ const ACTIONS = {
       const { remote, dest } = r.git.upstream ? await upstreamOf(r, b, ctx, 'push') : { remote: 'origin', dest: b };
       // No tags or submodules either: push.followTags and push.recurseSubmodules would add them.
       const args = ['push', '--no-follow-tags', '--recurse-submodules=no', ...(r.git.upstream ? [] : ['-u']), '--', remote, `refs/heads/${b}:refs/heads/${dest}`];
-      return { risk: 'safe', title: `Push ${b}`, uses: ['push'], steps: [git(args, r.path, undefined, ['-c', `remote.${remote}.mirror=false`, '-c', 'push.default=simple'])] };
+      return { risk: 'safe', title: `Push ${b}`, uses: ['push'], remotes: [remote], pushes: true, steps: [git(args, r.path, undefined, ['-c', `remote.${remote}.mirror=false`, '-c', 'push.default=simple'])] };
     },
   },
 
@@ -111,7 +123,7 @@ const ACTIONS = {
     plan(r, p) {
       const b = safeName(localBranch(r, p.branch).name);
       if (r.git.dirty > 0) fail('Uncommitted changes: commit them first.');
-      return { risk: 'safe', title: `Switch to ${b}`, uses: ['switch'], steps: [git(['switch', '--end-of-options', b], r.path)] };
+      return { risk: 'safe', title: `Switch to ${b}`, uses: ['switch'], target: `refs/heads/${b}`, steps: [git(['switch', '--no-recurse-submodules', '--end-of-options', b], r.path)] };
     },
   },
 
@@ -120,7 +132,7 @@ const ACTIONS = {
       if (!validBranch(p.name)) fail('Invalid branch name.');
       if ((r.git.branches || []).some((b) => b.name === p.name)) fail(`Branch "${p.name}" already exists.`);
       const from = p.from ? safeName(localBranch(r, p.from).name) : null;
-      return { risk: 'safe', title: `Create and switch to ${p.name}${from ? ` from ${from}` : ''}`, uses: ['switch'], steps: [git(['switch', '-c', p.name, ...(from ? ['--end-of-options', from] : [])], r.path)], undo: `git switch ${r.git.branch || '-'} && git branch -d ${p.name}` };
+      return { risk: 'safe', title: `Create and switch to ${p.name}${from ? ` from ${from}` : ''}`, uses: ['switch'], target: from ? `refs/heads/${from}` : null, steps: [git(['switch', '--no-recurse-submodules', '-c', p.name, ...(from ? ['--end-of-options', from] : [])], r.path)], undo: `git switch ${r.git.branch || '-'} && git branch -d ${p.name}` };
     },
   },
 
@@ -134,7 +146,7 @@ const ACTIONS = {
       if (r.git.dirty > 0) fail('Uncommitted changes: commit them first.');
       const noff = p.mode === 'no-ff';
       return {
-        risk: 'caution', uses: ['merge'],
+        risk: 'caution', uses: ['merge'], target: `refs/heads/${name}`,
         title: `Merge ${name} into ${cur}${noff ? ' (merge commit)' : ' (fast-forward only)'}`,
         steps: [git([...(noff ? ['merge', '--no-ff', '--no-edit'] : ['merge', '--ff-only']), '--end-of-options', name], r.path, undefined, ['-c', `branch.${cur}.mergeOptions=`])],
         undo: 'git reset --hard ORIG_HEAD   (only if you have not made further commits)',
@@ -173,7 +185,7 @@ const ACTIONS = {
       if (pr) fail(`PR #${pr.number} is open from this branch. Close or merge it first.`);
       // An explicit delete refspec, and nothing else: no mirror, tags or submodules from config.
       const args = ['push', '--no-follow-tags', '--recurse-submodules=no', '--', 'origin', `:refs/heads/${name}`];
-      return { risk: 'danger', title: `Delete remote branch origin/${name}`, uses: ['push'], steps: [git(args, r.path, undefined, ['-c', 'remote.origin.mirror=false'])], undo: `git push origin <sha>:refs/heads/${rb.name}   (find the sha with git reflog)` };
+      return { risk: 'danger', title: `Delete remote branch origin/${name}`, uses: ['push'], remotes: ['origin'], pushes: true, steps: [git(args, r.path, undefined, ['-c', 'remote.origin.mirror=false'])], undo: `git push origin <sha>:refs/heads/${rb.name}   (find the sha with git reflog)` };
     },
   },
 
@@ -300,9 +312,10 @@ async function plan(repo, action, ctx = {}) {
     if (!action || typeof action.type !== 'string' || !Object.prototype.hasOwnProperty.call(ACTIONS, action.type)) fail('Unknown action.');
     if (ctx.readOnly) fail('Read-only mode is on. Turn it off in the header to make changes.');
     const out = await ACTIONS[action.type].plan(repo, action, ctx);
-    // The repo's own network programs refuse the plan; its hooks and drivers make it caution (B9, B10).
-    const code = await inspect(ctx, repo.path, out.uses, fail);
-    const risk = code && RISK[out.risk] < RISK.caution ? 'caution' : out.risk;
+    // The repo's own network programs and non-network remotes refuse the plan; its hooks and
+    // drivers make it caution (B9, B10).
+    const code = await inspect(ctx, repo.path, out, fail);
+    const risk = code.runsRepoCode && RISK[out.risk] < RISK.caution ? 'caution' : out.risk;
     return {
       ok: true,
       type: action.type,
@@ -312,16 +325,16 @@ async function plan(repo, action, ctx = {}) {
       risk,
       steps: out.steps,
       display: out.steps.map((s) => ({ text: s.display, preview: s.preview, note: s.note })),
-      warnings: [...(out.warnings || []), ...(code ? code.warnings : [])],
+      warnings: [...(out.warnings || []), ...code.warnings],
       // Fix all leaves these out of what it runs on its own (renderer/fix-all.js).
-      runsRepoCode: !!code,
+      runsRepoCode: code.runsRepoCode,
       undo: out.undo || null,
       body: out.body || null,
-      note: out.note || null,
+      note: [out.note, code.note].filter(Boolean).join(' ') || null,
       confirmName: RISK[risk] >= RISK.danger ? repo.name : null,
     };
   } catch (e) {
-    if (e instanceof PlanError || e instanceof AGENT.PlanError) return { ok: false, error: e.message };
+    if (e instanceof PlanError || e instanceof AGENT.PlanError) return { ok: false, error: e.message, ...(e.nothing ? { nothing: true } : {}) };
     return { ok: false, error: 'Could not plan action: ' + (e && e.message) };
   }
 }

@@ -102,12 +102,13 @@ test('B10: a commit in a husky repo is caution, names the hook, and is marked as
   fs.writeFileSync(path.join(d, 'b.txt'), '2\n');
   const c = await planOn(d, { type: 'commit-all', message: 'x' });
   assert.equal(c.runsRepoCode, true);
-  // Only the hooks a step triggers count: switching branches runs no pre-commit hook.
+  // Only the hooks a step triggers are named: switching branches runs no pre-commit hook. It is still
+  // marked, since the hooks folder is in the repo's own files (a branch can bring a post-checkout).
   sh(d, 'branch', 'topic');
   fs.rmSync(path.join(d, 'b.txt'));
   const s = await planOn(d, { type: 'checkout', branch: 'topic' });
-  assert.equal(s.risk, 'safe');
-  assert.equal(s.runsRepoCode, false);
+  assert.equal(s.runsRepoCode, true);
+  assert.doesNotMatch(s.warnings.join('\n'), /pre-commit/);
 });
 
 test('B10: a repo with only the sample hooks stays safe and is not marked', async () => {

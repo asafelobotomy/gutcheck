@@ -38,8 +38,11 @@ function discover(root, maxDepth = 2) {
   return found.sort();
 }
 
+// Only GitHub itself (audit B13): https://github.com/o/r, git@github.com:o/r or
+// ssh://git@github.com/o/r, optionally ending in .git. Not "github.com" anywhere in a path or a
+// local folder, so a local or other remote is never treated as GitHub.
 function parseGithubRemote(url) {
-  const m = /github\.com[:/]([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(url || '');
+  const m = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(url || '');
   return m ? { owner: m[1], name: m[2] } : null;
 }
 
@@ -75,6 +78,8 @@ async function collectGit(dir) {
   // Branches checked out in another worktree cannot be deleted or switched to from here.
   const wt = await git(['worktree', 'list', '--porcelain'], { cwd: dir });
   g.worktreeBranches = wt.stdout.split('\n').filter((l) => l.startsWith('branch refs/heads/')).map((l) => l.slice(18)).filter((b) => b !== g.branch);
+  // Remote names (Fetch is offered only when there is one).
+  g.remotes = (await git(['remote'], { cwd: dir })).stdout.split('\n').filter(Boolean);
   const rrefs = await git(['for-each-ref', '--format=%(refname:short)\t%(committerdate:iso-strict)', 'refs/remotes/origin'], { cwd: dir });
   g.remoteBranches = rrefs.stdout
     .split('\n')

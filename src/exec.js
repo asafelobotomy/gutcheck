@@ -41,6 +41,8 @@ const READONLY_GIT = [
   // Scans make no network calls; if one ever authenticated (git-lfs reads these too), it must not
   // run the repo's askpass program or credential helper.
   '-c', 'core.askPass=', '-c', 'credential.helper=',
+  // Run when git lists an alternate object store's refs (fetch negotiation, connectivity checks).
+  '-c', 'core.alternateRefsCommand=', '-c', 'core.alternateRefsPrefixes=',
 ];
 
 // No lazy fetch: in a partial clone a missing object would be fetched, which runs the repo's

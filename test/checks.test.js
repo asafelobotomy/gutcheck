@@ -43,6 +43,14 @@ test('parseGithubRemote handles ssh and https', () => {
   assert.deepEqual(parseGithubRemote('git@github.com:a/b.git'), { owner: 'a', name: 'b' });
   assert.deepEqual(parseGithubRemote('https://github.com/a/b'), { owner: 'a', name: 'b' });
   assert.equal(parseGithubRemote('https://gitlab.com/a/b'), null);
+  assert.deepEqual(parseGithubRemote('ssh://git@github.com/a/b.git'), { owner: 'a', name: 'b' });
+  assert.deepEqual(parseGithubRemote('https://github.com/a/b.git'), { owner: 'a', name: 'b' });
+});
+
+test('parseGithubRemote only accepts GitHub itself, not "github.com" inside another address (B13)', () => {
+  for (const url of ['/tmp/github.com/a/b', 'file:///srv/github.com/a/b', 'https://evil.example/github.com/a/b', 'https://github.com.evil.example/a/b', 'evil::github.com:a/b', 'git@evil.example:github.com/a/b', 'http://github.com/a/b', 'ext::sh github.com/a/b']) {
+    assert.equal(parseGithubRemote(url), null, url);
+  }
 });
 
 test('parseGithubRemote rejects unexpected characters', () => {

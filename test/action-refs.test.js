@@ -6,6 +6,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const { ROOT, sh, repo, fresh } = require('./helpers/git-lab');
+const { sshUrl } = require('./helpers/fake-ssh');
 const { plan, apply } = require('../src/actions');
 const { scanRepo } = require('../src/scanner');
 
@@ -24,7 +25,7 @@ function cloned() {
   const bare = fresh('bare');
   sh(ROOT, 'init', '-q', '--bare', '-b', 'main', bare);
   const d = repo({ 'a.txt': '1\n' });
-  sh(d, 'remote', 'add', 'origin', bare);
+  sh(d, 'remote', 'add', 'origin', sshUrl(bare));
   sh(d, 'push', '-q', 'origin', 'main:gone', 'main:keep');
   sh(d, 'push', '-q', '-u', 'origin', 'main');
   sh(d, 'switch', '-q', '-c', 'feat');
@@ -81,10 +82,10 @@ test('B7: checkout, create-branch, merge and delete-local still work, with --end
   sh(d, 'branch', 'topic');
   let { p, applied } = await act(d, { type: 'create-branch', name: 'side', from: 'topic' });
   assert.ok(applied.ok, JSON.stringify(applied.results));
-  assert.equal(p.display[0].text, 'git switch -c side --end-of-options topic');
+  assert.equal(p.display[0].text, 'git switch --no-recurse-submodules -c side --end-of-options topic');
   commit(d, 'b.txt', 'side\n');
   ({ p, applied } = await act(d, { type: 'checkout', branch: 'main' }));
-  assert.equal(p.display[0].text, 'git switch --end-of-options main');
+  assert.equal(p.display[0].text, 'git switch --no-recurse-submodules --end-of-options main');
   assert.ok(applied.ok);
   ({ p, applied } = await act(d, { type: 'merge-branch', branch: 'side', mode: 'ff' }));
   assert.equal(p.display[0].text, 'git merge --ff-only --end-of-options side');
