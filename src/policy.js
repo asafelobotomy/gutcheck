@@ -156,7 +156,7 @@ function driftReport(results, baseline) {
       if (res.drift.failed.some((f) => f.id === r.id)) missing.push(res.name);
       else if (RULES[r.id].test(res) === true) ok.push(res.name);
     }
-    return { id: r.id, label: RULES[r.id].label, publicOnly: r.publicOnly, ok: ok.length, missing };
+    return { id: r.id, label: RULES[r.id].label, publicOnly: r.publicOnly, ok: ok.length, missing: missing.sort() };
   });
 }
 
