@@ -18,8 +18,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const KEYS = '^((filter|diff)\\..+\\.(clean|smudge|process|textconv|command|required)|extensions\\.partialclone|remote\\..+\\.promisor|include\\.path|includeif\\..+\\.path)$';
+const KEYS = '^((filter|diff)\\..+\\.(clean|smudge|process|textconv|command|required)|extensions\\.partialclone|remote\\..+\\.promisor|lfs\\.extension\\..+\\.(clean|smudge)|lfs\\.customtransfer\\..+\\.path|lfs\\.standalonetransferagent|include\\.path|includeif\\..+\\.path)$';
 const DRIVER_RE = /^(filter|diff)\.(.+)\.(clean|smudge|process|textconv|command|required)$/;
+// git-lfs, run as a trusted global filter, reads the repo's config too and runs the programs these
+// name (an extension's clean/smudge, a custom transfer agent). Blanked like drivers; git-lfs then
+// refuses the file, so the git call fails rather than run them. A tracked .lfsconfig cannot set them.
+const LFS_RE = /^lfs\.(extension\..+\.(clean|smudge)|customtransfer\..+\.path|standalonetransferagent)$/;
 // A scan makes dozens of git calls per repo within a few seconds; 15 s covers one repo's scan.
 // The repo's config files, HEAD (for includeIf onbranch:) and every included file are watched
 // too, and scans and actions drop a repo's entry before they start (forget).
@@ -29,26 +33,27 @@ const MAX_ENTRIES = 500;
 // the repo's remote.<r>.uploadpack, core.sshCommand or credential helper during a scan.
 const LAZY_FETCH_GIT = [2, 44];
 
-// The files that decide a repo's config, found from cwd without running git.
+// The files that decide a repo's config, found from cwd without running git, and the work tree's
+// top folder (git prints the repo's own config origins relative to it, e.g. "file:.git/config").
 function repoFiles(cwd) {
   for (let dir = path.resolve(cwd), i = 0; i < 64; i++) {
     const dotgit = path.join(dir, '.git');
     let st = null;
     try { st = fs.statSync(dotgit); } catch {}
-    if (st && st.isDirectory()) return ['config', 'config.worktree', 'HEAD'].map((f) => path.join(dotgit, f));
+    if (st && st.isDirectory()) return { top: dir, files: ['config', 'config.worktree', 'HEAD'].map((f) => path.join(dotgit, f)) };
     if (st && st.isFile()) {
       try {
         const gitdir = path.resolve(dir, /^gitdir: (.*)$/m.exec(fs.readFileSync(dotgit, 'utf8'))[1].trim());
         let common = gitdir;
         try { common = path.resolve(gitdir, fs.readFileSync(path.join(gitdir, 'commondir'), 'utf8').trim()); } catch {}
-        return [path.join(common, 'config'), path.join(gitdir, 'config.worktree'), path.join(gitdir, 'HEAD'), dotgit];
-      } catch { return [dotgit]; }
+        return { top: dir, files: [path.join(common, 'config'), path.join(gitdir, 'config.worktree'), path.join(gitdir, 'HEAD'), dotgit] };
+      } catch { return { top: dir, files: [dotgit] }; }
     }
     const up = path.dirname(dir);
-    if (up === dir) return [];
+    if (up === dir) break;
     dir = up;
   }
-  return [];
+  return { top: path.resolve(cwd), files: [] };
 }
 
 // Changes when any of these files is written (mtime, size or inode). A few stat calls, no git.
@@ -69,15 +74,15 @@ function entries(stdout) {
 
 // Every config file the lookup saw, plus the files include keys point at (even ones whose
 // includeIf is false now, so a later branch switch or edit is noticed).
-function watchedFiles(cwd, all) {
+function watchedFiles(top, all) {
   const files = new Set();
-  const fileOf = (origin) => (origin.startsWith('file:') ? path.resolve(cwd, origin.slice(5)) : null);
+  const fileOf = (origin) => (origin.startsWith('file:') ? path.resolve(top, origin.slice(5)) : null);
   for (const e of all) {
     const f = fileOf(e.origin);
     if (f) files.add(f);
     if (/^include(if\..+)?\.path$/.test(e.key) && e.value) {
       const v = e.value.startsWith('~/') ? path.join(os.homedir(), e.value.slice(2)) : e.value;
-      files.add(path.isAbsolute(v) ? v : path.resolve(f ? path.dirname(f) : cwd, v));
+      files.add(path.isAbsolute(v) ? v : path.resolve(f ? path.dirname(f) : top, v));
     }
   }
   return [...files];
@@ -97,6 +102,11 @@ function overridesFrom(all, trusted, gitVersion) {
       continue;
     }
     if (/^remote\./.test(e.key)) continue;
+    if (LFS_RE.test(e.key)) {
+      if (e.key.includes('=')) throw new Error(`cannot switch off the git-lfs setting "${e.key.slice(0, 80)}" in this repo's config`);
+      out.push('-c', `${e.key}=`);
+      continue;
+    }
     const m = DRIVER_RE.exec(e.key);
     if (!m || m[3] === 'required') continue;
     // `-c name=value` splits at the first "=", so a driver whose name holds one cannot be blanked.
@@ -125,9 +135,9 @@ module.exports = (run, READONLY_GIT, SAFE_ENV) => {
     throw new Error(`could not read its filter and diff drivers (${(r.stderr || '').trim().split('\n')[0].slice(0, 120)})`);
   }
 
-  async function lookup(cwd, env) {
+  async function lookup(cwd, top, env) {
     const [all, global, system, ver] = await Promise.all([query(cwd, env, []), query(cwd, env, ['--global']), query(cwd, env, ['--system']), gitVersion()]);
-    return { overrides: overridesFrom(all, [...global, ...system], ver), watched: watchedFiles(cwd, all) };
+    return { overrides: overridesFrom(all, [...global, ...system], ver), watched: watchedFiles(top, all) };
   }
 
   // The -c options that blank this repo's own drivers. Rejects (never resolves to "no
@@ -135,12 +145,13 @@ module.exports = (run, READONLY_GIT, SAFE_ENV) => {
   function driverOverrides(cwd, env) {
     const key = env ? `${cwd}\0${JSON.stringify(env)}` : cwd;
     const now = Date.now();
-    const sig = statSig(repoFiles(cwd));
+    const repo = repoFiles(cwd);
+    const sig = statSig(repo.files);
     const hit = cache.get(key);
     if (hit && hit.sig === sig && now - hit.at < DRIVER_TTL_MS && (!hit.watched || statSig(hit.watched) === hit.watchedSig)) return hit.p;
     if (cache.size >= MAX_ENTRIES) for (const [k, v] of cache) if (now - v.at >= DRIVER_TTL_MS || cache.size >= MAX_ENTRIES) cache.delete(k);
     const entry = { at: now, sig, p: null, watched: null, watchedSig: null };
-    entry.p = lookup(cwd, env).then((r) => { entry.watched = r.watched; entry.watchedSig = statSig(r.watched); return r.overrides; });
+    entry.p = lookup(cwd, repo.top, env).then((r) => { entry.watched = r.watched; entry.watchedSig = statSig(r.watched); return r.overrides; });
     cache.set(key, entry);
     entry.p.catch(() => { if (cache.get(key) === entry) cache.delete(key); });
     return entry.p;

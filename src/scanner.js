@@ -47,6 +47,8 @@ async function collectGit(dir) {
   // --ignore-submodules=dirty: a submodule's own config (its filters) is never read, so git must
   // not look inside it. New commits in a submodule still show; edits inside one no longer do.
   const st = await git(['status', '--porcelain=v2', '--branch', '--ignore-submodules=dirty'], { cwd: dir });
+  // A failed status (refused, or a filter that would not run) must not look like a clean repo.
+  if (!st.ok) throw new Error(`git status failed: ${(st.stderr || '').trim().split('\n').pop().slice(0, 200)}`);
   const g = { branch: null, detached: false, upstream: null, ahead: 0, behind: 0, dirty: 0, branches: [], remoteBranches: [], mergedBranches: [] };
   for (const line of st.stdout.split('\n')) {
     if (line.startsWith('# branch.head ')) {

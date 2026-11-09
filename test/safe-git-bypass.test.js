@@ -151,3 +151,36 @@ test('a repo value for a driver the user trusts globally is still blanked when i
     assert.equal(g.ran(), true, 'a repo value equal to the global one is kept');
   } finally { fs.writeFileSync(GLOBAL, '[protocol "file"]\n\tallow = always\n'); }
 });
+
+test('a repo lfs.extension cannot run through the trusted global git-lfs filter; the scan reports an error', { skip: !hasLfs() && 'git-lfs is not installed' }, async () => {
+  execFileSync('git', ['lfs', 'install', '--skip-repo'], { cwd: ROOT, stdio: 'ignore' }); // into the temp global config
+  try {
+    const d = repo({ '.gitattributes': '*.bin filter=lfs diff=lfs merge=lfs -text\n' });
+    put(d, 'a.bin', 'x'.repeat(500));
+    sh(d, 'add', 'a.bin');
+    sh(d, 'commit', '-qm', 'lfs');
+    const m = marker();
+    sh(d, 'config', 'lfs.extension.evil.clean', `${m.prog} %f`);
+    sh(d, 'config', 'lfs.extension.evil.smudge', 'cat');
+    sh(d, 'config', 'lfs.extension.evil.priority', '0');
+    put(d, 'a.bin', 'y'.repeat(500));
+    await exec.git(['status', '--porcelain'], { cwd: d });
+    assert.equal(m.ran(), false, 'the lfs extension ran');
+    await assert.rejects(collectLocal(d, {}), /git status failed/);
+    assert.equal(m.ran(), false);
+  } finally { fs.writeFileSync(GLOBAL, '[protocol "file"]\n\tallow = always\n'); }
+});
+
+test('a relative include is watched correctly when git runs from a subfolder', async () => {
+  const d = repo({ 'sub/a.txt': 'hello\n', '.gitattributes': '* filter=rel\n' });
+  const inc = path.join(d, '.git', 'rel.inc');
+  fs.writeFileSync(inc, '');
+  sh(d, 'config', 'include.path', 'rel.inc'); // relative to .git/config's folder
+  const sub = path.join(d, 'sub');
+  assert.ok((await exec.git(['status', '--porcelain'], { cwd: sub })).ok);
+  const m = marker();
+  fs.writeFileSync(inc, `[filter "rel"]\n\tclean = ${m.prog}\n`);
+  statDirty(d, 'sub/a.txt');
+  assert.ok((await exec.git(['status', '--porcelain'], { cwd: sub })).ok);
+  assert.equal(m.ran(), false, 'the newly included filter ran');
+});

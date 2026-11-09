@@ -38,6 +38,9 @@ const READONLY_GIT = [
   '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
   '-c', 'log.showSignature=false', '-c', 'gpg.program=false', '-c', 'gpg.ssh.program=false', '-c', 'gpg.x509.program=false',
   '-c', 'protocol.ext.allow=never', '-c', 'protocol.fd.allow=never',
+  // Scans make no network calls; if one ever authenticated (git-lfs reads these too), it must not
+  // run the repo's askpass program or credential helper.
+  '-c', 'core.askPass=', '-c', 'credential.helper=',
 ];
 
 // No lazy fetch: in a partial clone a missing object would be fetched, which runs the repo's
