@@ -27,30 +27,58 @@ const ignoredEnv = (dir, name = '.env') => { put(dir, '.gitignore', '.env*\n.net
 const ours = (tool, target, extra) => ({ sha256: 'old', tool, target, at: '2026-11-01T00:00:00.000Z', ...extra });
 const writeRecord = (dataDir, entries) => fs.writeFileSync(path.join(dataDir, 'secret-backups.json'), JSON.stringify({ version: 1, entries, skipped: {} }));
 
-test('owners: after the workspace folder is renamed, pass replaces the old backup and moves the record', async () => {
+const crypto = require('node:crypto');
+const tag = (real) => '~' + crypto.createHash('sha256').update(real).digest('hex').slice(0, 8);
+const saves = (calls) => calls.filter((c) => !['ls', 'info'].includes(c.args[0])).map((c) => (c.cmd === '/bin/sh' ? c.args.slice(3) : c.args).join(' '));
+
+// Back up `rel` in <tmp>/ws1/api, rename ws1 to ws2, change the file, and plan it again.
+async function movedWorkspace({ tool, target, rel = '.env' }) {
   const { tmp, mkCtl, record, env } = setup();
   put(env.PASSWORD_STORE_DIR, '.gpg-id', 'me\n');
   const calls = [];
   const ctl = mkCtl({ run: okRun(calls) });
-  ctl.link({ tool: 'pass', target: '' });
-  const first = ignoredEnv(gitRepo(path.join(tmp, 'ws1', 'api')));
-  let ws = { repos: [{ path: path.dirname(first) }], root: path.join(tmp, 'ws1') };
-  const p = await ctl.plan([first], { via: 'app', ...ws });
+  ctl.link({ tool, target });
+  const repo = gitRepo(path.join(tmp, 'ws1', 'api'));
+  put(repo, '.gitignore', '.env\n');
+  put(repo, rel, 'A=1\n');
+  const first = path.join(repo, rel);
+  const p = await ctl.plan([first], { via: 'app', repos: [{ path: repo }], root: path.join(tmp, 'ws1') });
+  assert.ok(p.ok, p.error);
   assert.ok((await ctl.apply(p.token, { via: 'app' })).ok);
+  const oldName = record().entries[first].itemId;
   fs.renameSync(path.join(tmp, 'ws1'), path.join(tmp, 'ws2'));
-  const moved = path.join(tmp, 'ws2', 'api', '.env');
+  const moved = path.join(tmp, 'ws2', 'api', rel);
   fs.appendFileSync(moved, 'ROTATED=1\n');
-  ws = { repos: [{ path: path.dirname(moved) }], root: path.join(tmp, 'ws2') };
-  const q = await ctl.plan([moved], { via: 'app', ...ws });
+  calls.length = 0;
+  const q = await ctl.plan([moved], { via: 'app', repos: [{ path: path.join(tmp, 'ws2', 'api') }], root: path.join(tmp, 'ws2') });
   assert.ok(q.ok, q.error);
-  assert.deepEqual(q.display.map((d) => d.text.split('  ←')[0]), ['pass insert -m -f gutcheck/@repo/api/.env']);
-  assert.deepEqual(q.warnings, [`repo api/.env replaces the backup of ${first}, which no longer exists`]);
   assert.ok((await ctl.apply(q.token, { via: 'app' })).ok);
-  assert.deepEqual(Object.keys(record().entries), [moved]);
-  assert.equal(record().entries[moved].key, 'gutcheck/@repo/api/.env');
+  return { first, moved, oldName, q, calls, record };
+}
+
+test('owners: after the workspace folder is renamed, pass saves a new suffixed item and keeps the old one', async () => {
+  const { first, moved, oldName, q, calls, record } = await movedWorkspace({ tool: 'pass', target: '' });
+  assert.equal(oldName, 'gutcheck/@repo/api/.env');
+  const name = `gutcheck/@repo/api/.env${tag(moved)}`;
+  assert.deepEqual(q.display.map((d) => d.text.split('  ←')[0]), [`pass insert -m -f ${name}`]);
+  assert.deepEqual(q.warnings, [`repo api/.env is saved as a new item; the backup of ${first} (no longer found) is kept as ${oldName}.`]);
+  assert.deepEqual(saves(calls), [`insert -m -f ${name}`], 'nothing is written to the old name');
+  assert.deepEqual(Object.keys(record().entries).sort(), [first, moved].sort(), 'the old record entry is kept');
+  assert.equal(record().entries[moved].key, name);
 });
 
-test('owners: a repointed dotfiles link replaces its pass backup; Proton just saves a new item', async () => {
+test('owners: a 326-character name and a KeePassXC entry get a new suffixed item too', async () => {
+  const long = 'd'.repeat(120) + '/' + 'e'.repeat(120) + '/' + 'f'.repeat(60) + '/.env';
+  const a = await movedWorkspace({ tool: 'pass', target: '', rel: long });
+  assert.ok(a.oldName.length > 300);
+  assert.deepEqual(saves(a.calls), [`insert -m -f ${a.oldName}${tag(a.moved)}`]);
+  assert.equal(a.q.warnings.length, 1);
+  const k = await movedWorkspace({ tool: 'keepassxc', target: { db: '/d.kdbx', keyFile: '/k' } });
+  const entry = `${k.oldName}${tag(k.moved)}`;
+  assert.deepEqual(saves(k.calls), [`add --no-password -k /k /d.kdbx ${entry}`, `attachment-import --no-password -k /k /d.kdbx ${entry} .env /dev/stdin`]);
+});
+
+test('owners: a repointed dotfiles link gets a new pass item; Proton just saves a new item', async () => {
   const { tmp, home, ws, mkCtl, record, env, dataDir } = setup();
   put(env.PASSWORD_STORE_DIR, '.gpg-id', 'me\n');
   const a = path.join(tmp, 'dots', 'a'), b = path.join(tmp, 'dots', 'b');
@@ -70,16 +98,12 @@ test('owners: a repointed dotfiles link replaces its pass backup; Proton just sa
     const q = await ctl.plan([link], { via: 'app', ...ws });
     assert.ok(q.ok, `${tool}: ${q.error}`);
     assert.equal(q.display.length, 1, tool);
-    const entries = () => Object.keys(record().entries).sort();
     if (tool === 'pass') {
-      assert.deepEqual(q.warnings, [`home ~/.netrc replaces the backup of ${path.join(a, 'netrc')}, which ~/.netrc no longer points to`]);
-      assert.ok((await ctl.apply(q.token, { via: 'app' })).ok);
-      assert.deepEqual(entries(), [path.join(b, 'netrc')]);
-    } else {
-      assert.deepEqual(q.warnings, [], 'a new item never overwrites the old one');
-      assert.ok((await ctl.apply(q.token, { via: 'app' })).ok);
-      assert.deepEqual(entries(), [path.join(a, 'netrc'), path.join(b, 'netrc')].sort());
-    }
+      assert.match(q.display[0].text, new RegExp(`^pass insert -m -f gutcheck/@home/%7E/\\.netrc${tag(path.join(b, 'netrc'))}  ←`));
+      assert.deepEqual(q.warnings, [`home ~/.netrc is saved as a new item; the backup of ${path.join(a, 'netrc')} (~/.netrc no longer points to it) is kept as gutcheck/@home/%7E/.netrc.`]);
+    } else assert.deepEqual(q.warnings, [], 'a new item never overwrites the old one');
+    assert.ok((await ctl.apply(q.token, { via: 'app' })).ok);
+    assert.deepEqual(Object.keys(record().entries).sort(), [path.join(a, 'netrc'), path.join(b, 'netrc')].sort(), tool);
   }
 });
 

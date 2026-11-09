@@ -86,3 +86,23 @@ test('plan display text escapes the file name for the app as well', async () => 
     assert.ok(!RAW.test(p.note) && !RAW.test(p.title));
   }
 });
+
+test('plan display: a backslash in a name is escaped once, and shell characters are single-quoted', async () => {
+  const { setup: vsetup, okRun } = require('./helpers/vault-ctl');
+  const { tmp, mkCtl } = vsetup();
+  const root = path.join(tmp, 'ws7');
+  const repo = path.join(root, 'my $app "x" \\y');
+  fs.mkdirSync(repo, { recursive: true });
+  execFileSync('git', ['init', '-q', repo]);
+  fs.writeFileSync(path.join(repo, '.env'), 'K=1\n');
+  const ctl = mkCtl({ run: okRun() });
+  ctl.link({ tool: 'proton', target: 'Dev' });
+  const p = await ctl.plan([path.join(repo, '.env')], { via: 'app', repos: [{ path: repo }], root });
+  assert.ok(p.ok, p.error);
+  const { quoteArg } = require('../src/secrets-ctl');
+  assert.equal(quoteArg('gutcheck: repo my $app "x" \\y/.env'), `'gutcheck: repo my $app "x" \\\\y/.env'`);
+  assert.equal(quoteArg("it's"), `'it'\\''s'`);
+  assert.equal(quoteArg('plain/path-1.env'), 'plain/path-1.env');
+  assert.equal(quoteArg('a\x1bb'), `'a\\x1bb'`);
+  assert.ok(p.display[0].text.endsWith(`contents of repo my $app "x" \\\\y/.env (4 bytes)`), p.display[0].text);
+});

@@ -135,8 +135,9 @@ const keepassxc = make('keepassxc', 'keepassxc-cli', 'Path to the .kdbx file, it
   named: true,
   // { update, itemId }: the entry this file was saved to before. It exists, so no add, and -f
   // replaces the attachment (attachment-import refuses an existing one without it).
-  saveCmd(cand, t, { update = false, itemId = null } = {}) {
-    const entry = update && itemId ? itemId : kpEntry(cand, t);
+  saveCmd(cand, t, o = {}) {
+    const { update = false, itemId = null } = o;
+    const entry = update && itemId ? itemId : kpEntry(cand, t) + suffixOf(o);
     const [noPw, k, key, db] = kpBase(t);
     const imp = { args: ['attachment-import', ...(update ? ['-f'] : []), noPw, k, key, db, entry, baseName(cand.rel), '/dev/stdin'], stdin: true, stdinPath: true, encode: (buf) => buf };
     return { key: entry, steps: update ? [imp] : [{ args: ['add', noPw, k, key, db, entry] }, imp], parseId: () => entry };
@@ -152,13 +153,18 @@ const keepassxc = make('keepassxc', 'keepassxc-cli', 'Path to the .kdbx file, it
   },
 });
 
+// { suffix }: "~" and 8 hex, added to a new name whose plain form a gone file's backup still holds.
+// slug() writes "~" as %7E, so a suffixed name never equals a plain one.
+const suffixOf = (o) => (o && /^~[0-9a-f]{8}$/.test(o.suffix || '') ? o.suffix : '');
+
 function passLike(id, bin, insertFlags, extra) {
   const sub = (t) => String(t || '').replace(/^\/+|\/+$/g, '') || 'gutcheck';
   return make(id, bin, 'Subfolder (optional, default gutcheck)', {
     named: true,
     // A file saved before keeps its name (itemId); insert -f overwrites that item.
-    saveCmd(cand, t, { update = false, itemId = null } = {}) {
-      const name = update && itemId ? itemId : `${sub(t)}/${slug(cand.title)}`;
+    saveCmd(cand, t, o = {}) {
+      const { update = false, itemId = null } = o;
+      const name = update && itemId ? itemId : `${sub(t)}/${slug(cand.title)}${suffixOf(o)}`;
       return { key: name, args: ['insert', ...insertFlags, name], encode: (buf) => textOf(buf), parseId: () => name };
     },
     ...extra,

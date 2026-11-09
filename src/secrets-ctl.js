@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const exec = require('./exec');
-const { plural, printable } = require('./util');
+const { plural, printable, sq } = require('./util');
 const { ADAPTERS, TOOL_INFO } = require('./vault-adapters');
 const { findRepoSecrets, findWorkspaceSecrets, findHomeSecrets } = require('./secrets');
 const { createRecord, statusOf, secretAdvice } = require('./secret-status');
@@ -26,8 +26,13 @@ const shortName = (cand) => cand.title.replace(/^gutcheck: /, '');
 const GOOGLE = { id: 'google', label: 'Google Password Manager', found: false, reason: 'No CLI or write API' };
 
 const refused = (via) => (via === 'mcp' ? { ok: false, error: MCP_REFUSAL } : null);
-const quote = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : '"' + String(s).replace(/(["\\$`])/g, '\\$1') + '"');
+// One argument as the preview shows it: escaped by printable (so a "\" shows once, as "\\"), then
+// single-quoted unless it is plain, so a pasted copy cannot expand.
+const quoteArg = (s) => { const p = printable(s); return /^[\w@%+=:,./-][\w@%+=:,./~-]*$/.test(p) ? p : sq(p); };
 const isText = (s) => typeof s === 'string' && s.length <= 300 && !/[\0-\x1f\x7f]/.test(s) && !s.startsWith('-');
+// A recorded item name: our own pass/gopass name or KeePassXC entry, which can be long.
+const isName = (s) => typeof s === 'string' && s.length <= 4096 && !/[\0-\x1f\x7f]/.test(s) && !s.startsWith('-');
+const tagOf = (real) => '~' + crypto.createHash('sha256').update(real).digest('hex').slice(0, 8);
 const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
 // A repo's label in titles: its path under the workspace root (posix), else its folder name.
 function repoLabel(repoPath, root) {
@@ -167,14 +172,21 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     // attachment-import -f would overwrite an item another file owns. A file whose key is taken is
     // left out of this plan, with a "skipped:" warning; the rest go ahead.
     const keyOf = (e) => e.key || (l.a.named ? e.itemId : e.title);
-    const owners = new Map(Object.entries(rec.entries).filter(([, e]) => ours(e)).map(([real, e]) => [keyOf(e), { real, e }]));
-    // An owner is gone when its file no longer exists (a renamed workspace), or when it was a home file
-    // whose name now leads elsewhere (a repointed dotfiles link): a home title names one place here.
+    const byKey = new Map(); // key -> [{ real, e }]
+    for (const [real, e] of Object.entries(rec.entries)) {
+      if (!ours(e)) continue;
+      if (!byKey.has(keyOf(e))) byKey.set(keyOf(e), []);
+      byKey.get(keyOf(e)).push({ real, e });
+    }
+    const othersOf = (key, real) => (byKey.get(key) || []).filter((o) => o.real !== real);
+    // An owner is gone when its file is not found (a renamed workspace, or an unmounted disk), or when
+    // it was a home file whose name now leads elsewhere (a repointed dotfiles link). Its backup may be
+    // the only copy, so it is never overwritten: a named tool saves this file under a new name.
     const homeAt = new Map(fresh.items.filter((c) => c.scope === 'home').map((c) => [c.title, c.real]));
     const gone = (o) => {
-      if (!fs.existsSync(o.real)) return 'which no longer exists';
+      if (!fs.existsSync(o.real)) return 'no longer found';
       const now = homeAt.get(o.e.title);
-      return now && now !== o.real ? `which ${o.e.title.replace(/^gutcheck: home /, '')} no longer points to` : null;
+      return now && now !== o.real ? `${o.e.title.replace(/^gutcheck: home /, '')} no longer points to it` : null;
     };
     const keys = new Set();
     const items = [];
@@ -184,31 +196,33 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     for (const c of fresh.items) {
       if (!wanted.has(c.real) || c.status === 'backed' || c.status === 'skipped' || !isFile(c.real)) continue;
       const prev = rec.entries[c.real];
-      const again = l.a.named && ours(prev) && !prev.missing && isText(prev.itemId) ? { update: true, itemId: prev.itemId } : {};
+      const again = l.a.named && ours(prev) && !prev.missing && isName(prev.itemId) ? { update: true, itemId: prev.itemId } : {};
       let save = l.a.saveCmd(c, l.target, again);
       if (save.error) return { ok: false, error: save.error };
-      const other = owners.get(save.key);
-      const why = other && other.real !== c.real ? gone(other) : null;
-      let replaces = null;
-      // A gone owner: an id-based tool just creates a new item (it never overwrites); a named one
-      // replaces the old backup explicitly, and the record entry moves to this file.
-      if (why && l.a.named && isText(other.e.itemId)) {
-        save = l.a.saveCmd(c, l.target, { update: true, itemId: other.e.itemId });
-        replaces = other.real;
+      const others = othersOf(save.key, c.real);
+      let kept = null;
+      // An id-based tool only ever creates, so a gone owner's title is no clash. A named tool gets a
+      // new name, suffixed with a hash of this file's path.
+      if (others.length && l.a.named && others.every(gone)) {
+        kept = others[0];
+        save = l.a.saveCmd(c, l.target, { suffix: tagOf(c.real) });
       }
-      if (keys.has(save.key) || (other && other.real !== c.real && !why)) {
+      const live = othersOf(save.key, c.real).some((o) => (l.a.named ? true : !gone(o)));
+      if (keys.has(save.key) || live) {
         clash = clash || CLASH(c, save.key);
         warnings.push(printable(`skipped: ${shortName(c)}: another file already uses the vault item ${keyWord(c, save.key)} ${save.key}`));
         continue;
       }
+      // The invariant: a named save never reuses a name recorded for another file.
+      if (l.a.named && othersOf(save.key, c.real).length) return { ok: false, error: 'GutCheck refused this backup: a save would reuse the vault item of another file. Nothing was planned.' };
       keys.add(save.key);
-      if (replaces) warnings.push(printable(`${shortName(c)} replaces the backup of ${replaces}, ${why}`));
-      items.push({ cand: c, sha256: c.sha256, save, replaces });
+      if (kept) warnings.push(printable(`${shortName(c)} is saved as a new item; the backup of ${kept.real} (${gone(kept)}) is kept as ${kept.e.itemId || keyOf(kept.e)}.`));
+      items.push({ cand: c, sha256: c.sha256, save });
       const steps = save.steps || [save];
       steps.forEach((s, i) => {
-        const cmd = [l.a.bin, ...s.args.map(quote)].join(' ');
-        const tail = i === steps.length - 1 ? `  ← contents of ${shortName(c)} (${c.size} bytes)` : '';
-        display.push({ text: printable(cmd + tail) });
+        const cmd = [l.a.bin, ...s.args.map(quoteArg)].join(' ');
+        const tail = i === steps.length - 1 ? `  ← contents of ${printable(shortName(c))} (${c.size} bytes)` : '';
+        display.push({ text: cmd + tail });
       });
     }
     if (!items.length) return { ok: false, error: clash || 'Nothing to back up: those files are already backed up, skipped or no longer found.' };
@@ -255,7 +269,6 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     record.update((rec) => {
       const e = { sha256: it.sha256, tool: l.tool, target: l.target, itemId, key: it.save.key, title: cand.title, at: new Date().toISOString() };
       if (cand.kind === 'ssh' && cand.fingerprint && l.a.fingerprintCmd(itemId, l.target)) e.fingerprint = cand.fingerprint;
-      if (it.replaces && it.replaces !== cand.real) delete rec.entries[it.replaces]; // the backup moved to this file
       rec.entries[cand.real] = e;
       delete rec.skipped[cand.real];
     });
@@ -349,4 +362,4 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
   return { tools, link, test, scan, plan, apply, verify, skip, unskip, PLAN_TTL };
 }
 
-module.exports = { createSecretsCtl, scrub, pipeCall, findBin, repoLabel, PLAN_TTL, MCP_REFUSAL, SCAN_FIRST };
+module.exports = { quoteArg, createSecretsCtl, scrub, pipeCall, findBin, repoLabel, PLAN_TTL, MCP_REFUSAL, SCAN_FIRST };
