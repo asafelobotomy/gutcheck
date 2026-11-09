@@ -11,6 +11,8 @@ const { canRepoIgnore, MIN_PREFIX, wildcardOk, SHORT_WHY, FROM_REPO } = require(
 
 const MAX_REASON = 300;
 const VIA = new Set(['cli', 'app', 'mcp']);
+// Who wrote a rule: anything but cli or app (another case, an unknown tool, a missing field) counts as an agent.
+const viaOf = (v) => (v == null ? undefined : VIA.has(v) ? v : 'mcp');
 const ID_RE = /^[A-Za-z0-9][\w.:/-]{0,120}\*?$/; // a finding id, or a prefix ending in * (pr-stale-*)
 
 const readJSON = (f) => { try { const v = JSON.parse(fs.readFileSync(f, 'utf8')); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
@@ -99,7 +101,7 @@ function createPolicyStore(dir) {
   // Files from before via was stored hold the reason as a plain string; those read as the user's.
   const readRaw = () => { const v = readJSON(ignoreFile) || {}; const out = {}; for (const [k, m] of Object.entries(v)) if (m && typeof m === 'object' && !Array.isArray(m)) out[k] = m; return out; };
   const loadIgnores = () => Object.fromEntries(Object.entries(readRaw()).map(([k, m]) => [k, clean(m)]));
-  const loadVia = () => Object.fromEntries(Object.entries(readRaw()).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).filter(([, v]) => v && VIA.has(v.via)).map(([id, v]) => [id, v.via]))]));
+  const loadVia = () => Object.fromEntries(Object.entries(readRaw()).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).filter(([, v]) => v && typeof v === 'object').map(([id, v]) => [id, viaOf(v.via) || 'mcp']))]));
   function setIgnore(key, id, reason, via = 'cli') {
     if (typeof key !== 'string' || !key || !ID_RE.test(String(id || ''))) return { ok: false, error: 'Name a repo and a finding id (a trailing * ignores every id that starts with it).' };
     if (!wildcardOk(id, MIN_PREFIX.user)) return { ok: false, error: `An ignore needs at least ${MIN_PREFIX.user} characters before the *.` };
@@ -131,7 +133,7 @@ function createPolicyStore(dir) {
 function applyPolicy(res, policy, score) {
   if (!res || res.error || !policy) return res;
   const key = repoKey(res);
-  const user = (k, from) => Object.entries((policy.ignores || {})[k] || {}).filter(([id]) => wildcardOk(id, MIN_PREFIX.user)).map(([id, reason]) => ({ id, reason, from, via: ((policy.ignoreVia || {})[k] || {})[id] }));
+  const user = (k, from) => Object.entries((policy.ignores || {})[k] || {}).filter(([id]) => wildcardOk(id, MIN_PREFIX.user)).map(([id, reason]) => ({ id, reason, from, via: viaOf(((policy.ignoreVia || {})[k] || {})[id]) }));
   const rules = [
     ...user('*', 'all repos'),
     ...user(key, 'GutCheck'),

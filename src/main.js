@@ -11,7 +11,7 @@ const { createTrayController } = require('./tray');
 const { setAutostart, isAutostart, HIDDEN_FLAG } = require('./autostart');
 const { createSettingsStore } = require('./settings');
 const { createAgentConnect } = require('./agent-connect');
-const { createPolicyStore, driftReport } = require('./policy');
+const { createPolicyStore, driftReport, inactiveIgnores } = require('./policy');
 const sched = require('./schedule');
 const { createWorkspaceScanner } = require('./workspace-scan');
 const { dataDir } = require('./paths');
@@ -174,7 +174,7 @@ handle('ignore:set', async (_e, { dir, id, reason, remove, allRepos } = {}) => {
   if (allRepos) { await ws.refreshAll(); return { ok: true, all: true, repos: [...known.values()] }; }
   return { ok: true, res: await rescanKnown(dir) };
 });
-handle('drift:get', () => { const b = policyNow().baseline; return { file: policy().baselineFile, rules: b ? driftReport([...known.values()], b) : null }; });
+handle('drift:get', () => { const p = policyNow(); const b = p.baseline; return { file: policy().baselineFile, rules: b ? driftReport([...known.values()], b) : null, inactive: inactiveIgnores(p.ignores) }; });
 handle('baseline:init', async () => {
   if (loadSettings().readOnly) return { ok: false, error: 'Read-only mode is on.' };
   const i = policy().initBaseline();

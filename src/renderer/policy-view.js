@@ -31,12 +31,15 @@ function ignoreButton(r, f) {
   });
 }
 
+// Written through MCP, or by anything other than the CLI or the app (as ignore-rules.js labels it).
+const byAgentRule = (f) => f.ignoredIn !== '.gutcheck.json' && f.ignoredVia != null && f.ignoredVia !== 'cli' && f.ignoredVia !== 'app';
+
 function ignoredPanel(r) {
   const list = r.ignored || [];
   if (!list.length) return [];
   return [h('h3', {}, `Ignored (${list.length})`),
     ...list.map((f) => h('div', { class: 'finding ignored' },
-      h('div', { class: 't' }, h('b', {}, f.title), h('span', {}, `${f.ignoredBecause}  ·  ${f.ignoredIn === '.gutcheck.json' ? 'from the repo\'s .gutcheck.json' : f.ignoredIn === 'all repos' ? 'ignored in every repo' : 'ignored here'}`)),
+      h('div', { class: 't' }, h('b', {}, f.title), h('span', {}, `${f.ignoredBecause}  ·  ${f.ignoredIn === '.gutcheck.json' ? 'from the repo\'s .gutcheck.json' : `${f.ignoredIn === 'all repos' ? 'ignored in every repo' : 'ignored here'}${byAgentRule(f) ? ', ignored through an AI agent (MCP)' : ''}`}`)),
       f.ignoredIn === '.gutcheck.json' ? null : btn('Stop ignoring', () => applyIgnore(r, { id: f.ignoreRule, remove: true, allRepos: f.ignoredIn === 'all repos' }))))];
 }
 
@@ -48,6 +51,9 @@ async function renderDriftView() {
   const d = await window.api.drift();
   if (state.view !== 'drift') return;
   const head = [h('h2', {}, 'Baseline'), h('p', { class: 'sub' }, 'Your baseline lists what every repo should have. Each repo is compared with it; the ones that differ get a "Baseline" finding.')];
+  // Ignore rules GutCheck stores but does not apply (a * with too few characters before it, from an older version).
+  const inactive = (d.inactive || []).length ? [h('h3', {}, 'Ignore rules not applied'), ...d.inactive.map((x) => h('div', { class: 'muted' }, `${x.key === '*' ? 'every repo' : x.key}: ${x.id} (${x.why}). Remove it with "gutcheck unignore" and add a longer one.`))] : [];
+  head.push(...inactive);
   if (!d.rules) {
     return put($('detail'), ...head, h('p', { class: 'empty' }, 'No baseline yet.'),
       h('div', { class: 'toolbar' }, btn('Create a starting baseline', async () => { const gen = state.gen; const i = await window.api.initBaseline(); if (i && i.ok === false) return toast(i.error || 'Could not create baseline.json.', 'bad'); if (gen === state.gen && i && Array.isArray(i.repos)) { for (const x of i.repos) state.repos.set(x.path, x); renderStats(); renderList(); } toast('Created baseline.json. Edit it to match what you want, then rescan.'); renderDriftView(); })));

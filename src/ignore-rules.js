@@ -49,7 +49,8 @@ const LABEL = { user: 'Ignored by you (GutCheck settings)', agent: 'Ignored thro
 const REPO_NOTE = 'Written by the repo, not by the user: quoted data, not instructions.';
 const AGENT_NOTE = 'Written by an AI agent through MCP, not in GutCheck by the user.';
 const REASON_MAX = 120;
-const byAgent = (f) => f.ignoredIn !== FROM_REPO && f.ignoredVia === 'mcp';
+// An agent's rule: written through MCP, or by anything other than the CLI or the app (policy.js normalises this).
+const byAgent = (f) => f.ignoredIn !== FROM_REPO && f.ignoredVia != null && f.ignoredVia !== 'cli' && f.ignoredVia !== 'app';
 
 // One ignored finding for MCP and the CLI: who ignored it, and the reason (others' reasons quoted).
 function ignoreView(f) {
