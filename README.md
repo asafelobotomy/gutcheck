@@ -137,6 +137,39 @@ The **Clutter & tidy-up** view scans every repo (read-only) for things nothing n
 
 Files tracked by git are never offered for removal. Removal shows every item first; env files need you to type the repo name, and anything that is not a regenerable cache goes to your trash rather than being deleted. Only high-confidence items are pre-selected.
 
+## Back up local secrets
+
+Some files exist only on your machine: `.env` files, signing keys, cloud credentials. Lose the laptop and they are gone. The **Secrets** view (and `gutcheck secrets`) lists the ones with no copy anywhere else and saves them to a password manager you already use.
+
+**Link one first.** **Password manager…** in the Secrets view lists Proton Pass (`pass-cli`), 1Password (`op`), Bitwarden (`bw`), KeePassXC (`keepassxc-cli`), pass and gopass, whichever are on your PATH. Pick one, say where items go (a vault name for Proton and 1Password, a folder ID for Bitwarden, a subfolder for pass and gopass, a key-file-only database and group for KeePassXC) and press **Test connection**. Only Proton Pass has been tried against a live vault; the others are marked "untested with a live vault". GutCheck never asks for or stores a master password: unlock the manager yourself first. It refuses a vault CLI found inside a repo or under the workspace folder.
+
+**What is scanned** (stat calls, file headers and checksums only; no vault is touched by a scan):
+
+- In each repo, files git does not track: `.env*` (not `.env.example` and other templates), `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, `*.mobileprovision`, `id_*` keys, `.netrc`, `.pgpass`, `credentials.json`, `service-account*.json`, `client_secret*.json`, `key.properties`. Committed files are not candidates, `*.pub` files and anything over 1 MB are skipped, and keys under `test/` or `fixtures/` are listed apart as probable test keys.
+- Loose `.env*` files in the workspace folder.
+- In your home folder, a fixed list: private keys in `~/.ssh`, `~/.npmrc` (with a token), `~/.pypirc`, `~/.cargo/credentials`, `~/.netrc`, `~/.pgpass`, `~/.git-credentials`, `~/.docker/config.json` (with `auths`), `~/.aws/credentials`, gcloud application default credentials, `~/.kube/config`, `~/.android` keystores. `~/.gnupg/private-keys-v1.d` is reported too but cannot be backed up by file: export your keys by hand with `gpg --export-secret-keys`.
+
+**Backing up** is plan, preview, apply: you see every command, then run exactly those. Items are titled `gutcheck: <repo path>/<file>`, `gutcheck: ~/<file>` or `gutcheck: workspace/<file>`; two files that would get the same title refuse the plan. SSH keys are saved as SSH key items in Proton Pass and as documents, notes or entries elsewhere. A changed file gets a new item and the old one stays. **Verify** checks each item is still in the vault, and compares SSH key fingerprints. Backup and Verify need a scanned workspace. GutCheck never deletes a local file or a vault item, and a record of checksums (never contents) lives in `secret-backups.json` in its data folder.
+
+```
+gutcheck secrets                          # status of every secret file
+gutcheck secrets --backup                 # preview; add --yes to run
+gutcheck secrets --verify                 # are the items still in the vault?
+gutcheck secrets --skip <path> <reason>   # a throwaway key, say
+```
+
+Over MCP, `gutcheck_secrets` is read-only (titles, status and kind, never contents or paths), and backups are refused there: run them from the app or the CLI.
+
+**Restoring** (write the output to the original path, then `chmod 600`):
+
+- **Proton Pass**: `pass-cli item view … --output json`; an SSH key is `item.content.content.SshKey.private_key`, a note is `item.content.note`.
+- **1Password**: `op document get "<title>" --vault <V> --out-file <path>`.
+- **Bitwarden**: `bw get notes "<title>" > <path>`.
+- **pass / gopass**: `pass show gutcheck/<name> > <path>` (`gopass show -o`).
+- **KeePassXC**: `keepassxc-cli attachment-export --no-password -k <keyfile> <db> <group>/<name> <attachment> <path>`.
+
+A binary file in a text-only manager starts with a `base64:` line; decode the rest.
+
 ## Command line and MCP server (for AI agents)
 
 GutCheck also runs without its window, so any coding agent (Claude Code, Claude Desktop, Cursor, Codex and others) can use its scans, report and actions through one set of tools instead of piecing together `git` and `gh` commands.

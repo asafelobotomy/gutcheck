@@ -16,6 +16,8 @@ const { buildTestAdvice } = require('../src/tests');
 const { buildReport } = require('../src/report');
 const { collectHygiene } = require('../src/hygiene');
 const { scanRepo } = require('../src/scanner');
+const { looksSecret } = require('../src/secret-patterns');
+const { findRepoSecrets } = require('../src/secrets');
 
 const sh = (dir, ...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim();
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'gutcheck-acc-'));
@@ -279,4 +281,23 @@ test('tests upkeep false alarms: deliberate skips, fixtures named in strings, se
     assert.deepEqual(u.tinyFiles, []);
     assert.deepEqual(u.copies, []);
   } finally { rm(d); }
+});
+
+test('secrets false alarms: templates and public keys are not secrets, committed files and non-git folders are not candidates', async () => {
+  for (const n of ['.env.example', '.env.sample', '.env.template', 'id_ed25519.pub', 'deploy.key.pub']) assert.ok(!looksSecret(n), n);
+  for (const n of ['.env', '.env.local', 'id_ed25519', 'server.pem']) assert.ok(looksSecret(n), n);
+  const d = repo();
+  const plain = tmp();
+  try {
+    put(d, '.env', 'A=1\n');
+    put(d, '.env.example', 'A=\n');
+    put(d, 'keys/deploy.pub', 'ssh-ed25519 AAAA\n');
+    put(d, 'config/prod.env.key', 'k\n');
+    put(d, 'committed/.env', 'B=2\n');
+    sh(d, 'add', 'committed/.env');
+    sh(d, 'commit', '-q', '-m', 'c');
+    assert.deepEqual((await findRepoSecrets(d)).map((c) => c.rel).sort(), ['.env', 'config/prod.env.key'], 'a committed file is already backed up by git');
+    put(plain, '.env', 'A=1\n');
+    assert.deepEqual(await findRepoSecrets(plain), [], 'not a git repo: the tracked set is unknown, so nothing is offered');
+  } finally { rm(d); rm(plain); }
 });
