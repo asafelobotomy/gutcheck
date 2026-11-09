@@ -62,9 +62,16 @@ async function buildOutput(abs, name, parentFiles, parentName) {
   const rust = name === 'target' && parentFiles.has('Cargo.toml');
   if (tag.startsWith(CACHEDIR_SIG)) return { reason: rust ? 'Rust build output (cargo, tagged as a cache)' : 'Cache folder (tagged CACHEDIR.TAG)', sure: true, ignoreAs: rust ? 'target/' : null, rebuild: rust ? 'cargo build' : 'the tool that made it' };
   if (rust) return { reason: 'Rust build output (cargo)', sure: true, ignoreAs: 'target/', rebuild: 'cargo build' };
-  if ((name === 'pytest' || /^pytest-of-/.test(name)) && /^\.?te?mp$/i.test(parentName)) return { reason: 'pytest temporary folders', sure: false, ignoreAs: null, rebuild: 'the next test run' };
+  if (/^\.?te?mp$/i.test(parentName) && (name === 'pytest' || /^pytest-of-/.test(name) || (/^pytest-./.test(name) && await looksPytestTemp(abs)))) return { reason: 'pytest temporary folders', sure: false, ignoreAs: null, rebuild: 'the next test run', testTemp: 'pytest' };
   if ((name === 'dist' || name === 'build') && (await Promise.all(BUILDER_MARKERS.map(has))).some(Boolean)) return { reason: 'electron-builder output (packaged app builds)', sure: false, ignoreAs: null, rebuild: 'the next package build' };
   return null;
+}
+// A --basetemp folder with another name (pytest-main): pytest names each test's folder after the
+// test plus a number (test_login0, library-template0), and xdist workers get popen-gw0, popen-gw1.
+async function looksPytestTemp(abs) {
+  let ents = [];
+  try { ents = await fsp.readdir(abs, { withFileTypes: true }); } catch {}
+  return ents.some((e) => e.isDirectory() && /^(popen-gw\d+|[\w.-]+\d+)$/.test(e.name));
 }
 // Real size of a big folder: du is far faster than walking it, and a capped walk would under-count.
 async function bigDirSize(p) {

@@ -23,6 +23,8 @@ const NO_DESCEND = new Set([...HEAVY_DIRS, '.git', '.venv', 'venv', '.next', '.n
 
 const { CACHE_DIRS, FILE_RULES, VENV_NAMES, buildOutput, bigDirSize, dirSize, STALE_LOG_DAYS, STALE_BACKUP_DAYS, SCRATCH_DIR_RE } = require('./clutter-rules');
 
+const { scratchAdvice } = require('./clutter-scratch');
+
 const COPY_RE = /^(.+?)(?: \(\d+\)| copy(?: \d+)?| - Copy(?: \(\d+\))?|[_-]copy\d*|\.copy)(\.[^.]+)?$/i;
 
 const ENV_RE = /^\.env(?:[._\- (~].*)?$|^[\w-]+\.env(?:\.[\w-]+)?$/i;
@@ -172,7 +174,7 @@ async function scanClutter(dir) {
           const p = path.join(abs, e.name);
           let mtime = Date.now();
           try { mtime = (await fsp.lstat(p)).mtimeMs; } catch {}
-          await addItem({ path: r, name: e.name, kind: 'dir', category: 'build', reason: `${build.reason}; rebuilt by ${build.rebuild}`, confidence: build.sure ? 'high' : 'medium', size: await bigDirSize(p), mtime, regenerable: true, costly: true, ignoreAs: build.ignoreAs });
+          await addItem({ path: r, name: e.name, kind: 'dir', category: 'build', reason: `${build.reason}; rebuilt by ${build.rebuild}`, confidence: build.sure ? 'high' : 'medium', size: await bigDirSize(p), mtime, regenerable: true, costly: true, ignoreAs: build.ignoreAs, ...(build.testTemp ? { testTemp: build.testTemp } : {}) });
           continue;
         }
         const rule = CACHE_DIRS[e.name];
@@ -253,7 +255,7 @@ async function scanClutter(dir) {
   // Declared submodules and git-ignored folders (build areas, vendored checkouts) are deliberate.
   const nestedIgnored = await ignoredSet(dir, nested);
   const strays = nested.filter((n) => !subs.has(n) && !nestedIgnored.has(n));
-  const advice = buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, root, nested: strays, templateSeen });
+  const advice = [...buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, root, nested: strays, templateSeen }), ...await scratchAdvice(dir, items)];
   return { items, advice, count: items.length, totalSize: items.reduce((n, i) => n + i.size, 0), truncated };
 }
 
