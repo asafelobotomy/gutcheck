@@ -71,6 +71,6 @@ test('mcp: agent usage needs --allow-actions to start servers, and agent fixes p
     assert.match(fs.readFileSync(path.join(data, 'audit.log'), 'utf8'), /stale config file/);
   } finally {
     process.env.HOME = oldHome;
-    for (const d of [home, data, root]) fs.rmSync(d, { recursive: true, force: true });
+    for (const d of [home, data, root]) fs.rmSync(d, { recursive: true, force: true, maxRetries: 3 });
   }
 });
