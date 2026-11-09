@@ -107,6 +107,10 @@ async function fixAll(engine, repo, f, out, err) {
     for (const c of d.choices) out(`  - ${c.label}${c.fields ? ` (needs ${c.fields.join(', ')})` : ''}`);
     out(`  Run it yourself: gutcheck fix ${repo} ${d.finding}${d.choices[0].fields ? d.choices[0].fields.map((k) => ` ${k}="..."`).join('') : ''}`);
   }
+  if (p.held) {
+    out('\nNot run on its own: it runs the repo\'s own code. Read it, then fix it on its own if you trust it.');
+    for (const x of p.held) { out(`  - ${x.title}  (risk: ${x.risk})`); for (const w of x.warnings) out(`      ${w}`); }
+  }
   if (!plans.length) { out('Nothing to fix automatically.'); return 0; }
   if (!f.yes) { out('\nNothing was run. Add --yes to run exactly these commands, in this order.'); return 0; }
   const confirm = Object.fromEntries(plans.filter((x) => x.confirmName).map((x) => [x.token, f.confirm]));

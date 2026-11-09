@@ -235,7 +235,7 @@ function createEngine(opts = {}) {
           const c = a && d.choices[a.choice];
           return c && c.action ? { action: { ...c.action, ...(a.values && typeof a.values === 'object' ? a.values : {}) }, sev: (x.repo.findings.find((f) => f.id === d.id) || {}).severity } : null;
         });
-        for (const action of FixAll.order(x.repo, fa.actions, answers).actions) resolved.push({ dir: x.repo.path, action });
+        for (const action of FixAll.order(x.repo, fa.actions, answers).actions) resolved.push({ dir: x.repo.path, action, all: true });
         const open = fa.decisions.filter((_, k) => !answers[k]);
         if (open.length) decisions.push({ repo: x.repo.name, decisions: open.map((d) => ({ finding: d.id, title: d.title, choices: d.choices.map((c, k) => ({ choice: k, label: c.label, fields: c.fields && c.fields.map((f) => f.name) })) })) });
         continue;
@@ -251,8 +251,12 @@ function createEngine(opts = {}) {
       }
       resolved.push({ dir: x.repo.path, action });
     }
-    const plans = resolved.length ? await service.planActions(resolved) : [];
-    return { ok: true, plans: [...plans.map((p) => (p.ok ? { ok: true, token: p.token, repo: p.repoName, title: p.title, risk: p.risk, commands: p.display.map((d) => d.text), warnings: p.warnings, undo: p.undo, note: p.note, confirmName: p.confirmName } : p)), ...errors], ...(decisions.length ? { decisions } : {}) };
+    const plans = resolved.length ? await service.planActions(resolved.map(({ dir, action }) => ({ dir, action }))) : [];
+    const pub = (p) => (p.ok ? { ok: true, token: p.token, repo: p.repoName, title: p.title, risk: p.risk, commands: p.display.map((d) => d.text), warnings: p.warnings, undo: p.undo, note: p.note, confirmName: p.confirmName, ...(p.runsRepoCode ? { runsRepoCode: true } : {}) } : p);
+    // Fix all never runs the repo's own hooks or drivers on its own: those plans come back in `held`.
+    const isHeld = (p, k) => resolved[k].all && p.ok && !FixAll.automatic(p);
+    const held = plans.filter(isHeld).map(pub);
+    return { ok: true, plans: [...plans.filter((p, k) => !isHeld(p, k)).map(pub), ...errors], ...(held.length ? { held } : {}), ...(decisions.length ? { decisions } : {}) };
   }
 
   // Only plans returned by plan() can run. Danger plans need confirm: { <token>: '<repo name>' }.

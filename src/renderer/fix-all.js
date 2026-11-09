@@ -28,6 +28,10 @@
   const OWNER_FILES = { license: 1, readme: 0, codeowners: 0, 'ci-node': 0 };
 
   const leave = (label = 'Leave it for now') => ({ label, action: null });
+  // A planned step that runs the repo's own code (its hooks or filter drivers: the plan's
+  // runsRepoCode) never runs as part of Fix all on its own. The app shows it unticked; the CLI and
+  // MCP return it under `held`, to run only when the owner asks for it.
+  const automatic = (p) => !(p && p.runsRepoCode);
 
   // A finding whose fix needs the owner -> { id, title, detail, choices: [{ label, action, fields? }], pick }.
   // pick: the choice selected at first (code-running choices start on "leave it").
@@ -84,7 +88,7 @@
     return { actions: sorted, note };
   }
 
-  const api = { plan, order, decision, STEP, AUTO };
+  const api = { plan, order, decision, automatic, STEP, AUTO };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FixAll = api;
 })(typeof window !== 'undefined' ? window : globalThis);

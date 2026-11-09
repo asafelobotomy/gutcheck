@@ -81,11 +81,13 @@ const RISK_LABEL = { safe: 'Safe', caution: 'Changes things', danger: 'Dangerous
 // one can be left out. opts.lead: lines shown above the list (what was left out, and why).
 // Each repo with a dangerous plan needs its name typed; the names go with the plans to the main
 // process (planConfirm), which refuses a dangerous plan without its repo's name.
-function confirmPlans(plans, { lead = [] } = {}) {
+// hold (Fix all): plans it returns false for start unticked, with a tick box even when alone.
+function confirmPlans(plans, { lead = [], hold = null } = {}) {
   const danger = plans.some((p) => p.risk === 'danger');
   const names = [...new Set(plans.map((p) => p.confirmName).filter(Boolean))];
-  const many = plans.length > 1;
-  const picked = new Set(plans);
+  const many = plans.length > 1 || !!hold;
+  const picked = new Set(plans.filter((p) => !hold || hold(p)));
+  if (picked.size < plans.length) lead = [...lead, 'Steps that run the repo\'s own code (its hooks or filter drivers) start unticked. Tick one only if you trust that code.'];
   return modal((box, close) => {
     const label = () => (many ? `Apply ${picked.size} change${picked.size === 1 ? '' : 's'}` : 'Apply');
     const ok = h('button', { class: danger ? 'danger' : 'primary' }, label());
@@ -103,7 +105,7 @@ function confirmPlans(plans, { lead = [] } = {}) {
     const tick = (p) => {
       if (!many) return null;
       const c = h('input', { type: 'checkbox', 'aria-label': `Include: ${p.title}` });
-      c.checked = true;
+      c.checked = picked.has(p);
       c.addEventListener('change', () => { if (c.checked) picked.add(p); else picked.delete(p); update(); });
       return c;
     };

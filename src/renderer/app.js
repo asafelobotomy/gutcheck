@@ -119,7 +119,7 @@ function renderList() {
 
 // items: [{ repo, action }]. Asks for inputs (single action only), previews, confirms, applies, refreshes.
 // opts.ask: ask for inputs (one item only). opts.lead: lines shown at the top of the review dialog.
-async function runActions(items, { ask = true, lead = [] } = {}) {
+async function runActions(items, { ask = true, lead = [], hold = null } = {}) {
   if (state.readOnly) return toast('Read-only mode is on. Untick "Read-only" in the header to make changes.', 'bad');
   if (ask && items.length === 1) {
     const a = items[0].action;
@@ -144,7 +144,7 @@ async function runActions(items, { ask = true, lead = [] } = {}) {
   const good = plans.filter((p) => p.ok);
   if (bad.length && !good.length) return toast(bad.map((p) => (p.repoName ? p.repoName + ': ' : '') + p.error).join('\n'), 'bad');
   if (bad.length) toast(`Could not plan ${bad.length} change${bad.length === 1 ? '' : 's'}:\n` + bad.map((p) => `${p.repoName || '?'}: ${p.error}`).join('\n'));
-  const chosen = await confirmPlans(good, { lead });
+  const chosen = await confirmPlans(good, { lead, hold });
   if (!chosen || !chosen.length) return;
   const gen = state.gen;
   const outs = await window.api.applyActions(chosen.map((p) => p.token), confirmOf(chosen));
