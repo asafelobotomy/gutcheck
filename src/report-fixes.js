@@ -4,7 +4,7 @@
 // 3 project files, 4 dependencies, 5 branches, 6 clutter, 7 settings and housekeeping.
 
 const { sq } = require('./util');
-const { historyVerdict } = require('./history');
+const { historyVerdict, SAFE_EXT } = require('./history');
 
 const GH = 'https://docs.github.com/en/';
 const REFS = {
@@ -63,7 +63,7 @@ function hygieneFix(id, r) {
     'git-submodules': { phase: 7, rank: 7, why: 'Code the project depends on is missing from this checkout.', cmds: ['git submodule status', 'git submodule update --init --recursive'], ref: REFS.submodule },
     'remote-http': { phase: 0, rank: 10, why: 'http:// sends code and credentials unencrypted.', cmds: [`git remote set-url origin ${sq((r.originUrl || '').replace(/^http:/i, 'https:') || 'https://github.com/OWNER/REPO.git')}`] },
     'repo-size': sizeStep(h.history),
-    'history-large-blobs': { phase: 7, rank: 8, why: 'Every clone downloads these, and GitHub rejects pushes with files over 100 MB.', cmds: [...((h.historyBlobs || []).slice(0, 5).map((b) => `git log --all --oneline --find-object=${b.id}   # ${(b.size / 1048576).toFixed(0)} MB`))], note: 'Find which file each object is, then ask the owner: keep, move to Git LFS (git lfs migrate import), or remove with git filter-repo. Both rewrite history; back up first and coordinate before any force-push.', ref: REFS.largeFiles },
+    'history-large-blobs': { phase: 7, rank: 8, why: 'Every clone downloads these, and GitHub rejects pushes with files over 100 MB.', cmds: [...((h.historyBlobs || []).filter((b) => /^[0-9a-f]{40,64}$/.test(b.id)).slice(0, 5).map((b) => `git log --all --oneline --find-object=${b.id}   # ${(b.size / 1048576).toFixed(0)} MB`))], note: 'Find which file each object is, then ask the owner: keep, move to Git LFS (git lfs migrate import), or remove with git filter-repo. Both rewrite history; back up first and coordinate before any force-push.', ref: REFS.largeFiles },
     'git-loose': { phase: 7, rank: 9, why: 'Unpacked objects waste space and slow git down.', cmds: ['git count-objects -vH', 'git gc   # safe default; do not use --prune=now', 'git maintenance start   # optional: keep it tidy automatically'], ref: REFS.gc },
     'git-garbage': { phase: 7, rank: 9, why: 'Stray files in .git/objects are left by interrupted commands.', cmds: ['git count-objects -vH', 'git fsck --connectivity-only --no-dangling'], note: 'Report what fsck says to the owner before deleting anything inside .git.', ref: REFS.gc },
     'readme-thin': { phase: 3, rank: 2, why: 'People cannot tell what the project does or how to run it.', cmds: [], note: 'Add: a one-line description, Install, Usage (with a runnable example), Contributing and License sections, using facts from the code and manifest only.', ref: REFS.readme },
@@ -107,11 +107,10 @@ function sizeStep(hist) {
   const base = { phase: 7, rank: 8, why: 'Large repositories are slow to clone and GitHub may ask you to reduce them.', ref: REFS.largeFiles };
   if (!hist) return { ...base, cmds: ['git count-objects -vH', 'git lfs migrate info --everything --above=10MB   # what is taking the space (needs git-lfs)'], note: 'Run a GutCheck Deep scan first: it shows whether the space is current files or old history. Moving history to LFS or stripping blobs rewrites history: never do it without the owner, and never force-push a shared branch without coordinating.' };
   const big = hist.folders.slice(0, 3).map((f) => f.name);
-  const bin = hist.extensions.slice(0, 4).map((e) => `"*.${e.name}"`).join(' ');
+  // Extension names come from file names: only plain ones (no "(none)", no shell syntax), single-quoted.
+  const exts = hist.extensions.map((e) => String(e.name)).filter((e) => SAFE_EXT.test(e)).slice(0, 4);
   const cmds = [
-    '# 1. Stop it growing (no rewrite): track big binaries with Git LFS from now on',
-    `git lfs track ${bin}`,
-    'git add .gitattributes && git commit -m "Track binaries with Git LFS"',
+    ...(exts.length ? ['# 1. Stop it growing (no rewrite): track big binaries with Git LFS from now on', `git lfs track ${exts.map((e) => sq('*.' + e)).join(' ')}`, 'git add .gitattributes && git commit -m "Track binaries with Git LFS"'] : []),
     '# 2. Keep generated or archived files out of git (no rewrite; history keeps old copies)',
     ...big.filter((f) => /archive|_out|cache|build|dist|shots/i.test(f)).map((f) => `git rm -r --cached -- ${sq(f.replace(/\/$/, ''))}   # then add it to .gitignore`),
   ];
@@ -120,7 +119,7 @@ function sizeStep(hist) {
     'git clone --mirror . ../backup-before-rewrite.git   # full backup first',
     'git filter-repo --analyze   # needs git-filter-repo; review .git/filter-repo/analysis',
     ...hist.deletedFolders.filter((f) => f.bytes >= 10 * 1024 * 1024).slice(0, 3).map((f) => `git filter-repo --invert-paths --path ${sq(f.name)}   # folder no longer in the tree: removes only old files`),
-    'git lfs migrate import --everything --include=' + sq(hist.extensions.slice(0, 4).map((e) => `*.${e.name}`).join(',')) + '   # or move old binaries into LFS',
+    ...(exts.length ? ['git lfs migrate import --everything --include=' + sq(exts.map((e) => `*.${e}`).join(',')) + '   # or move old binaries into LFS'] : []),
   );
   return { ...base, why: historyVerdict(hist), cmds, note: 'Steps 1 and 2 are safe and stop the growth. Step 3 rewrites history: do it only if the owner asks, after the backup, then force-push every branch and tag and tell everyone with a clone to re-clone. GitHub LFS storage has quotas. Encrypted files (git-crypt, if used) must stay listed in .gitattributes after any rewrite.' };
 }

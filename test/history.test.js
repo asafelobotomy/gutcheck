@@ -57,7 +57,7 @@ test('the verdict says when a rewrite would not help, and when it would; the ste
   assert.match(worth, /Rewriting history could save about 2\.8 GB.*GutCheck does not do it/);
 
   const s = sizeStep(H());
-  assert.ok(s.cmds.includes('git lfs track "*.png" "*.jpg" "*.glb"'));
+  assert.ok(s.cmds.includes("git lfs track '*.png' '*.jpg' '*.glb'"));
   assert.ok(s.cmds.some((c) => c === "git rm -r --cached -- 'assets/_archive'   # then add it to .gitignore"), 'archives are suggested to leave git');
   assert.ok(s.cmds.some((c) => c.startsWith('git clone --mirror')), 'a backup comes before any rewrite');
   assert.ok(s.cmds.indexOf('git clone --mirror . ../backup-before-rewrite.git   # full backup first') < s.cmds.findIndex((c) => c.startsWith('git filter-repo --invert-paths')));
