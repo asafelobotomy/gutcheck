@@ -112,7 +112,7 @@ const bitwarden = make('bitwarden', 'bw', 'Folder ID (optional)', {
 
 // KeePassXC: key-file-only database, group/title entry paths, no ids.
 const kpBase = (t) => ['--no-password', '-k', t.keyFile, t.db];
-const kpEntry = (cand, t) => `${(t.group || 'gutcheck').replace(/\/+$/, '')}/${slug(cand.title)}`;
+const kpEntry = (cand, t) => `${(t.group || 'gutcheck').replace(/\/+$/, '')}/${slug(cand.title).replace(/\//g, '_')}`;
 const keepassxc = make('keepassxc', 'keepassxc-cli', 'Path to the .kdbx file, its key file and a group', {
   statusCmd: (t) => ({ args: ['ls', ...kpBase(t)] }),
   parseStatus: ({ ok }) => ({ ok: !!ok, locked: !ok, hint: ok ? '' : TOOL_INFO.keepassxc.unlockHint }),

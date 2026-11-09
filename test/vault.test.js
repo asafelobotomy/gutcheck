@@ -124,13 +124,16 @@ test('1password saves a document and parses the id', () => {
 test('keepassxc saves in two steps, key file only', () => {
   const s = ADAPTERS.keepassxc.saveCmd(c, kp);
   assert.equal(s.steps.length, 2);
-  assert.deepEqual(s.steps[0].args, ['add', '--no-password', '-k', '/k', '/d.kdbx', 'gutcheck/api/.env']);
-  assert.deepEqual(s.steps[1].args, ['attachment-import', '--no-password', '-k', '/k', '/d.kdbx', 'gutcheck/api/.env', '.env', '/dev/stdin']);
+  assert.deepEqual(s.steps[0].args, ['add', '--no-password', '-k', '/k', '/d.kdbx', 'gutcheck/api_.env']);
+  assert.deepEqual(s.steps[1].args, ['attachment-import', '--no-password', '-k', '/k', '/d.kdbx', 'gutcheck/api_.env', '.env', '/dev/stdin']);
   assert.equal(s.steps[1].stdin, true);
-  assert.equal(s.parseId(''), 'gutcheck/api/.env');
+  assert.equal(s.parseId(''), 'gutcheck/api_.env');
   const l = ADAPTERS.keepassxc.listCmd(kp);
   assert.deepEqual(l.args, ['ls', '-R', '-f', '--no-password', '-k', '/k', '/d.kdbx', 'gutcheck']);
-  assert.ok(ADAPTERS.keepassxc.parseList('api/.env\nother\n').has('gutcheck/api/.env'));
+  assert.ok(ADAPTERS.keepassxc.parseList('api_.env\nother\n').has('gutcheck/api_.env'));
+  const n = ADAPTERS.keepassxc.saveCmd({ ...c, title: 'gutcheck: ~/.ssh/a/b' }, kp);
+  assert.equal(n.parseId(''), 'gutcheck/home_.ssh_a_b');
+  assert.equal(n.steps[0].args[5].split('/').length, 2);
 });
 
 test('pass and gopass entry names, ids and existence', () => {
