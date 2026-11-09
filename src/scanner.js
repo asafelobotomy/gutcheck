@@ -41,11 +41,13 @@ function discover(root, maxDepth = 2) {
 // Only GitHub itself (audit B13): the host must be github.com or www.github.com (any case), after
 // an https, http, git, ssh, git+ssh or ssh+git scheme with optional user info and port, or in the
 // scp form [user@]github.com:o/r. Not "github.com" elsewhere in an address, a lookalike host, a
-// <helper>:: address or a local folder, so those are never treated as GitHub.
-const GITHUB_RE = /^(?:(?:https?|git|ssh|git\+ssh|ssh\+git):\/\/(?:[^@/]*@)?(?:www\.)?github\.com(?::\d+)?\/|(?:[A-Za-z0-9._-]+@)?(?:www\.)?github\.com:)([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/i;
+// <helper>:: address or a local folder, so those are never treated as GitHub. User info stops at
+// /, ?, # or \ (evil.com#@github.com is evil.com).
+const GITHUB_RE = /^(?:(?:https?|git|ssh|git\+ssh|ssh\+git):\/\/(?:[^@/?#\\]*@)?(?:www\.)?github\.com(?::\d+)?\/|(?:[A-Za-z0-9._-]+@)?(?:www\.)?github\.com:)([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/i;
 function parseGithubRemote(url) {
   const m = GITHUB_RE.exec(url || '');
-  return m ? { owner: m[1], name: m[2] } : null;
+  // "." and ".." are path steps, not names (https://github.com/../n).
+  return m && ![m[1], m[2]].some((x) => x === '.' || x === '..') ? { owner: m[1], name: m[2] } : null;
 }
 
 async function collectGit(dir) {

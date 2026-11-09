@@ -61,6 +61,8 @@ test('parseGithubRemote only accepts GitHub itself, not "github.com" inside anot
     '/tmp/github.com/a/b', 'file:///srv/github.com/a/b', 'https://evil.example/github.com/a/b', 'https://github.com.evil.example/a/b',
     'https://evilgithub.com/a/b', 'https://github.com@evil.example/a/b', 'evil::github.com:a/b', 'github.com::a/b', 'git@evil.example:github.com/a/b',
     'ext::sh github.com/a/b', 'ftp://github.com/a/b', './github.com:a/b', 'https://github.com/a', 'https://github.com/a/b/c',
+    'https://evil.com#@github.com/a/b', 'https://evil.com?@github.com/a/b', 'https://evil.com\\@github.com/a/b',
+    'https://github.com/../b', 'https://github.com/a/..', 'https://github.com/./b', 'git@github.com:a/.', 'https://github.com/a/...git',
   ]) assert.equal(parseGithubRemote(url), null, url);
 });
 
