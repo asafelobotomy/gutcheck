@@ -79,6 +79,7 @@ async function verifySecrets() {
 async function openVaultPanel() {
   const tools = await window.api.secrets.tools();
   const cur = state.secrets && state.secrets.tool;
+  const saved = (state.secrets && state.secrets.target) || null; // the linked tool's target: fills its fields, so Save/Test keep it
   return modal((box, close) => {
     let pick = (tools.find((t) => t.id === cur && t.found) || tools.find((t) => t.found) || {}).id;
     const inputs = {};
@@ -86,6 +87,8 @@ async function openVaultPanel() {
     const status = h('p', { class: 'muted', role: 'status' });
     const field = (name, label, placeholder = '') => {
       inputs[name] = h('input', { type: 'text', placeholder, spellcheck: 'false' });
+      const v = pick !== cur || saved == null ? '' : name === 'target' ? saved : saved[name];
+      if (typeof v === 'string') inputs[name].value = v;
       return h('label', { class: 'frow' }, h('span', {}, label), inputs[name]);
     };
     const draw = () => {
@@ -105,7 +108,10 @@ async function openVaultPanel() {
     const save = async () => {
       if (secReadOnly()) return null;
       if (!pick) { toast('Pick a password manager.'); return null; }
-      const r = await window.api.secrets.link(pick, target());
+      const t = target();
+      const blank = pick === 'keepassxc' ? (!t.db ? 'Database path' : !t.keyFile ? 'Key file path' : '') : (pick === 'proton' || pick === '1password') && !t ? 'Vault name' : '';
+      if (blank) { toast(`${blank} is required.`, 'bad'); return null; }
+      const r = await window.api.secrets.link(pick, t);
       if (!r.ok) toast(r.error, 'bad');
       return r.ok;
     };

@@ -314,3 +314,16 @@ test('scan with home: false leaves out the home folder', async () => {
   assert.ok((await ctl.scan(ws)).items.some((i) => i.scope === 'home'));
   assert.ok(!(await ctl.scan({ ...ws, home: false })).items.some((i) => i.scope === 'home'));
 });
+
+test('scan returns the saved tool and target for the app panel; the MCP view leaves the target out', async () => {
+  const { ws, mkCtl } = setup();
+  const ctl = mkCtl({ run: okRun() });
+  assert.equal((await ctl.scan(ws)).target, null);
+  ctl.link({ tool: 'keepassxc', target: { db: '/h/v.kdbx', keyFile: '/h/v.keyx', group: 'g' } });
+  const s = await ctl.scan(ws);
+  assert.deepEqual([s.tool, s.target], ['keepassxc', { db: '/h/v.kdbx', keyFile: '/h/v.keyx', group: 'g' }]);
+  const { createSecretsService, mcpView } = require('../src/secrets-glue');
+  const svc = createSecretsService({ ctl, known: new Map(ws.repos.map((r) => [r.path, r])), settings: () => ({ root: ws.root }) });
+  assert.deepEqual((await svc.scan()).target, s.target);
+  assert.ok(!('target' in mcpView(s)));
+});

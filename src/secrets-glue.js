@@ -35,7 +35,7 @@ function adviceView(advice, items) {
 function view(res) {
   if (!res || !res.ok) return res;
   const items = res.items.map(itemView);
-  return { ok: true, linked: res.linked, tool: res.tool, items, advice: adviceView(res.advice, items) };
+  return { ok: true, linked: res.linked, tool: res.tool, target: res.target, items, advice: adviceView(res.advice, items) }; // mcpView leaves target out
 }
 
 // What the MCP server may return: titles, statuses, kinds and confidence. No paths, no hashes.

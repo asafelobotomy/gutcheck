@@ -164,7 +164,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     const rec = record.load();
     const l = linked();
     return {
-      ok: true, linked: !!l, tool: l ? l.tool : null,
+      ok: true, linked: !!l, tool: l ? l.tool : null, target: l ? l.target : null, // where items go (a vault name or paths), for the app's panel
       items: cands.map((c) => ({ ...c, ...statusOf(c, rec) })),
       advice: secretAdvice(cands, rec, { linked: !!l }),
     };

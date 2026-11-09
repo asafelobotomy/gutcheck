@@ -156,3 +156,44 @@ test('advice: secret-backup picks its paths, low-confidence-only advice has no b
   await tick();
   assert.equal(t.$$('.modal input[type=radio]').length, 4);
 });
+
+test('the panel opens pre-filled from the saved link, and Test keeps that target', async () => {
+  const t = await boot({ secrets: { ...SECRETS, tool: 'keepassxc', target: { db: '/h/v.kdbx', keyFile: '/h/v.keyx', group: 'work' } } });
+  await open(t);
+  click(button(t, 'Password manager…'));
+  await tick();
+  assert.ok(t.$$('.modal input[type=radio]').find((r) => r.value === 'keepassxc').checked);
+  assert.deepEqual(t.$$('.modal input[type=text]').map((i) => i.value), ['/h/v.kdbx', '/h/v.keyx', 'work']);
+  click(modalButton(t, 'Test connection'));
+  await tick();
+  assert.deepEqual(callsOf(t, 'link'), [['secrets.link', 'keepassxc', { db: '/h/v.kdbx', keyFile: '/h/v.keyx', group: 'work' }]]);
+  const u = await boot({ secrets: { ...SECRETS, target: 'Dev' } });
+  await open(u);
+  click(button(u, 'Password manager…'));
+  await tick();
+  assert.equal(u.$('.modal input[type=text]').value, 'Dev');
+  click(modalButton(u, 'Test connection'));
+  await tick();
+  assert.deepEqual(callsOf(u, 'link'), [['secrets.link', 'proton', 'Dev']]);
+});
+
+test('a blank required field makes no link call', async () => {
+  const t = await boot();
+  await open(t);
+  click(button(t, 'Password manager…'));
+  await tick();
+  click(modalButton(t, 'Save'));
+  await tick();
+  click(modalButton(t, 'Test connection'));
+  await tick();
+  assert.match(t.$('#toast').textContent, /Vault name/);
+  const kp = t.$$('.modal input[type=radio]').find((r) => r.value === 'keepassxc');
+  kp.checked = true;
+  kp.dispatchEvent(new t.w.Event('change'));
+  t.$$('.modal input[type=text]')[0].value = '/h/v.kdbx';
+  click(modalButton(t, 'Save'));
+  await tick();
+  assert.match(t.$('#toast').textContent, /[Kk]ey file/);
+  assert.equal(callsOf(t, 'link').length, 0);
+  assert.equal(callsOf(t, 'test').length, 0);
+});
