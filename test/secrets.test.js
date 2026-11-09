@@ -205,3 +205,12 @@ test('home: gnupg private-keys folder is one entry whose hash changes with its k
 test('home: a missing HOME returns []', async () => {
   assert.deepEqual(await S.findHomeSecrets({ home: '/nonexistent-gc', env: {} }), []);
 });
+
+test('repo: when git ls-files fails (not a repo) nothing is reported', async () => {
+  const dir = tmp('notgit');
+  try {
+    put(dir, '.env', 'A=1');
+    put(dir, 'server.key', 'k');
+    assert.deepEqual(await S.findRepoSecrets(dir), []);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

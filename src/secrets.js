@@ -20,6 +20,7 @@ const posix = (p) => p.split(path.sep).join('/');
 
 async function trackedFiles(dir) {
   const r = await git(['ls-files', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
+  if (!r.ok) return null; // fail closed: an unknown tracked set must never make committed files look unbacked
   return new Set(r.stdout.split('\0').filter(Boolean));
 }
 
@@ -46,8 +47,8 @@ async function makeCandidate({ real, scope, repo, rel, title, inSshDir = false, 
 async function findRepoSecrets(dir) {
   let root;
   try { root = await fsp.realpath(dir); } catch { return []; }
-  let tracked;
-  try { tracked = await trackedFiles(root); } catch { return []; }
+  const tracked = await trackedFiles(root);
+  if (!tracked) return [];
   const repo = path.basename(dir);
   const found = new Map(); // real path -> candidate
   let seen = 0;
