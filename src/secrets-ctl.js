@@ -19,6 +19,8 @@ const VAULT_TIMEOUT = 60000;
 const MCP_REFUSAL = 'Backing up secrets runs only from the GutCheck app or CLI.';
 const CHANGED = 'Changed since the preview. Rescan and review it again.';
 const NOT_LINKED = 'Link a password manager first (Settings).';
+const SCAN_FIRST = 'Scan the workspace first.';
+const lockedText = (l, s) => (s.locked ? `${l.info.label} is locked or not signed in. ` : '') + (s.hint || l.info.unlockHint);
 const GOOGLE = { id: 'google', label: 'Google Password Manager', found: false, reason: 'No CLI or write API' };
 
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
@@ -78,7 +80,12 @@ function findBin(bin, env) {
 function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env, home = os.homedir(), audit = () => {} }) {
   const record = createRecord(path.join(dataDir, 'secret-backups.json'));
   const plans = new Map();
-  let last = { repos: [], root: null };
+  let last = null; // { repos, root } of the last scan
+  // The workspace to guard against: opts when given, else the last scan's, else none (refuse).
+  const workspace = ({ repos, root } = {}) => {
+    const w = Array.isArray(repos) || typeof root === 'string' ? { repos: Array.isArray(repos) ? repos : [], root: typeof root === 'string' ? root : null } : last;
+    return w && (w.repos.length || w.root) ? w : null;
+  };
   const opts = (input) => ({ input, timeout: VAULT_TIMEOUT, env });
 
   function linked() {
@@ -88,15 +95,18 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     return t.ok ? { tool: v.tool, target: t.target, a: ADAPTERS[v.tool], info: TOOL_INFO[v.tool] } : null;
   }
 
-  // The tool's binary: a real executable on PATH that lies inside no scanned repo.
-  function checkBin(a, repos) {
+  // The tool's binary: a real executable on PATH inside no scanned repo and outside the
+  // workspace root. Fails closed when the workspace isn't known.
+  function checkBin(a, ws) {
+    if (!ws) return { error: SCAN_FIRST };
     const real = findBin(a.bin, env);
     if (!real) return { error: `${a.bin} was not found on PATH.` };
-    for (const r of repos || []) {
+    const dirs = [...ws.repos.filter((r) => r && typeof r.path === 'string'), ...(ws.root ? [{ path: ws.root, name: 'workspace root' }] : [])];
+    for (const r of dirs) {
       let root;
       try { root = fs.realpathSync(r.path); } catch { root = path.resolve(r.path); }
       if (real === root || real.startsWith(root + path.sep)) {
-        return { error: `${a.bin} resolves to ${real}, inside a scanned repo (${r.name || path.basename(root)}). GutCheck will not run it.` };
+        return { error: `${a.bin} resolves to ${real}, inside a scanned repo or the workspace (${r.name || path.basename(root)}). GutCheck will not run it.` };
       }
     }
     return { path: real };
@@ -125,10 +135,10 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     return { ok: true };
   }
 
-  async function test() {
+  async function test(wsOpts) {
     const l = linked();
     if (!l) return { ok: false, locked: false, hint: NOT_LINKED };
-    const bin = checkBin(l.a, last.repos);
+    const bin = checkBin(l.a, workspace(wsOpts));
     if (bin.error) return { ok: false, locked: false, hint: bin.error };
     const s = await status(l, bin.path);
     return { ok: !!s.ok, locked: !!s.locked, hint: s.ok ? '' : s.hint || l.info.unlockHint };
@@ -160,8 +170,8 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     for (const [k, p] of plans) if (now - p.at > PLAN_TTL) plans.delete(k);
     const l = linked();
     if (!l) return { ok: false, error: NOT_LINKED };
-    const ws = Array.isArray(repos) ? { repos, root } : last;
-    const bin = checkBin(l.a, ws.repos);
+    const ws = workspace({ repos, root });
+    const bin = checkBin(l.a, ws);
     if (bin.error) return { ok: false, error: bin.error };
     const wanted = new Set();
     for (const p of Array.isArray(paths) ? paths : []) {
@@ -186,7 +196,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     }
     if (!items.length) return { ok: false, error: 'Nothing to back up: those files are already backed up, skipped or no longer found.' };
     const token = 's:' + crypto.randomBytes(16).toString('hex');
-    plans.set(token, { at: now, l, bin: bin.path, repos: ws.repos, items });
+    plans.set(token, { at: now, l, bin: bin.path, ws, items });
     const where = l.tool === 'keepassxc' ? `${l.target.db}, group ${l.target.group}` : l.target || 'default';
     return {
       ok: true, token, title: `Back up ${plural(items.length, 'secret file')} to ${l.info.label}`, risk: 'caution', display,
@@ -199,12 +209,19 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     let st;
     try { st = await fsp.lstat(it.cand.real); } catch { return { error: 'The file is gone. Rescan and review it again.' }; }
     if (st.isSymbolicLink()) return { error: 'The file is now a symlink. GutCheck does not save through links.' };
+    const notFile = { error: 'The file is no longer a regular file of 1 MB or less.' };
+    if (!st.isFile() || st.size > MAX_SECRET_BYTES) return notFile; // a FIFO or device would block open/read
     let fh;
     try {
-      fh = await fsp.open(it.cand.real, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-      const s = await fh.stat();
-      if (!s.isFile() || s.size > MAX_SECRET_BYTES) return { error: 'The file is no longer a regular file of 1 MB or less.' };
-      const buf = await fh.readFile();
+      const { O_RDONLY, O_NOFOLLOW, O_NONBLOCK } = fs.constants;
+      fh = await fsp.open(it.cand.real, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+      if (!(await fh.stat()).isFile()) return notFile;
+      const max = MAX_SECRET_BYTES + 1; // read at most one byte past the limit
+      const big = Buffer.alloc(max);
+      let n = 0;
+      for (let r; n < max && (r = (await fh.read(big, n, max - n, null)).bytesRead) > 0;) n += r;
+      if (n > MAX_SECRET_BYTES) return notFile;
+      const buf = big.subarray(0, n);
       return sha256(buf) === it.sha256 ? { buf } : { error: CHANGED };
     } catch { return { error: 'Could not read the file.' }; } finally { if (fh) await fh.close().catch(() => {}); }
   }
@@ -252,8 +269,10 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     const p = plans.get(token);
     plans.delete(token);
     if (!p || Date.now() - p.at > PLAN_TTL) return { ok: false, error: 'This preview expired or was already used. Preview it again.', results: [] };
-    const bin = checkBin(p.l.a, p.repos);
+    const bin = checkBin(p.l.a, p.ws);
     if (bin.error || bin.path !== p.bin) return { ok: false, error: bin.error || `${p.l.a.bin} changed since the preview. Preview it again.`, results: [] };
+    const s = await status(p.l, p.bin); // a locked vault fails here with the fixed hint, before any save
+    if (!s.ok) return { ok: false, error: lockedText(p.l, s), results: [] };
     const results = [];
     for (const it of p.items) {
       const r = await saveOne(p, it);
@@ -264,15 +283,15 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     return { ok: results.length === p.items.length && results.every((r) => r.ok), results };
   }
 
-  async function verify({ via } = {}) {
+  async function verify({ via, repos, root } = {}) {
     const no = refused(via);
     if (no) return no;
     const l = linked();
     if (!l) return { ok: false, error: NOT_LINKED };
-    const bin = checkBin(l.a, last.repos);
+    const bin = checkBin(l.a, workspace({ repos, root }));
     if (bin.error) return { ok: false, error: bin.error };
     const s = await status(l, bin.path);
-    if (!s.ok) return { ok: false, error: s.hint || l.info.unlockHint };
+    if (!s.ok) return { ok: false, error: lockedText(l, s) };
     const lists = new Map();
     const updates = new Map();
     for (const [real, e] of Object.entries(record.load().entries)) {
