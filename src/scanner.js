@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { run, git } = require('./exec');
+const exec = require('./exec');
+const { run, git } = exec;
 const { HEAVY_DIRS, NODE_LOCKFILES, installCommand, cmpVersion } = require('./util');
 const { evaluate, score } = require('./checks');
 const { auditDepAutomation } = require('./dep-automation');
@@ -43,7 +44,9 @@ function parseGithubRemote(url) {
 }
 
 async function collectGit(dir) {
-  const st = await git(['status', '--porcelain=v2', '--branch'], { cwd: dir });
+  // --ignore-submodules=dirty: a submodule's own config (its filters) is never read, so git must
+  // not look inside it. New commits in a submodule still show; edits inside one no longer do.
+  const st = await git(['status', '--porcelain=v2', '--branch', '--ignore-submodules=dirty'], { cwd: dir });
   const g = { branch: null, detached: false, upstream: null, ahead: 0, behind: 0, dirty: 0, branches: [], remoteBranches: [], mergedBranches: [] };
   for (const line of st.stdout.split('\n')) {
     if (line.startsWith('# branch.head ')) {
@@ -192,6 +195,7 @@ const safeJSON = (p) => {
 
 // Everything that needs no network: git state, files, manifests.
 async function collectLocal(dir, opts) {
+  exec.forgetGitDrivers(dir); // read the repo's drivers afresh: an action may have changed them
   // Strip any user:token@ from the URL so credentials never reach the UI, logs or reports.
   const rawOrigin = (await git(['remote', 'get-url', 'origin'], { cwd: dir })).stdout.trim();
   const originUrl = rawOrigin.replace(/^([a-z+]+:\/\/)[^/@]*@/i, '$1');

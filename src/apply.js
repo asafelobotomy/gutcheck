@@ -3,12 +3,16 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { run, READONLY_GIT } = require('./exec');
+const exec = require('./exec');
+const { run, READONLY_GIT, SAFE_GIT_ENV } = exec;
 const { COMMAND_TIMEOUT_MS } = require('./util');
 const { scanClutter } = require('./clutter');
 
 const defaultCtx = (over = {}) => {
   const ctx = { run, fs, readOnly: false, clutter: scanClutter, ...over };
+  // Read-only git for plans and checks: exec.git's guards (repo drivers blanked, no lazy fetch).
+  // A runner injected by tests gets the fixed options only, since it runs no real git.
+  ctx.safeGit = ctx.safeGit || (ctx.run === run ? (args, cwd) => exec.git(args, { cwd }) : (args, cwd) => ctx.run('git', [...READONLY_GIT, ...args], { cwd, env: SAFE_GIT_ENV }));
   // Recoverable removal. The app passes Electron's shell.trashItem; this fallback uses gio.
   ctx.trash = ctx.trash || (async (p) => {
     const t = await ctx.run('gio', ['trash', '--', p]);
@@ -30,7 +34,17 @@ function assertInside(io, root, file) {
   if (st && st.isSymbolicLink()) throw new Error('Refusing to write through a symbolic link.');
 }
 
+// Whatever happens, the repo's cached git drivers are dropped: the action may have changed its
+// config or branch (includeIf onbranch:), and the rescan after it must read them afresh.
 async function apply(p, ctx = {}) {
+  try {
+    return await applySteps(p, ctx);
+  } finally {
+    for (const d of new Set([p.repoPath, ...(p.steps || []).map((s) => s.cwd || s.root)].filter(Boolean))) exec.forgetGitDrivers(d);
+  }
+}
+
+async function applySteps(p, ctx) {
   ctx = defaultCtx(ctx);
   const io = ctx.fs;
   const results = [];
@@ -42,7 +56,7 @@ async function apply(p, ctx = {}) {
       results.push({ text: s.display, ok: same, out: same ? '' : r.ok ? 'It changed since the scan. Rescan and review it again.' : (r.stdout + r.stderr).trim().slice(-500) });
       if (!same) return { ok: false, results };
     } else if (s.kind === 'check') {
-      const r = await ctx.run(s.cmd, s.args, { cwd: s.cwd });
+      const r = s.safeGit ? await ctx.safeGit(s.args, s.cwd) : await ctx.run(s.cmd, s.args, { cwd: s.cwd });
       const now = r.ok ? r.stdout.trimEnd() : null; // not trim(): " M a" keeps its leading status space
       // subset: fewer lines than previewed is fine (a .gitignore added just before hides some), but
       // nothing that was not previewed may appear.
@@ -80,7 +94,7 @@ async function apply(p, ctx = {}) {
         if (s.fileStat && (st.size !== s.fileStat.size || st.mtimeMs !== s.fileStat.mtime)) throw new Error('Changed since the preview. Rescan and review it again.');
         // Might have been committed since the preview: never remove anything git tracks.
         // --literal-pathspecs: "a*b.tmp" is that one file, not a pattern that matches a tracked axb.tmp.
-        const tr = await ctx.run('git', [...READONLY_GIT, '--literal-pathspecs', 'ls-files', '-z', '--', s.rel], { cwd: s.root });
+        const tr = await ctx.safeGit(['--literal-pathspecs', 'ls-files', '-z', '--', s.rel], s.root);
         if (!tr.ok || tr.stdout) throw new Error('Tracked by git (or could not be checked): not removed.');
         if (s.mode === 'trash') await ctx.trash(s.path);
         else io.rmSync(s.path, { recursive: true, force: true });

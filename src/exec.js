@@ -40,18 +40,25 @@ const READONLY_GIT = [
   '-c', 'protocol.ext.allow=never', '-c', 'protocol.fd.allow=never',
 ];
 
-const { driverOverrides } = require('./git-drivers')(run, READONLY_GIT);
+// No lazy fetch: in a partial clone a missing object would be fetched, which runs the repo's
+// remote.<r>.uploadpack, core.sshCommand or credential helper (git 2.44+; older git refuses below).
+const SAFE_GIT_ENV = { GIT_NO_LAZY_FETCH: '1' };
+
+const drivers = require('./git-drivers')(run, READONLY_GIT, SAFE_GIT_ENV);
 
 // Every scan git call. Filter and diff drivers are named per repo, so they are read first (from a
-// short cache) and the repo-local ones are blanked; if that lookup fails the call is refused.
+// short cache) and the repo's own ones are blanked; if that lookup fails the call is refused. A
+// subcommand git does not have built in (`git lfs`) would fall back to a repo alias of that name
+// when the program is missing, so its alias is blanked too (builtins never use aliases).
 async function git(args, opts = {}) {
   let extra;
   try {
-    extra = await driverOverrides(opts.cwd || process.cwd(), opts.env);
+    extra = await drivers.driverOverrides(opts.cwd || process.cwd(), opts.env);
   } catch (e) {
     return { ok: false, code: null, stdout: '', stderr: `GutCheck refused to run git here: ${e.message}` };
   }
-  return run('git', [...READONLY_GIT, ...extra, ...args], opts);
+  const alias = /^[a-z][a-z0-9-]*$/.test(args[0] || '') ? ['-c', `alias.${args[0]}=`] : [];
+  return run('git', [...READONLY_GIT, ...extra, ...alias, ...args], { ...opts, env: { ...(opts.env || {}), ...SAFE_GIT_ENV } });
 }
 
-module.exports = { run, json, git, READONLY_GIT };
+module.exports = { run, json, git, READONLY_GIT, SAFE_GIT_ENV, forgetGitDrivers: (dir) => drivers.forget(dir) };

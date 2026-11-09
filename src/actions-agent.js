@@ -13,7 +13,6 @@ const crypto = require('node:crypto');
 const { dataDir } = require('./paths');
 const { classifyRule, lspCatalog, LSP_FALLBACK, INSTR_INFO } = require('./agent-context');
 const { claudeBin } = require('./agent-connect');
-const { READONLY_GIT } = require('./exec');
 
 class PlanError extends Error {}
 const fail = (msg) => { throw new PlanError(msg); };
@@ -115,7 +114,7 @@ async function planSplit(r, p, ctx = {}) {
   }
   const content = out.join('\n');
   // `git checkout` would also throw away edits not yet committed: offer it only when the file is clean.
-  const st = ctx.run ? await ctx.run('git', [...READONLY_GIT, 'status', '--porcelain', '--', rel], { cwd: r.path }) : null;
+  const st = ctx.safeGit ? await ctx.safeGit(['status', '--porcelain', '--ignore-submodules=dirty', '--', rel], r.path) : null;
   const clean = !!(st && st.ok && !st.stdout.trim());
   const rmMoved = moved.length ? `rm ${moved.map((s) => quote(s.target)).join(' ')}` : '';
   steps.push({ kind: 'replace', root: r.path, path: file, expect: sha(text), content, display: `rewrite ${rel}: ${Math.round(Buffer.byteLength(text) / KB)} KB to ${Math.round(Buffer.byteLength(content) / KB)} KB${moved.length ? `, ${moved.length} section${moved.length === 1 ? '' : 's'} replaced by pointers` : ''}${imports.length ? `, ${imports.length} @-import${imports.length === 1 ? '' : 's'} turned into pointers` : ''}` });

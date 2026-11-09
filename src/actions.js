@@ -3,7 +3,6 @@
 // stored plan, so what is previewed is exactly what runs. Deliberately NOT offered: deleting repos, changing visibility, force-push, history rewriting.
 
 const path = require('node:path');
-const { READONLY_GIT } = require('./exec');
 const { apply, defaultCtx } = require('./apply');
 const { MAX_PLAN_ITEMS, sq } = require('./util');
 const INSTALLERS = ['npm install', 'yarn install', 'pnpm install', 'bun install'];
@@ -21,8 +20,8 @@ const validBranch = (b) => typeof b === 'string' && BRANCH_RE.test(b) && !b.incl
 const REMOTE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const cleanText = (s, max) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) : '');
 
-// Read-only git for planning: same hardening as scans (no hooks, no fsmonitor, no index lock).
-const readGit = (ctx, args, cwd) => ctx.run('git', [...READONLY_GIT, ...args], { cwd });
+// Read-only git for planning: the scans' guards (no hooks, fsmonitor, repo drivers or lazy fetch).
+const readGit = (ctx, args, cwd) => ctx.safeGit(args, cwd);
 
 // The preview shows every argument that runs (the git builder adds its hardening -c option after
 // building this), single-quoted so a pasted copy cannot expand $(...) or backticks.
@@ -156,7 +155,8 @@ const ACTIONS = {
       if (r.git.detached) fail('Detached HEAD.');
       // -uall lists each file inside an untracked folder, so one added there after the preview is caught.
       // trimEnd, not trim: the first line's leading space is part of its status (" M a").
-      const st = (await readGit(ctx, ['status', '--short', '-uall'], r.path)).stdout.trimEnd();
+      // --ignore-submodules=dirty: never look inside a submodule, whose own config runs its filters.
+      const st = (await readGit(ctx, ['status', '--short', '-uall', '--ignore-submodules=dirty'], r.path)).stdout.trimEnd();
       // `git add -A` would commit a key or an env file as readily as code: refuse, and say how to fix it.
       const secrets = st.split('\n').filter((l) => l && l[1] !== 'D' && l[0] !== 'D').map(statusPath).filter(looksSecret);
       if (secrets.length) fail(`These files look like secrets or keys and would be committed:\n${secrets.slice(0, 10).join('\n')}${secrets.length > 10 ? `\n...and ${secrets.length - 10} more` : ''}\nAdd them to .gitignore (or move them out of the repo), then plan the commit again.`);
@@ -165,7 +165,7 @@ const ACTIONS = {
       // afterGitignore: Fix all adds .gitignore rules just before this commit, so .gitignore itself may
       // show up as changed or new; it is committed with the rest.
       const also = p.afterGitignore === true && !st.split('\n').some((l) => statusPath(l) === '.gitignore') ? [' M .gitignore', '?? .gitignore'] : [];
-      const check = { kind: 'check', cmd: 'git', args: [...READONLY_GIT, 'status', '--short', '-uall'], cwd: r.path, expect: [st, ...also].join('\n'), subset: true, display: 'check no file outside the list below has changed' };
+      const check = { kind: 'check', cmd: 'git', safeGit: true, args: ['status', '--short', '-uall', '--ignore-submodules=dirty'], cwd: r.path, expect: [st, ...also].join('\n'), subset: true, display: 'check no file outside the list below has changed' };
       const list = st.split('\n').slice(0, 40).join('\n') + (also.length ? '\n.gitignore (the rules added just before)' : '');
       return { risk: 'caution', title: `Commit all changes on ${r.git.branch}`, steps: [check, git(['add', '-A'], r.path), git(['commit', '-m', msg], r.path)], warnings: ['Files to be committed:\n' + list], undo: 'git reset --soft HEAD~1' };
     },
