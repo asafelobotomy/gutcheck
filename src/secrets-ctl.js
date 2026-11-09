@@ -3,7 +3,6 @@
 // hashed, and piped on stdin only), verifies the record against the vault, and records skips.
 // Contents never reach argv, env, results, audit entries, the plan display or the record.
 const fs = require('node:fs');
-const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -12,19 +11,18 @@ const { plural } = require('./util');
 const { ADAPTERS, TOOL_INFO } = require('./vault-adapters');
 const { findRepoSecrets, findWorkspaceSecrets, findHomeSecrets } = require('./secrets');
 const { createRecord, statusOf, secretAdvice } = require('./secret-status');
-const { MAX_SECRET_BYTES } = require('./secret-patterns');
+const { scrub, findBin, containing, safePath, readPlanned } = require('./secrets-io');
 
 const PLAN_TTL = 5 * 60 * 1000;
 const VAULT_TIMEOUT = 60000;
 const MCP_REFUSAL = 'Backing up secrets runs only from the GutCheck app or CLI.';
-const CHANGED = 'Changed since the preview. Rescan and review it again.';
-const NOT_LINKED = 'Link a password manager first (Settings).';
-const SCAN_FIRST = 'Scan the workspace first.';
+const NOT_LINKED = 'Link a password manager first (Secrets > Password manager…).';
+const SCAN_FIRST = 'Scan a workspace first.';
 const lockedText = (l, s) => (s.locked ? `${l.info.label} is locked or not signed in. ` : '') + (s.hint || l.info.unlockHint);
-const CLASH = (t) => `Two files would get the same vault item title: ${t}. Rename one or skip it.`;
+// Names the clashing item: its title for id-based tools, else its pass/gopass name or KeePassXC entry.
+const CLASH = (cand, key) => `Two files would get the same vault item ${key === cand.title ? 'title' : 'name'}: ${key}. Rename one or skip it.`;
 const GOOGLE = { id: 'google', label: 'Google Password Manager', found: false, reason: 'No CLI or write API' };
 
-const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const refused = (via) => (via === 'mcp' ? { ok: false, error: MCP_REFUSAL } : null);
 const quote = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : '"' + String(s).replace(/(["\\$`])/g, '\\$1') + '"');
 const isText = (s) => typeof s === 'string' && s.length <= 300 && !/[\0-\x1f\x7f]/.test(s) && !s.startsWith('-');
@@ -48,41 +46,6 @@ function checkTarget(tool, t) {
   return isText(s) && s.trim() ? { ok: true, target: s } : { ok: false };
 }
 
-// Remove every stderr line that holds a non-empty line of any source, or any 8+ character run
-// from one. Runs are found by checking each 8-char window of a line against a Set of the
-// sources' 8-char substrings, so a 1 MB file costs one pass, not a substring scan per line.
-function scrub(text, ...sources) {
-  const lines = String(text || '').slice(0, 65536).split('\n');
-  if (!lines.some((l) => l.trim())) return '';
-  const grams = new Set();
-  const short = new Set();
-  for (const src of sources) {
-    const s = Buffer.isBuffer(src) ? src.toString('utf8') : String(src == null ? '' : src);
-    for (let i = 0; i + 8 <= s.length; i++) grams.add(s.slice(i, i + 8));
-    for (const l of s.split(/\r?\n/)) { const t = l.trim(); if (t && t.length < 8) short.add(t); }
-  }
-  const leaks = (line) => {
-    for (let i = 0; i + 8 <= line.length; i++) if (grams.has(line.slice(i, i + 8))) return true;
-    for (const t of short) if (line.includes(t)) return true;
-    return false;
-  };
-  return lines.filter((l) => l.trim() && !leaks(l)).join('\n').trim();
-}
-
-// First executable regular file named `bin` on PATH (symlinks resolved), or null.
-function findBin(bin, env) {
-  for (const dir of String((env && env.PATH) || '').split(path.delimiter)) {
-    if (!dir || !path.isAbsolute(dir)) continue;
-    try {
-      const real = fs.realpathSync(path.join(dir, bin));
-      if (!fs.statSync(real).isFile()) continue;
-      fs.accessSync(real, fs.constants.X_OK);
-      return real;
-    } catch { /* next */ }
-  }
-  return null;
-}
-
 function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env, home = os.homedir(), audit = () => {} }) {
   const record = createRecord(path.join(dataDir, 'secret-backups.json'));
   const plans = new Map();
@@ -92,7 +55,9 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     const w = Array.isArray(repos) || typeof root === 'string' ? { repos: Array.isArray(repos) ? repos : [], root: typeof root === 'string' ? root : null } : last;
     return w && (w.repos.length || w.root) ? w : null;
   };
-  const opts = (input) => ({ input, timeout: VAULT_TIMEOUT, env });
+  // Every vault call: stdin given and closed, a timeout, cwd the home folder (never a repo), and a
+  // PATH with no relative entries and nothing inside the scanned workspace.
+  const opts = (input, ws) => ({ input, timeout: VAULT_TIMEOUT, cwd: home, env: { ...env, PATH: safePath(env.PATH, ws) } });
 
   function linked() {
     const v = (settings.load() || {}).vault;
@@ -107,24 +72,19 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     if (!ws) return { error: SCAN_FIRST };
     const real = findBin(a.bin, env);
     if (!real) return { error: `${a.bin} was not found on PATH.` };
-    const dirs = [...ws.repos.filter((r) => r && typeof r.path === 'string'), ...(ws.root ? [{ path: ws.root, name: 'workspace root' }] : [])];
-    for (const r of dirs) {
-      let root;
-      try { root = fs.realpathSync(r.path); } catch { root = path.resolve(r.path); }
-      if (real === root || real.startsWith(root + path.sep)) {
-        return { error: `${a.bin} resolves to ${real}, inside a scanned repo or the workspace (${r.name || path.basename(root)}). GutCheck will not run it.` };
-      }
-    }
+    const d = containing(real, ws);
+    if (d && d.isRoot) return { error: `${a.bin} resolves to ${real}, which is inside the scanned workspace; GutCheck won't run it.` };
+    if (d) return { error: `${a.bin} resolves to ${real}, which is inside the scanned repo ${d.name}; GutCheck won't run code from a scanned repo.` };
     return { path: real };
   }
 
-  async function status(l, bin) {
+  async function status(l, bin, ws) {
     const hint = l.info.unlockHint;
     if (l.tool === 'pass') {
       const store = env.PASSWORD_STORE_DIR || path.join(env.HOME || home, '.password-store');
       if (!isFile(path.join(store, '.gpg-id'))) return { ok: false, locked: false, hint };
     }
-    const r = await run(bin, l.a.statusCmd(l.target).args, opts(''));
+    const r = await run(bin, l.a.statusCmd(l.target).args, opts('', ws));
     if (!r.ok && r.code === null) return { ok: false, locked: true, hint };
     return l.a.parseStatus(r);
   }
@@ -144,9 +104,10 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
   async function test(wsOpts) {
     const l = linked();
     if (!l) return { ok: false, locked: false, hint: NOT_LINKED };
-    const bin = checkBin(l.a, workspace(wsOpts));
+    const ws = workspace(wsOpts);
+    const bin = checkBin(l.a, ws);
     if (bin.error) return { ok: false, locked: false, hint: bin.error };
-    const s = await status(l, bin.path);
+    const s = await status(l, bin.path, ws);
     return { ok: !!s.ok, locked: !!s.locked, hint: s.ok ? '' : s.hint || l.info.unlockHint };
   }
 
@@ -187,11 +148,16 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
       try { wanted.add(fs.realpathSync(p)); } catch { /* gone */ }
     }
     const fresh = await scan(ws);
+    const rec = record.load();
+    // Entries this link wrote: same tool and target. A named item (pass, gopass, KeePassXC) keeps its name.
+    const ours = (e) => !!e && typeof e === 'object' && e.tool === l.tool && JSON.stringify(e.target == null ? '' : e.target) === JSON.stringify(l.target == null ? '' : l.target);
     const items = [];
     const display = [];
     for (const c of fresh.items) {
       if (!wanted.has(c.real) || c.status === 'backed' || c.status === 'skipped' || !isFile(c.real)) continue;
-      const save = l.a.saveCmd(c, l.target);
+      const prev = rec.entries[c.real];
+      const again = l.a.named && ours(prev) && !prev.missing && isText(prev.itemId) ? { update: true, itemId: prev.itemId } : {};
+      const save = l.a.saveCmd(c, l.target, again);
       if (save.error) return { ok: false, error: save.error };
       items.push({ cand: c, sha256: c.sha256, save });
       const steps = save.steps || [save];
@@ -202,13 +168,15 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
       });
     }
     if (!items.length) return { ok: false, error: 'Nothing to back up: those files are already backed up, skipped or no longer found.' };
-    // One vault item per title: pass/gopass insert -f would overwrite an item another file owns.
-    const owners = new Map(Object.entries(record.load().entries).map(([real, e]) => [e && e.title, real]));
-    const titles = new Set();
-    for (const { cand } of items) {
-      const other = owners.get(cand.title);
-      if (titles.has(cand.title) || (other && other !== cand.real)) return { ok: false, error: CLASH(cand.title) };
-      titles.add(cand.title);
+    // One vault item per key (the title, or the pass/gopass name or KeePassXC entry): insert -f and
+    // attachment-import -f would overwrite an item another file owns.
+    const keyOf = (e) => e.key || (l.a.named ? e.itemId : e.title);
+    const owners = new Map(Object.entries(rec.entries).filter(([, e]) => ours(e)).map(([real, e]) => [keyOf(e), real]));
+    const keys = new Set();
+    for (const { cand, save } of items) {
+      const other = owners.get(save.key);
+      if (keys.has(save.key) || (other && other !== cand.real)) return { ok: false, error: CLASH(cand, save.key) };
+      keys.add(save.key);
     }
     const token = 's:' + crypto.randomBytes(16).toString('hex');
     plans.set(token, { at: now, l, bin: bin.path, ws, items });
@@ -217,28 +185,6 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
       ok: true, token, title: `Back up ${plural(items.length, 'secret file')} to ${l.info.label}`, risk: 'caution', display,
       note: `Copies the file's contents into ${l.info.label} (${where}). The local file is not changed.`,
     };
-  }
-
-  // Read the file once (no symlinks, 1 MB at most) and check it still matches the preview.
-  async function readPlanned(it) {
-    let st;
-    try { st = await fsp.lstat(it.cand.real); } catch { return { error: 'The file is gone. Rescan and review it again.' }; }
-    if (st.isSymbolicLink()) return { error: 'The file is now a symlink. GutCheck does not save through links.' };
-    const notFile = { error: 'The file is no longer a regular file of 1 MB or less.' };
-    if (!st.isFile() || st.size > MAX_SECRET_BYTES) return notFile; // a FIFO or device would block open/read
-    let fh;
-    try {
-      const { O_RDONLY, O_NOFOLLOW, O_NONBLOCK } = fs.constants;
-      fh = await fsp.open(it.cand.real, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
-      if (!(await fh.stat()).isFile()) return notFile;
-      const max = MAX_SECRET_BYTES + 1; // read at most one byte past the limit
-      const big = Buffer.alloc(max);
-      let n = 0;
-      for (let r; n < max && (r = (await fh.read(big, n, max - n, null)).bytesRead) > 0;) n += r;
-      if (n > MAX_SECRET_BYTES) return notFile;
-      const buf = big.subarray(0, n);
-      return sha256(buf) === it.sha256 ? { buf } : { error: CHANGED };
-    } catch { return { error: 'Could not read the file.' }; } finally { if (fh) await fh.close().catch(() => {}); }
   }
 
   function failText(r, l, ...sources) {
@@ -253,7 +199,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     const { cand } = it;
     const text = `Back up ${cand.title} to ${l.info.label}`;
     const fail = (out) => ({ text, ok: false, out });
-    const got = await readPlanned(it);
+    const got = await readPlanned(cand.real, it.sha256);
     if (got.error) return fail(got.error);
     const { buf } = got;
     const steps = it.save.steps || [it.save];
@@ -264,13 +210,13 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
       if (step.encode) {
         try { input = step.encode(buf); } catch (e) { return fail(String((e && e.message) || 'Could not prepare the file for the password manager.').slice(0, 300)); }
       }
-      r = await run(p.bin, step.args, opts(input));
+      r = await run(p.bin, step.args, opts(input, p.ws));
       if (!r || !r.ok) return fail(failText(r || { code: null, stderr: '' }, l, buf, input));
     }
     const itemId = it.save.parseId(r.stdout);
     if (!itemId) return fail(scrub(r.stderr, buf, input).slice(0, 300) || `${l.info.label} returned no item ID, so nothing was recorded.`);
     record.update((rec) => {
-      const e = { sha256: it.sha256, tool: l.tool, target: l.target, itemId, title: cand.title, at: new Date().toISOString() };
+      const e = { sha256: it.sha256, tool: l.tool, target: l.target, itemId, key: it.save.key, title: cand.title, at: new Date().toISOString() };
       if (cand.kind === 'ssh' && cand.fingerprint && l.a.fingerprintCmd(itemId, l.target)) e.fingerprint = cand.fingerprint;
       rec.entries[cand.real] = e;
       delete rec.skipped[cand.real];
@@ -286,13 +232,13 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     if (!p || Date.now() - p.at > PLAN_TTL) return { ok: false, error: 'This preview expired or was already used. Preview it again.', results: [] };
     const bin = checkBin(p.l.a, p.ws);
     if (bin.error || bin.path !== p.bin) return { ok: false, error: bin.error || `${p.l.a.bin} changed since the preview. Preview it again.`, results: [] };
-    const s = await status(p.l, p.bin); // a locked vault fails here with the fixed hint, before any save
+    const s = await status(p.l, p.bin, p.ws); // a locked vault fails here with the fixed hint, before any save
     if (!s.ok) return { ok: false, error: lockedText(p.l, s), results: [] };
     const results = [];
     for (const it of p.items) {
       const r = await saveOne(p, it);
       results.push(r);
-      audit({ ok: r.ok, repo: 'Secrets', title: `Backed up ${it.cand.title} to ${p.l.info.label}` });
+      audit({ ok: r.ok, repo: 'Secrets', title: `${r.ok ? 'Backed up' : 'Back up'} ${it.cand.title} to ${p.l.info.label}` });
       if (!r.ok) break;
     }
     return { ok: results.length === p.items.length && results.every((r) => r.ok), results };
@@ -303,10 +249,16 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     if (no) return no;
     const l = linked();
     if (!l) return { ok: false, error: NOT_LINKED };
-    const bin = checkBin(l.a, workspace({ repos, root }));
+    const ws = workspace({ repos, root });
+    const bin = checkBin(l.a, ws);
     if (bin.error) return { ok: false, error: bin.error };
-    const s = await status(l, bin.path);
+    const s = await status(l, bin.path, ws);
     if (!s.ok) return { ok: false, error: lockedText(l, s) };
+    const sc = l.a.syncCmd && l.a.syncCmd(l.target);
+    if (sc) { // e.g. bw sync, so an item deleted elsewhere isn't read from the local cache
+      const r = await run(bin.path, sc.args, opts('', ws));
+      if (!r.ok) return { ok: false, error: `${l.info.label} could not sync, so nothing was changed. ${l.info.unlockHint}` };
+    }
     const lists = new Map();
     const updates = new Map();
     for (const [real, e] of Object.entries(record.load().entries)) {
@@ -316,9 +268,10 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
       if (lc) {
         const key = JSON.stringify(e.target == null ? '' : e.target);
         if (!lists.has(key)) {
-          const r = await run(bin.path, lc.args, opts(''));
-          if (!r.ok) return { ok: false, error: l.info.unlockHint };
-          lists.set(key, l.a.parseList(r.stdout, e.target));
+          const r = await run(bin.path, lc.args, opts('', ws));
+          const got = r.ok ? l.a.parseList(r.stdout, e.target) : null;
+          if (!got) return { ok: false, error: r.ok ? `${l.info.label} listed its items in a form GutCheck could not read, so nothing was changed.` : l.info.unlockHint };
+          lists.set(key, got);
         }
         present = lists.get(key).has(e.itemId);
       } else if (l.a.existsFs) present = l.a.existsFs(e.itemId, e.target, env);
@@ -326,7 +279,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
       let mismatch = false;
       const fc = present && e.fingerprint ? l.a.fingerprintCmd(e.itemId, e.target) : null;
       if (fc) {
-        const r = await run(bin.path, fc.args, opts(''));
+        const r = await run(bin.path, fc.args, opts('', ws));
         const fp = r.ok ? l.a.parseFingerprint(r.stdout) : null;
         mismatch = !!fp && fp !== e.fingerprint;
       }
@@ -358,4 +311,4 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
   return { tools, link, test, scan, plan, apply, verify, skip, unskip, PLAN_TTL };
 }
 
-module.exports = { createSecretsCtl, scrub, findBin, repoLabel, PLAN_TTL, MCP_REFUSAL };
+module.exports = { createSecretsCtl, scrub, findBin, repoLabel, PLAN_TTL, MCP_REFUSAL, SCAN_FIRST };

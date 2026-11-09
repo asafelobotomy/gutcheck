@@ -3,10 +3,9 @@
 // each surface may see (never contents or hashes; MCP gets no absolute paths) and gates writes.
 const fs = require('node:fs');
 const path = require('node:path');
-const { MCP_REFUSAL, repoLabel } = require('./secrets-ctl');
+const { MCP_REFUSAL, SCAN_FIRST, repoLabel } = require('./secrets-ctl');
 
 const READ_ONLY = 'Read-only mode is on.';
-const SCAN_FIRST = 'Scan a workspace first.';
 const GPG_NOTE = 'a folder, not one file: export with gpg --export-secret-keys yourself';
 // Finding fix types that only the app or the CLI may plan.
 const SECRET_TYPES = new Set(['secret-backup', 'secret-link', 'vault-verify']);

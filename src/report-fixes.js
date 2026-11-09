@@ -81,14 +81,17 @@ function hygieneFix(id, r) {
     'code-scanning-off': { phase: 7, rank: 3, why: 'Common vulnerabilities in the code go unnoticed.', cmds: [`gh api -X PATCH ${api('/code-scanning/default-setup')} -f state=configured`], note: 'Needs GitHub Actions enabled. Results appear under Security > Code scanning.', ref: REFS.codeScanning },
     'private-reporting-off': { phase: 7, rank: 4, why: 'Researchers otherwise have to report vulnerabilities in public.', cmds: [`gh api -X PUT ${api('/private-vulnerability-reporting')}`], ref: REFS.pvr },
   };
-  return steps[id] || secretFix(id);
+  return steps[id] || null;
 }
 
 // Local secret files that no password manager holds (secret-status.js), per repo and for the workspace/home.
+// fix is the finding's fix: with no password manager linked (secret-link), the CLI can't back up yet.
 const SECRET_IDS = new Set(['secret-unbacked', 'secret-changed', 'ws-secret-unbacked', 'ws-secret-changed']);
-function secretFix(id) {
+function secretFix(id, fix) {
   if (!SECRET_IDS.has(id)) return null;
-  return { phase: 0, rank: 2, why: 'This file exists only on this machine; losing the disk loses the secret.', cmds: ['gutcheck secrets --backup'], note: 'Ask the owner first: this copies secrets into their password manager.' };
+  const why = 'This file exists only on this machine; losing the disk loses the secret.';
+  if (fix && fix.type === 'secret-link') return { phase: 0, rank: 2, why, cmds: [], note: 'No password manager is linked yet. Ask the owner to link a password manager in the GutCheck app (Secrets > Password manager…); backing up comes after that.' };
+  return { phase: 0, rank: 2, why, cmds: ['gutcheck secrets --backup'], note: 'Ask the owner first: this copies secrets into their password manager.' };
 }
 
 // The repo-size step depends on where the space is (history.js, deep scans). History rewrites are

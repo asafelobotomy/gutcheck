@@ -33,7 +33,7 @@ async function makeCandidate({ real, scope, repo, rel, title, inSshDir = false, 
     const text = buf.toString('utf8');
     if (gate && !gate(text)) return null;
     const first = text.split('\n')[0];
-    const head = P.classifyHead(first, { inSshDir, name: path.basename(real) });
+    const head = P.classifyHead(first, { inSshDir, name: path.basename(rel || real) }); // the name as found (a link's own name)
     if (onlyKind && head !== onlyKind) return null;
     const fp = head === 'ssh' ? P.opensshFingerprint(text) : null;
     return {
@@ -112,8 +112,12 @@ async function findHomeSecrets({ home, env = {} }) {
   if (!home) return [];
   const cfg = env.XDG_CONFIG_HOME || path.join(home, '.config');
   const out = [];
-  const add = async (real, opts = {}) => {
-    const rel = posix(path.relative(home, real));
+  // `at` is where the file is looked for; a dotfiles symlink (stow, chezmoi, yadm) is followed, so the
+  // candidate's `real` is the target (what apply reads) while its name stays ~/<rel> of the link.
+  const add = async (at, opts = {}) => {
+    let real;
+    try { real = await fsp.realpath(at); } catch { return; }
+    const rel = posix(path.relative(home, at));
     const c = await makeCandidate({ real, scope: 'home', repo: null, rel, title: `gutcheck: ~/${rel}`, ...opts });
     if (c) out.push(c);
   };

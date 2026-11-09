@@ -135,7 +135,7 @@ async function secretsCmd(engine, f, rest, out, err, json) {
   if (!list.ok) return fail(list);
   if (!f.backup) {
     if (f.json) { json(list); return 0; }
-    out(list.linked ? `Password manager: ${list.tool}\n` : 'No password manager linked: link one in the GutCheck app (Secrets > Settings).\n');
+    out(list.linked ? `Password manager: ${list.tool}\n` : 'No password manager linked: link one in the GutCheck app (Secrets > Password manager…).\n');
     for (const x of list.items) out(`  ${x.status.padEnd(9)} ${x.kind.padEnd(5)} ${String(x.size).padStart(8)}  ${x.title.replace(/^gutcheck: /, '')}${x.note ? `  (${x.note})` : ''}${x.sameAs ? '  (same as a backed-up file)' : ''}`);
     if (!list.items.length) out('No secret files found.');
     return 0;

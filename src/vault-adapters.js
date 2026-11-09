@@ -20,9 +20,12 @@ const parseJson = (s) => { try { return JSON.parse(s); } catch { return null; } 
 const lines = (s) => String(s || '').split('\n').map((l) => l.trim()).filter(Boolean);
 const baseName = (rel) => path.basename(String(rel || 'file'));
 
-// Title without "gutcheck: ", ~ as home, anything outside [\w./-] as _.
+// The title without "gutcheck: ", with every byte outside [A-Za-z0-9_./-] percent-encoded (UTF-8),
+// "%" and "~" included. Injective: "my app" -> "my%20app" never meets "my_app", and "~/.netrc" ->
+// "%7E/.netrc" never meets a repo named "home".
 function slug(title) {
-  return String(title).replace(/^gutcheck:\s*/, '').replace(/~/g, 'home').replace(/[^\w./-]/g, '_');
+  const hex = (b) => '%' + b.toString(16).toUpperCase().padStart(2, '0');
+  return String(title).replace(/^gutcheck:\s*/, '').replace(/[^\w./-]/gu, (ch) => [...Buffer.from(ch, 'utf8')].map(hex).join(''));
 }
 
 // UTF-8 text without NULs, else "base64:\n<b64>" (for text-only tools).
@@ -42,7 +45,10 @@ function signedIn(id, test) {
   };
 }
 const idFromJson = (stdout) => { const j = parseJson(stdout); return j && (j.id || j.uuid) || null; };
-const idsOf = (arr) => new Set((Array.isArray(arr) ? arr : []).map((x) => x && x.id).filter(Boolean));
+// null (not an empty set) when the output isn't the expected shape: verify then changes nothing.
+const idsOf = (arr) => (Array.isArray(arr) ? new Set(arr.map((x) => x && x.id).filter(Boolean)) : null);
+// Line-based listings (keepassxc ls, gopass ls --flat): text with no control characters.
+const nameLines = (o) => (typeof o === 'string' && !/[\0-\x08\x0b-\x1f\x7f]/.test(o.replace(/\r\n/g, '\n')) ? lines(o) : null);
 
 function make(id, bin, targetHelp, rest) {
   const nul = () => null;
@@ -56,10 +62,10 @@ const proton = make('proton', 'pass-cli', 'Vault name', {
   saveCmd(cand, vault) {
     const parseId = (o) => { const t = String(o || '').trim(); return ID_RE.test(t) ? t : null; };
     if (cand.kind === 'ssh') {
-      return { args: ['item', 'create', 'ssh-key', 'import', '--from-private-key', '/dev/stdin', '--title', cand.title, '--vault-name', vault],
+      return { key: cand.title, args: ['item', 'create', 'ssh-key', 'import', '--from-private-key', '/dev/stdin', '--title', cand.title, '--vault-name', vault],
         encode: (buf) => buf, parseId };
     }
-    return { args: ['item', 'create', 'note', '--vault-name', vault, '--from-template', '-'],
+    return { key: cand.title, args: ['item', 'create', 'note', '--vault-name', vault, '--from-template', '-'],
       encode: (buf) => JSON.stringify({ title: cand.title, note: textOf(buf), extra_fields: [] }), parseId };
   },
   listCmd: (vault) => ({ args: ['item', 'list', '--vault-name', vault, '--filter-state', 'active', '--output', 'json'] }),
@@ -75,6 +81,7 @@ const onepassword = make('1password', 'op', 'Vault name', {
   statusCmd: () => ({ args: ['whoami', '--format', 'json'] }),
   parseStatus: signedIn('1password', () => true),
   saveCmd: (cand, vault) => ({
+    key: cand.title,
     args: ['document', 'create', '-', '--title', cand.title, '--file-name', baseName(cand.rel), '--vault', vault, '--tags', 'gutcheck', '--format', 'json'],
     encode: (buf) => buf, parseId: idFromJson,
   }),
@@ -96,6 +103,7 @@ const bitwarden = make('bitwarden', 'bw', 'Folder ID (optional)', {
       return { error: `Bitwarden notes are limited to 10,000 characters; this file is ${cand.size}. Use 1Password or KeePassXC, which take attachments.` };
     }
     return {
+      key: cand.title,
       args: ['create', 'item'],
       encode(buf) {
         const notes = textOf(buf);
@@ -106,32 +114,34 @@ const bitwarden = make('bitwarden', 'bw', 'Folder ID (optional)', {
       parseId: idFromJson,
     };
   },
+  syncCmd: () => ({ args: ['sync'] }),
   listCmd: (folderId) => ({ args: folderId ? ['list', 'items', '--folderid', folderId] : ['list', 'items'] }),
   parseList: (o) => idsOf(parseJson(o)),
 });
 
 // KeePassXC: key-file-only database, group/title entry paths, no ids.
 const kpBase = (t) => ['--no-password', '-k', t.keyFile, t.db];
-const kpEntry = (cand, t) => `${(t.group || 'gutcheck').replace(/\/+$/, '')}/${slug(cand.title).replace(/\//g, '_')}`;
+// One flat entry per file: the slug with "/" encoded too ("%" already is), so names stay distinct.
+const kpEntry = (cand, t) => `${(t.group || 'gutcheck').replace(/\/+$/, '')}/${slug(cand.title).replace(/\//g, '%2F')}`;
 const keepassxc = make('keepassxc', 'keepassxc-cli', 'Path to the .kdbx file, its key file and a group', {
   statusCmd: (t) => ({ args: ['ls', ...kpBase(t)] }),
   parseStatus: ({ ok }) => ({ ok: !!ok, locked: !ok, hint: ok ? '' : TOOL_INFO.keepassxc.unlockHint }),
-  saveCmd(cand, t) {
-    const entry = kpEntry(cand, t);
+  named: true,
+  // { update, itemId }: the entry this file was saved to before. It exists, so no add, and -f
+  // replaces the attachment (attachment-import refuses an existing one without it).
+  saveCmd(cand, t, { update = false, itemId = null } = {}) {
+    const entry = update && itemId ? itemId : kpEntry(cand, t);
     const [noPw, k, key, db] = kpBase(t);
-    return {
-      steps: [
-        { args: ['add', noPw, k, key, db, entry] },
-        { args: ['attachment-import', noPw, k, key, db, entry, baseName(cand.rel), '/dev/stdin'], stdin: true, encode: (buf) => buf },
-      ],
-      parseId: () => entry,
-    };
+    const imp = { args: ['attachment-import', ...(update ? ['-f'] : []), noPw, k, key, db, entry, baseName(cand.rel), '/dev/stdin'], stdin: true, encode: (buf) => buf };
+    return { key: entry, steps: update ? [imp] : [{ args: ['add', noPw, k, key, db, entry] }, imp], parseId: () => entry };
   },
   listCmd: (t) => ({ args: ['ls', '-R', '-f', ...kpBase(t), (t.group || 'gutcheck').replace(/\/+$/, '')] }),
   parseList(o, t) {
     const g = ((t && t.group) || 'gutcheck').replace(/\/+$/, '');
+    const ls = nameLines(o);
+    if (!ls) return null;
     const out = new Set();
-    for (const l of lines(o)) if (!l.endsWith('/')) { out.add(l); out.add(`${g}/${l}`); }
+    for (const l of ls) if (!l.endsWith('/')) { out.add(l); out.add(`${g}/${l}`); }
     return out;
   },
 });
@@ -139,9 +149,11 @@ const keepassxc = make('keepassxc', 'keepassxc-cli', 'Path to the .kdbx file, it
 function passLike(id, bin, insertFlags, extra) {
   const sub = (t) => String(t || '').replace(/^\/+|\/+$/g, '') || 'gutcheck';
   return make(id, bin, 'Subfolder (optional, default gutcheck)', {
-    saveCmd(cand, t) {
-      const name = `${sub(t)}/${slug(cand.title)}`;
-      return { args: ['insert', ...insertFlags, name], encode: (buf) => textOf(buf), parseId: () => name };
+    named: true,
+    // A file saved before keeps its name (itemId); insert -f overwrites that item.
+    saveCmd(cand, t, { update = false, itemId = null } = {}) {
+      const name = update && itemId ? itemId : `${sub(t)}/${slug(cand.title)}`;
+      return { key: name, args: ['insert', ...insertFlags, name], encode: (buf) => textOf(buf), parseId: () => name };
     },
     ...extra,
   });
@@ -161,7 +173,7 @@ const gopass = passLike('gopass', 'gopass', ['-f'], {
   statusCmd: () => ({ args: ['ls', '--flat'] }),
   parseStatus: ({ ok }) => ({ ok: !!ok, locked: false, hint: ok ? '' : TOOL_INFO.gopass.unlockHint }),
   listCmd: () => ({ args: ['ls', '--flat'] }),
-  parseList: (o) => new Set(lines(o)),
+  parseList: (o) => { const ls = nameLines(o); return ls ? new Set(ls) : null; },
 });
 
 const ADAPTERS = { proton, '1password': onepassword, bitwarden, keepassxc, pass, gopass };

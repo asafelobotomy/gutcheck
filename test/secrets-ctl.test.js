@@ -1,42 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
-const SECRET = 'API_KEY=hunter2-unique-marker';
-
-// ---- Controller (secrets-ctl.js): fake run, temp dataDir, temp repo, fake bin on a temp PATH ----
 const { execFileSync } = require('node:child_process');
-const { createSettingsStore } = require('../src/settings');
-
-const OK_ID = 'ID_' + 'x'.repeat(30);
-function setup({ binInRepo = false } = {}) {
-  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vctl-')));
-  const dataDir = path.join(tmp, 'data'), home = path.join(tmp, 'home'), wsRoot = path.join(tmp, 'ws');
-  const repo = path.join(wsRoot, 'api');
-  for (const d of [dataDir, home, repo]) fs.mkdirSync(d, { recursive: true });
-  execFileSync('git', ['init', '-q', repo]);
-  fs.writeFileSync(path.join(repo, '.gitignore'), '.env\n');
-  const envPath = path.join(repo, '.env');
-  fs.writeFileSync(envPath, SECRET + '\nOTHER=plain\n');
-  const binDir = binInRepo ? path.join(repo, 'bin') : path.join(tmp, 'bin');
-  fs.mkdirSync(binDir, { recursive: true });
-  for (const b of ['pass-cli', 'pass']) fs.writeFileSync(path.join(binDir, b), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  const ws = { repos: [{ path: repo, name: 'api' }], root: wsRoot };
-  const env = { PATH: binDir, HOME: home, PASSWORD_STORE_DIR: path.join(home, '.password-store') };
-  const mkCtl = (o = {}) => require('../src/secrets-ctl').createSecretsCtl({
-    dataDir, settings: createSettingsStore(path.join(dataDir, 'settings.json')), env, home, ...o });
-  const record = () => JSON.parse(fs.readFileSync(path.join(dataDir, 'secret-backups.json'), 'utf8'));
-  return { tmp, dataDir, home, repo, envPath, ws, env, mkCtl, record };
-}
-const STATUS_OK = { ok: true, code: 0, stdout: '{"id":"u"}', stderr: '' };
-// Answers the status call (pass-cli info) as signed in; records only save calls.
-const okRun = (calls = []) => async (cmd, args, o) => {
-  if (args[0] === 'info') return STATUS_OK;
-  calls.push({ cmd, args, input: String(o.input), opts: o });
-  return { ok: true, code: 0, stdout: OK_ID + '\n', stderr: '' };
-};
+const { SECRET, OK_ID, STATUS_OK, setup, okRun } = require('./helpers/vault-ctl');
 
 test('plan/apply: content only on stdin, record written, results clean', async () => {
   const { envPath, ws, dataDir, mkCtl } = setup();
@@ -160,7 +128,7 @@ test('a vault bin inside a scanned repo is refused', async () => {
   ctl.link({ tool: 'proton', target: 'Dev' });
   const p = await ctl.plan([envPath], { via: 'app', ...ws });
   assert.equal(p.ok, false);
-  assert.match(p.error, /inside a scanned repo/);
+  assert.match(p.error, /inside the scanned repo api; GutCheck won't run code from a scanned repo\./);
   assert.equal(calls.length, 0);
 });
 
@@ -169,7 +137,7 @@ test('tools lists found CLIs plus a disabled Google entry; pass test needs .gpg-
   const ctl = mkCtl({ run: okRun() });
   const t = ctl.tools();
   assert.equal(t.find((x) => x.id === 'proton').found, true);
-  assert.equal(t.find((x) => x.id === 'bitwarden').found, false);
+  assert.equal(t.find((x) => x.id === '1password').found, false);
   assert.deepEqual(t.find((x) => x.id === 'google'), { id: 'google', label: 'Google Password Manager', found: false, reason: 'No CLI or write API' });
   ctl.link({ tool: 'pass', target: '' });
   assert.equal((await ctl.test(ws)).ok, false);
@@ -226,14 +194,17 @@ test('the bin check fails closed: no workspace known, or bin inside a repo on a 
   const { envPath, mkCtl, ws } = setup({ binInRepo: true });
   const calls = [];
   const fresh = () => { const c = mkCtl({ run: okRun(calls) }); c.link({ tool: 'proton', target: 'Dev' }); return c; };
-  assert.match((await fresh().verify({ via: 'cli', ...ws })).error, /inside a scanned repo/);
-  assert.match((await fresh().test(ws)).hint, /inside a scanned repo/);
-  assert.equal((await fresh().verify({ via: 'cli' })).error, 'Scan the workspace first.');
-  assert.equal((await fresh().test()).hint, 'Scan the workspace first.');
-  assert.equal((await fresh().plan([envPath], { via: 'app' })).error, 'Scan the workspace first.');
-  assert.equal((await fresh().plan([envPath], { via: 'app', repos: [] })).error, 'Scan the workspace first.');
-  // a bin under the workspace root (outside every listed repo) is refused too
-  assert.match((await fresh().verify({ via: 'cli', repos: [], root: path.dirname(ws.repos[0].path) })).error, /inside a scanned repo or the workspace/);
+  assert.match((await fresh().verify({ via: 'cli', ...ws })).error, /inside the scanned repo api/);
+  assert.match((await fresh().test(ws)).hint, /inside the scanned repo api/);
+  const { SCAN_FIRST } = require('../src/secrets-ctl');
+  assert.equal(SCAN_FIRST, 'Scan a workspace first.');
+  assert.equal(require('../src/secrets-glue').createSecretsService({ ctl: {}, known: new Map(), settings: () => ({}) }).test().error, SCAN_FIRST); // one string
+  assert.equal((await fresh().verify({ via: 'cli' })).error, SCAN_FIRST);
+  assert.equal((await fresh().test()).hint, SCAN_FIRST);
+  assert.equal((await fresh().plan([envPath], { via: 'app' })).error, SCAN_FIRST);
+  assert.equal((await fresh().plan([envPath], { via: 'app', repos: [] })).error, SCAN_FIRST);
+  // a bin under the workspace root (outside every listed repo) is refused too, and says why
+  assert.match((await fresh().verify({ via: 'cli', repos: [], root: path.dirname(ws.repos[0].path) })).error, /pass-cli resolves to .*, which is inside the scanned workspace; GutCheck won't run it\./);
   assert.equal(calls.length, 0);
 });
 

@@ -120,7 +120,7 @@ async function openVaultPanel() {
       if (!(await save())) return;
       status.textContent = 'Testing…';
       const r = await window.api.secrets.test();
-      status.textContent = r.ok ? 'Connected: the vault is unlocked.' : `${r.locked ? 'Locked or signed out. ' : ''}${r.hint || ''}`;
+      status.textContent = r.ok ? 'Connected: the vault is unlocked.' : `${r.locked ? 'Locked or signed out. ' : ''}${r.hint || r.error || 'Could not test.'}`;
     };
     draw();
     box.append(h('h3', { class: 'mh' }, 'Password manager'), h('p', { class: 'sub' }, NO_PASSWORD), h('div', { role: 'radiogroup', 'aria-label': 'Password manager' }, radios), fields, status,

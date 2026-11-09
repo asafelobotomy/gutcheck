@@ -98,7 +98,13 @@ test('secrets: a repo secret file becomes a phase 0 step that runs gutcheck secr
     const advice = sec.advice.filter((a) => a.repo === path.basename(dir));
     assert.ok(advice.some((a) => a.id === 'secret-unbacked'), JSON.stringify(sec.advice));
     const r = await scanRepo(dir, {});
-    const md = buildReport({ repos: [r], secrets: new Map([[dir, { advice }]]) });
+    // Not linked: the step says to link a password manager, never to run the backup.
+    const unlinked = buildReport({ repos: [r], secrets: new Map([[dir, { advice }]]) });
+    assert.deepEqual(advice.find((a) => a.id === 'secret-unbacked').fix, { type: 'secret-link' });
+    assert.match(unlinked, /link a password manager in the GutCheck app \(Secrets > Password manager…\)/);
+    assert.ok(!unlinked.includes('gutcheck secrets --backup'));
+    const linked = advice.map((a) => ({ ...a, fix: { type: 'secret-backup', paths: [] } }));
+    const md = buildReport({ repos: [r], secrets: new Map([[dir, { advice: linked }]]) });
     assert.match(md, /Phase 1: Protect secrets and access[\s\S]*secret file[s]? exists? only on this machine/);
     assert.match(md, /This file exists only on this machine; losing the disk loses the secret\./);
     assert.match(md, /```bash\ngutcheck secrets --backup\n```/);

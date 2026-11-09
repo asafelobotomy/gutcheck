@@ -56,7 +56,7 @@ function fixFor(f, r) {
   if (id.startsWith('q-')) return qualityFix(id);
   if (id.startsWith('t-')) return testsFix(id);
   if (id.startsWith('agent-')) return agentFix(id) || { phase: 7, rank: 9, why: t(f.detail, LEN.text), cmds: [] };
-  const hy = hygieneFix(id, r) || upkeepFix(id, r);
+  const hy = secretFix(id, f.fix) || hygieneFix(id, r) || upkeepFix(id, r);
   if (hy) return hy;
   if (id === 'env-tracked') return { phase: 0, rank: 0, why: 'Committed secrets are readable by anyone with repo access and stay in history.', cmds: ['# for each file listed above:', 'git rm --cached <file>', 'git commit -m "Stop tracking env files"'], note: 'Tell the owner to rotate every secret those files held. Removing them from history needs a history rewrite: do NOT do that without explicit approval.' };
   if (id === 'env-not-ignored') return { phase: 0, rank: 1, why: 'One careless "git add ." would commit your secrets.', cmds: ["printf '\\n.env\\n.env.*\\n!.env.example\\n' >> .gitignore"], note: 'Check .gitignore does not already contain these lines first.' };
@@ -313,7 +313,7 @@ function buildReport({ repos, clutter = new Map(), quality = new Map(), tests = 
     out.push('Repos, worst first:\n' + sorted.map((r) => `- ${t(r.name)}: ${r.error ? 'scan failed' : `${r.grade} (${r.score}/100), ${plural(r.findings.length, 'finding')}`}`).join('\n') + '\n');
     if (workspace.length) {
       // Secret files keep their own step (and their file list as the detail); the rest use the detail as the why.
-      const ws = workspace.map((f) => (secretFix(f.id) ? { ...f, ...secretFix(f.id), sev: f.severity } : { ...f, phase: 7, rank: 9, why: t(f.detail, LEN.detail), cmds: f.cmds || [], sev: f.severity, detail: '' }));
+      const ws = workspace.map((f) => (secretFix(f.id, f.fix) ? { ...f, ...secretFix(f.id, f.fix), sev: f.severity } : { ...f, phase: 7, rank: 9, why: t(f.detail, LEN.detail), cmds: f.cmds || [], sev: f.severity, detail: '' }));
       out.push(`## Workspace-level tidy-up\n\n${renderSteps(ws.sort((a, b) => a.phase - b.phase), 1)}`);
     }
     out.push('## Repositories\n\nHandle repos in the order listed above.\n');

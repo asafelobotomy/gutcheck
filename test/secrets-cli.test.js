@@ -91,7 +91,8 @@ test('report: same-named nested repos each get their own secret step; a one-repo
     const md = (await e.report()).text;
     const sections = md.split(/^### api$/m).slice(1);
     assert.equal(sections.length, 2);
-    assert.ok(sections.every((s) => /gutcheck secrets --backup/.test(s.split(/^## /m)[0])), 'each repo section has its own step');
+    // No password manager linked: each repo's step says to link one, never to run the backup yet.
+    assert.ok(sections.every((s) => /Secrets > Password manager/.test(s.split(/^## /m)[0]) && !/gutcheck secrets --backup/.test(s.split(/^## /m)[0])), 'each repo section has its own step');
     assert.ok(!sections.some((s) => s.split(/^## /m)[0].includes('.env.a') && s.split(/^## /m)[0].includes('.env.b')), 'no mixing');
     assert.match(md, /Workspace-level tidy-up[\s\S]*~\/\.aws\/credentials/);
     const one = (await e.report({ repo: path.join(root, 'a', 'api') })).text;

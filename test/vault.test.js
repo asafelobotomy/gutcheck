@@ -63,7 +63,7 @@ test('proton parseList and parseFingerprint use recorded output', () => {
   assert.deepEqual(a.listCmd('Dev').args, ['item', 'list', '--vault-name', 'Dev', '--filter-state', 'active', '--output', 'json']);
   const ids = a.parseList(list);
   assert.ok(ids.has('A') && ids.has('B') && ids.size === 2);
-  assert.equal(a.parseList('garbage').size, 0);
+  assert.equal(a.parseList('garbage'), null);
   assert.deepEqual(a.fingerprintCmd('ID1', 'Dev').args,
     ['ssh-agent', 'debug', '--vault-name', 'Dev', '--item-id', 'ID1', '--output', 'json']);
   const dbg = JSON.stringify({ valid_keys: [{ title: 'k', algorithm: 'ssh-ed25519', fingerprint: 'SHA256:oMJ63abc' }], invalid_items: [] });
@@ -124,22 +124,24 @@ test('1password saves a document and parses the id', () => {
 test('keepassxc saves in two steps, key file only', () => {
   const s = ADAPTERS.keepassxc.saveCmd(c, kp);
   assert.equal(s.steps.length, 2);
-  assert.deepEqual(s.steps[0].args, ['add', '--no-password', '-k', '/k', '/d.kdbx', 'gutcheck/api_.env']);
-  assert.deepEqual(s.steps[1].args, ['attachment-import', '--no-password', '-k', '/k', '/d.kdbx', 'gutcheck/api_.env', '.env', '/dev/stdin']);
+  assert.deepEqual(s.steps[0].args, ['add', '--no-password', '-k', '/k', '/d.kdbx', 'gutcheck/api%2F.env']);
+  assert.deepEqual(s.steps[1].args, ['attachment-import', '--no-password', '-k', '/k', '/d.kdbx', 'gutcheck/api%2F.env', '.env', '/dev/stdin']);
   assert.equal(s.steps[1].stdin, true);
-  assert.equal(s.parseId(''), 'gutcheck/api_.env');
+  assert.equal(s.parseId(''), 'gutcheck/api%2F.env');
+  assert.equal(s.key, 'gutcheck/api%2F.env');
   const l = ADAPTERS.keepassxc.listCmd(kp);
   assert.deepEqual(l.args, ['ls', '-R', '-f', '--no-password', '-k', '/k', '/d.kdbx', 'gutcheck']);
-  assert.ok(ADAPTERS.keepassxc.parseList('api_.env\nother\n').has('gutcheck/api_.env'));
+  assert.ok(ADAPTERS.keepassxc.parseList('api%2F.env\nother\n').has('gutcheck/api%2F.env'));
   const n = ADAPTERS.keepassxc.saveCmd({ ...c, title: 'gutcheck: ~/.ssh/a/b' }, kp);
-  assert.equal(n.parseId(''), 'gutcheck/home_.ssh_a_b');
+  assert.equal(n.parseId(''), 'gutcheck/%7E%2F.ssh%2Fa%2Fb');
   assert.equal(n.steps[0].args[5].split('/').length, 2);
 });
 
 test('pass and gopass entry names, ids and existence', () => {
   const p = ADAPTERS.pass.saveCmd({ ...c, title: 'gutcheck: ~/.aws/cred entials' }, '');
-  assert.deepEqual(p.args, ['insert', '-m', '-f', 'gutcheck/home/.aws/cred_entials']);
-  assert.equal(p.parseId(''), 'gutcheck/home/.aws/cred_entials');
+  assert.deepEqual(p.args, ['insert', '-m', '-f', 'gutcheck/%7E/.aws/cred%20entials']);
+  assert.equal(p.parseId(''), 'gutcheck/%7E/.aws/cred%20entials');
+  assert.equal(p.key, 'gutcheck/%7E/.aws/cred%20entials');
   assert.deepEqual(ADAPTERS.gopass.saveCmd(c, 'keys').args, ['insert', '-f', 'keys/api/.env']);
   assert.deepEqual(ADAPTERS.gopass.listCmd('').args, ['ls', '--flat']);
   assert.ok(ADAPTERS.gopass.parseList('gutcheck/api/.env\nx\n').has('gutcheck/api/.env'));
@@ -150,4 +152,43 @@ test('pass and gopass entry names, ids and existence', () => {
   assert.equal(ADAPTERS.pass.existsFs('gutcheck/api/.env', '', env), true);
   assert.equal(ADAPTERS.pass.existsFs('gutcheck/nope', '', env), false);
   fs.rmSync(dir, { recursive: true });
+});
+
+test('slug is injective: spaces, underscores, %, ~ and non-ASCII never meet', () => {
+  const { slug } = require('../src/vault-adapters');
+  const titles = ['gutcheck: my app/.env', 'gutcheck: my_app/.env', 'gutcheck: my%20app/.env', 'gutcheck: ~/.netrc', 'gutcheck: home/.netrc', 'gutcheck: café/.env', 'gutcheck: caf%C3%A9/.env'];
+  const slugs = titles.map(slug);
+  assert.equal(new Set(slugs).size, titles.length, slugs.join(' '));
+  assert.equal(slug('gutcheck: my app/.env'), 'my%20app/.env');
+  assert.equal(slug('gutcheck: ~/.netrc'), '%7E/.netrc');
+  for (const id of ['pass', 'gopass', 'keepassxc']) {
+    const k = (t) => ADAPTERS[id].saveCmd({ ...c, title: t }, tgt(id)).key;
+    assert.notEqual(k('gutcheck: my app/.env'), k('gutcheck: my_app/.env'), id);
+    assert.notEqual(k('gutcheck: a/b_c'), k('gutcheck: a_b/c'), id); // keepassxc flattens "/" without meeting "_"
+  }
+  for (const id of ['proton', '1password', 'bitwarden']) assert.equal(ADAPTERS[id].saveCmd(c, tgt(id)).key, c.title, id);
+});
+
+test('parseList returns null for output of the wrong shape, in every adapter with a list', () => {
+  const bad = { proton: ['garbage', '[]', '{"items":5}'], '1password': ['garbage', '{}'], bitwarden: ['garbage', '{"id":1}'], keepassxc: ['a\x1b[31mb'], gopass: ['x\0y'] };
+  for (const [id, outs] of Object.entries(bad)) for (const o of outs) assert.equal(ADAPTERS[id].parseList(o, tgt(id)), null, `${id}: ${JSON.stringify(o)}`);
+  assert.equal(ADAPTERS['1password'].parseList('[]').size, 0); // an empty list is still a list
+  assert.equal(ADAPTERS.gopass.parseList('').size, 0);
+});
+
+test('keepassxc re-backup: no add, attachment-import -f onto the recorded entry', () => {
+  const s = ADAPTERS.keepassxc.saveCmd(c, kp, { update: true, itemId: 'gutcheck/api_.env' });
+  assert.equal(s.steps.length, 1);
+  assert.deepEqual(s.steps[0].args, ['attachment-import', '-f', '--no-password', '-k', '/k', '/d.kdbx', 'gutcheck/api_.env', '.env', '/dev/stdin']);
+  assert.equal(s.key, 'gutcheck/api_.env');
+  assert.equal(s.parseId(''), 'gutcheck/api_.env');
+  const first = ADAPTERS.keepassxc.saveCmd(c, kp);
+  assert.deepEqual(first.steps.map((x) => x.args[0]), ['add', 'attachment-import']);
+  assert.ok(!first.steps[1].args.includes('-f'));
+  assert.deepEqual(ADAPTERS.pass.saveCmd(c, '', { update: true, itemId: 'gutcheck/old_name' }).args, ['insert', '-m', '-f', 'gutcheck/old_name']);
+});
+
+test('bitwarden syncs before listing', () => {
+  assert.deepEqual(ADAPTERS.bitwarden.syncCmd('').args, ['sync']);
+  assert.ok(!ADAPTERS.proton.syncCmd);
 });

@@ -13,7 +13,8 @@ function createRecord(file, io = fs) {
     let v;
     try { v = JSON.parse(io.readFileSync(file, 'utf8')); } catch { return fresh(); }
     if (!isObject(v) || v.version !== 1) return fresh();
-    return { version: 1, entries: isObject(v.entries) ? v.entries : {}, skipped: isObject(v.skipped) ? v.skipped : {} };
+    const objs = (o) => (isObject(o) ? Object.fromEntries(Object.entries(o).filter(([, e]) => isObject(e))) : {}); // a hand-edited null entry is dropped
+    return { version: 1, entries: objs(v.entries), skipped: objs(v.skipped) };
   }
   function save(rec) {
     io.mkdirSync(path.dirname(file), { recursive: true });
@@ -35,13 +36,13 @@ function createRecord(file, io = fs) {
 function statusOf(c, rec) {
   if (rec.skipped && rec.skipped[c.real]) return { status: 'skipped' };
   const e = rec.entries && rec.entries[c.real];
-  if (e) {
+  if (isObject(e)) {
     if (e.missing) return { status: 'missing' };
     if (e.mismatch) return { status: 'mismatch' };
     return { status: e.sha256 === c.sha256 ? 'backed' : 'changed' };
   }
   for (const [p, o] of Object.entries(rec.entries || {}))
-    if (o.sha256 === c.sha256 && !o.missing && !o.mismatch) return { status: 'backed', sameAs: p };
+    if (isObject(o) && o.sha256 === c.sha256 && !o.missing && !o.mismatch) return { status: 'backed', sameAs: p };
   return { status: 'unbacked' };
 }
 

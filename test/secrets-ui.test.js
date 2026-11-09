@@ -197,3 +197,15 @@ test('a blank required field makes no link call', async () => {
   assert.equal(callsOf(t, 'link').length, 0);
   assert.equal(callsOf(t, 'test').length, 0);
 });
+
+test('Test connection shows the error when there is no hint, else a fixed fallback', async () => {
+  for (const [res, want] of [[{ ok: false, error: 'Read-only mode is on.' }, 'Read-only mode is on.'], [{ ok: false }, 'Could not test.']]) {
+    const t = await boot({ secrets: { ...SECRETS, target: 'Dev' }, secretsApi: { test: async () => res } });
+    await open(t);
+    click(button(t, 'Password manager…'));
+    await tick();
+    click(modalButton(t, 'Test connection'));
+    await tick();
+    assert.ok(t.$('.modal').textContent.includes(want), want);
+  }
+});
