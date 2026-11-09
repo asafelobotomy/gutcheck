@@ -26,10 +26,16 @@ const TITLE = {
   root: (name) => `gutcheck: root ${name}`,
 };
 
+// git ls-files -s prints about 70 bytes a path, three times plain ls-files: a big buffer, so a large
+// repo isn't silently skipped. An overflow is reported (see findRepoSecrets), never read as "nothing".
+const LS_MAX_BUFFER = 128 * 1024 * 1024;
+
 // The tracked paths, and the gitlinks (submodules, mode 160000) among them. Read-only, via exec.git.
-async function trackedFiles(dir) {
-  const r = await git(['ls-files', '-s', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
-  if (!r.ok) return null; // fail closed: an unknown tracked set must never make committed files look unbacked
+// { error } when the list could not be read: fail closed, as an unknown tracked set must never make
+// committed files look unbacked.
+async function trackedFiles(dir, maxBuffer = LS_MAX_BUFFER) {
+  const r = await git(['ls-files', '-s', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS, maxBuffer });
+  if (!r.ok) return { error: /maxBuffer/i.test(r.stderr) ? 'too many tracked files for git ls-files' : null };
   const tracked = new Set();
   const gitlinks = new Set();
   for (const rec of r.stdout.split('\0')) {
@@ -42,7 +48,17 @@ async function trackedFiles(dir) {
   return { tracked, gitlinks };
 }
 
-const hasGitEntry = async (abs) => { try { await fsp.lstat(path.join(abs, '.git')); return true; } catch { return false; } };
+// A checkout of its own: .git is a folder (or a link to one), or a file whose first line is "gitdir: "
+// (a submodule or a worktree). Any other .git entry is just a file.
+async function isCheckout(abs) {
+  const g = path.join(abs, '.git');
+  try {
+    const st = await fsp.stat(g);
+    if (st.isDirectory()) return true;
+    if (!st.isFile() || st.size > 4096) return false;
+    return (await fsp.readFile(g, 'utf8')).startsWith('gitdir: ');
+  } catch { return false; }
+}
 
 // Build a candidate for one regular file, or null (too big, unreadable, not a file).
 async function makeCandidate({ real, scope, repo, rel, title, inSshDir = false, onlyKind = null, gate = null }) {
@@ -66,53 +82,69 @@ async function makeCandidate({ real, scope, repo, rel, title, inSshDir = false, 
 
 // opts.name: the repo's label in titles and advice (default: the folder name). Callers pass the path
 // relative to the workspace root, so two nested repos named alike never share a vault item title.
-async function findRepoSecrets(dir, { name } = {}) {
-  let root;
-  try { root = await fsp.realpath(dir); } catch { return []; }
-  const idx = await trackedFiles(root);
-  if (!idx) return [];
-  const { tracked, gitlinks } = idx;
+// opts.problems: an array that gets { repo, error } when a tracked list could not be read.
+// A submodule, nested clone or worktree checkout inside the repo is scanned as its own repo (its own
+// ls-files), with titles under the parent's label; the file and depth limits are shared.
+async function findRepoSecrets(dir, { name, problems = null, maxBuffer = LS_MAX_BUFFER } = {}) {
+  let top;
+  try { top = await fsp.realpath(dir); } catch { return []; }
   const repo = typeof name === 'string' && name ? name : path.basename(dir);
   const found = new Map(); // real path -> candidate
-  let seen = 0;
-  // A folder that is a submodule (a gitlink) or holds its own .git is another repo: what is in it
-  // is committed or ignored there, so the parent never reports or backs it up.
-  const nested = new Map(); // rel folder -> boolean
-  const isNested = async (relDir) => {
-    if (!nested.has(relDir)) nested.set(relDir, gitlinks.has(relDir) || await hasGitEntry(path.join(root, relDir)));
-    return nested.get(relDir);
-  };
-  const inNested = async (rel) => {
-    const parts = rel.split('/');
-    for (let i = 1; i < parts.length; i++) if (await isNested(parts.slice(0, i).join('/'))) return true;
-    return false;
-  };
+  const budget = { seen: 0 };
 
-  const consider = async (abs, relHere) => {
-    let real;
-    try { real = await fsp.realpath(abs); } catch { return; }
-    const rel = posix(path.relative(root, real));
-    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return; // target outside the repo
-    if (tracked.has(rel) || found.has(real) || await inNested(rel)) return; // a link may point into a submodule
-    const c = await makeCandidate({ real, scope: 'repo', repo, rel, title: TITLE.repo(repo, rel) });
-    if (c) found.set(real, c);
-  };
-
-  const walk = async (d, depth, prefix) => {
-    let ents;
-    try { ents = await fsp.readdir(d, { withFileTypes: true }); } catch { return; }
-    for (const e of ents) {
-      if (++seen > MAX_FILES) return;
-      const rel = prefix + e.name;
-      const abs = path.join(d, e.name);
-      if (e.isDirectory()) {
-        if (depth < MAX_DEPTH && !NO_DESCEND.has(e.name) && !await isNested(rel)) await walk(abs, depth + 1, rel + '/');
-      } else if ((e.isFile() || e.isSymbolicLink()) && P.looksSecret(rel)) {
-        await consider(abs, rel);
-      }
+  // root: this checkout's folder; prefix: its path under the top repo ('' or 'libs/sub/').
+  async function scanCheckout(root, prefix, depth0) {
+    const idx = await trackedFiles(root, maxBuffer);
+    if (!idx.tracked) {
+      const where = prefix ? `${repo}/${prefix.slice(0, -1)}` : repo;
+      if (idx.error && problems) problems.push({ repo, error: `Secrets not checked in ${where}: ${idx.error}.` });
+      return;
     }
-  };
-  await walk(root, 0, '');
+    const { tracked, gitlinks } = idx;
+    // A folder that is a gitlink or a checkout is another repo: its files are committed or ignored
+    // there, so this one never reports them (they are scanned as that repo's own).
+    const nested = new Map(); // rel folder -> boolean
+    const isNested = async (relDir) => {
+      if (!nested.has(relDir)) nested.set(relDir, gitlinks.has(relDir) || await isCheckout(path.join(root, relDir)));
+      return nested.get(relDir);
+    };
+    const inNested = async (rel) => {
+      const parts = rel.split('/');
+      for (let i = 1; i < parts.length; i++) if (await isNested(parts.slice(0, i).join('/'))) return true;
+      return false;
+    };
+
+    const consider = async (abs) => {
+      let real;
+      try { real = await fsp.realpath(abs); } catch { return; }
+      const rel = posix(path.relative(root, real));
+      if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return; // target outside this checkout
+      if (tracked.has(rel) || found.has(real) || await inNested(rel)) return; // a link may point into a submodule
+      const relTop = prefix + rel;
+      const c = await makeCandidate({ real, scope: 'repo', repo, rel: relTop, title: TITLE.repo(repo, relTop) });
+      if (c) found.set(real, c);
+    };
+
+    const walk = async (d, depth, relDir) => {
+      let ents;
+      try { ents = await fsp.readdir(d, { withFileTypes: true }); } catch { return; }
+      for (const e of ents) {
+        if (++budget.seen > MAX_FILES) return;
+        const rel = relDir + e.name;
+        const abs = path.join(d, e.name);
+        if (e.isDirectory()) {
+          if (depth >= MAX_DEPTH || NO_DESCEND.has(e.name)) continue;
+          if (!await isNested(rel)) await walk(abs, depth + 1, rel + '/');
+          else if (await isCheckout(abs)) await scanCheckout(abs, `${prefix}${rel}/`, depth + 1); // a gitlink with no checkout is empty
+        } else if ((e.isFile() || e.isSymbolicLink()) && P.looksSecret(rel)) {
+          await consider(abs);
+        }
+      }
+    };
+    await walk(root, depth0, '');
+  }
+
+  await scanCheckout(top, '', 0);
   return [...found.values()];
 }
 
