@@ -10,6 +10,13 @@ const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`; // POSIX single-quote
 const plural = (n, w, pl = w + 's') => `${n} ${n === 1 ? w : pl}`;
 // The folder box accepts "~/Projects" (as its placeholder suggests) and relative paths.
 const expandHome = (p, home) => path.resolve(p === '~' ? home : p.startsWith('~/') ? path.join(home, p.slice(2)) : p);
+// Text safe to print to a terminal or show as a name: C0 and C1 controls and DEL become \xNN; line
+// separators and bidi controls (which reorder what follows) become \u{...}. Everything else is kept.
+const UNPRINTABLE = /[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+const printable = (s) => String(s).replace(UNPRINTABLE, (ch) => {
+  const n = ch.charCodeAt(0);
+  return n <= 0xff ? '\\x' + n.toString(16).padStart(2, '0') : '\\u{' + n.toString(16) + '}';
+});
 const list = (a, max = 6) => a.slice(0, max).join(', ') + (a.length > max ? `, +${a.length - max} more` : '');
 
 // Folders no scan should descend into: huge build/dependency output owned by a tool.
@@ -36,4 +43,4 @@ function cmpVersion(a, b) {
   return 0;
 }
 
-module.exports = { expandHome, NODE_LOCKFILES, installCommand, DAYS_PER_YEAR, MAX_PLAN_ITEMS, COMMAND_TIMEOUT_MS, cmpVersion, DAY, daysAgo, sq, plural, list, HEAVY_DIRS };
+module.exports = { expandHome, NODE_LOCKFILES, installCommand, DAYS_PER_YEAR, MAX_PLAN_ITEMS, COMMAND_TIMEOUT_MS, cmpVersion, DAY, daysAgo, sq, plural, printable, list, HEAVY_DIRS };

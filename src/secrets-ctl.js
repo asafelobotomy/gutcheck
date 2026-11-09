@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const exec = require('./exec');
-const { plural } = require('./util');
+const { plural, printable } = require('./util');
 const { ADAPTERS, TOOL_INFO } = require('./vault-adapters');
 const { findRepoSecrets, findWorkspaceSecrets, findHomeSecrets } = require('./secrets');
 const { createRecord, statusOf, secretAdvice } = require('./secret-status');
@@ -21,7 +21,7 @@ const SCAN_FIRST = 'Scan a workspace first.';
 const lockedText = (l, s) => (s.locked ? `${l.info.label} is locked or not signed in. ` : '') + (s.hint || l.info.unlockHint);
 // Names the clashing item: its title for id-based tools, else its pass/gopass name or KeePassXC entry.
 const keyWord = (cand, key) => (key === cand.title ? 'title' : 'name');
-const CLASH = (cand, key) => `Two files would get the same vault item ${keyWord(cand, key)}: ${key}. Rename one or skip it.`;
+const CLASH = (cand, key) => printable(`Two files would get the same vault item ${keyWord(cand, key)}: ${key}. Rename one or skip it.`);
 const shortName = (cand) => cand.title.replace(/^gutcheck: /, '');
 const GOOGLE = { id: 'google', label: 'Google Password Manager', found: false, reason: 'No CLI or write API' };
 
@@ -180,7 +180,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
       const other = owners.get(save.key);
       if (keys.has(save.key) || (other && other !== c.real)) {
         clash = clash || CLASH(c, save.key);
-        display.push({ text: `${shortName(c)}: skipped: another file already uses this vault item ${keyWord(c, save.key)}` });
+        display.push({ text: printable(`${shortName(c)}: skipped: another file already uses this vault item ${keyWord(c, save.key)}`) });
         continue;
       }
       keys.add(save.key);
@@ -189,7 +189,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
       steps.forEach((s, i) => {
         const cmd = [l.a.bin, ...s.args.map(quote)].join(' ');
         const tail = i === steps.length - 1 ? `  ← contents of ${shortName(c)} (${c.size} bytes)` : '';
-        display.push({ text: cmd + tail });
+        display.push({ text: printable(cmd + tail) });
       });
     }
     if (!items.length) return { ok: false, error: clash || 'Nothing to back up: those files are already backed up, skipped or no longer found.' };
@@ -198,7 +198,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     const where = l.tool === 'keepassxc' ? `${l.target.db}, group ${l.target.group}` : l.target || 'default';
     return {
       ok: true, token, title: `Back up ${plural(items.length, 'secret file')} to ${l.info.label}`, risk: 'caution', display,
-      note: `Copies the file's contents into ${l.info.label} (${where}). The local file is not changed.`,
+      note: printable(`Copies the file's contents into ${l.info.label} (${where}). The local file is not changed.`),
     };
   }
 
@@ -212,7 +212,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
   async function saveOne(p, it) {
     const { l } = p;
     const { cand } = it;
-    const text = `Back up ${cand.title} to ${l.info.label}`;
+    const text = printable(`Back up ${cand.title} to ${l.info.label}`);
     const fail = (out) => ({ text, ok: false, out });
     const got = await readPlanned(cand.real, it.sha256);
     if (got.error) return fail(got.error);
@@ -255,7 +255,7 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     for (const it of p.items) {
       const r = await saveOne(p, it);
       results.push(r);
-      audit({ ok: r.ok, repo: 'Secrets', title: `${r.ok ? 'Backed up' : 'Back up'} ${it.cand.title} to ${p.l.info.label}` });
+      audit({ ok: r.ok, repo: 'Secrets', title: printable(`${r.ok ? 'Backed up' : 'Back up'} ${it.cand.title} to ${p.l.info.label}`) });
       if (!r.ok) break;
     }
     return { ok: results.length === p.items.length && results.every((r) => r.ok), results };

@@ -4,6 +4,7 @@
 // (`GutCheck.AppImage --cli ...`, `GutCheck.AppImage --mcp`).
 
 const { createEngine } = require('./engine');
+const { printable: P } = require('./util');
 const { version } = require('../package.json');
 
 const HELP = `GutCheck ${version}: health checks for every git repo in a folder.
@@ -117,12 +118,13 @@ async function fixAll(engine, repo, f, out, err) {
 }
 
 // gutcheck secrets: the status table, or --backup [--yes], --verify, --skip <path> <reason...>.
+// Names come from the filesystem (a cloned repo picks its own), so every one goes through P (printable).
 async function secretsCmd(engine, f, rest, out, err, json) {
-  const fail = (r) => { err(`gutcheck: ${r.error}`); return 1; };
+  const fail = (r) => { err(`gutcheck: ${P(r.error)}`); return 1; };
   if (Object.prototype.hasOwnProperty.call(f, 'skip')) {
     const r = await engine.secretsSkip(typeof f.skip === 'string' ? f.skip : '', rest.join(' '));
     if (!r.ok) return fail(r);
-    out(`Not backing up ${f.skip}: ${rest.join(' ')}`);
+    out(`Not backing up ${P(f.skip)}: ${P(rest.join(' '))}`);
     return 0;
   }
   if (f.verify) {
@@ -135,8 +137,8 @@ async function secretsCmd(engine, f, rest, out, err, json) {
   if (!list.ok) return fail(list);
   if (!f.backup) {
     if (f.json) { json(list); return 0; }
-    out(list.linked ? `Password manager: ${list.tool}\n` : 'No password manager linked: link one in the GutCheck app (Secrets > Password manager…).\n');
-    for (const x of list.items) out(`  ${x.status.padEnd(9)} ${x.kind.padEnd(5)} ${String(x.size).padStart(8)}  ${x.title.replace(/^gutcheck: /, '')}${x.note ? `  (${x.note})` : ''}${x.sameAs ? '  (same as a backed-up file)' : ''}`);
+    out(list.linked ? `Password manager: ${P(list.tool)}\n` : 'No password manager linked: link one in the GutCheck app (Secrets > Password manager…).\n');
+    for (const x of list.items) out(`  ${x.status.padEnd(9)} ${x.kind.padEnd(5)} ${String(x.size).padStart(8)}  ${P(x.title.replace(/^gutcheck: /, ''))}${x.note ? `  (${P(x.note)})` : ''}${x.sameAs ? '  (same as a backed-up file)' : ''}`);
     if (!list.items.length) out('No secret files found.');
     return 0;
   }
@@ -145,13 +147,13 @@ async function secretsCmd(engine, f, rest, out, err, json) {
   if (!todo.length) { out('Nothing to back up.'); return 0; }
   const p = await engine.secretsPlan(todo.map((x) => x.path));
   if (!p.ok) return fail(p);
-  out(`${p.title}  (risk: ${p.risk})`);
-  p.display.forEach((d) => out(`  $ ${d.text}`));
-  out(`  ${p.note}`);
+  out(`${P(p.title)}  (risk: ${p.risk})`);
+  p.display.forEach((d) => out(`  $ ${P(d.text)}`));
+  out(`  ${P(p.note)}`);
   if (!f.yes) { out('\nNothing was run. Add --yes to run exactly these commands.'); return 0; }
   const r = await engine.secretsApply(p.token);
-  if (r.error) err(`gutcheck: ${r.error}`);
-  for (const x of r.results || []) out(`  ${x.ok ? 'ok    ' : 'FAILED'}  ${x.text}${x.out ? `\n    ${x.out.replace(/\n/g, '\n    ')}` : ''}`);
+  if (r.error) err(`gutcheck: ${P(r.error)}`);
+  for (const x of r.results || []) out(`  ${x.ok ? 'ok    ' : 'FAILED'}  ${P(x.text)}${x.out ? `\n    ${x.out.split('\n').map(P).join('\n    ')}` : ''}`);
   return r.ok ? 0 : 1;
 }
 
