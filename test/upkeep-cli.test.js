@@ -74,6 +74,6 @@ test('mcp engine: ignoring needs --allow-actions on the server; drift and new ar
     await rw.scan({ root });
     assert.equal((await tool('gutcheck_ignore').run(rw, { repo: 'alpha', finding: 'no-remote', reason: 'scratch' })).ok, true);
     const d = await rw.repoDetail({ repo: 'alpha' });
-    assert.deepEqual(d.ignored, [{ id: 'no-remote', title: 'No GitHub remote', reason: 'scratch', from: 'Ignored by you (GutCheck settings)' }]);
+    assert.deepEqual(d.ignored, [{ id: 'no-remote', title: 'No GitHub remote', reason: '"scratch"', from: 'Ignored through an AI agent (MCP)', note: 'Written by an AI agent through MCP, not in GutCheck by the user.' }]);
   } finally { for (const d of [root, data]) fs.rmSync(d, { recursive: true, force: true }); }
 });

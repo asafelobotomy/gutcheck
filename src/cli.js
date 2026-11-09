@@ -208,7 +208,7 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
       const r = await engine.ignore({ repo, finding: id, reason: why.join(' '), remove: cmd === 'unignore', allRepos: !!f.all });
       return done(r, (x) => out(`${cmd === 'ignore' ? `Ignoring ${x.id} in ${x.key === '*' ? 'every repo' : x.key}: ${x.reason}` : `No longer ignoring ${x.id} in ${x.key === '*' ? 'every repo' : x.key}`}  (${x.file})`));
     }
-    case 'ignored': return done(await engine.ignored(), (r) => { if (!r.findings.length) out('Nothing is ignored.'); r.findings.forEach((x) => out(`${x.repo}: ${x.title}  [${x.id}]\n    ${x.from}: ${x.reason}`)); });
+    case 'ignored': return done(await engine.ignored(), (r) => { if (!r.findings.length && !(r.inactive || []).length) out('Nothing is ignored.'); r.findings.forEach((x) => out(`${x.repo}: ${x.title}  [${x.id}]\n    ${x.from}: ${x.reason}`)); if ((r.inactive || []).length) { out('Not applied (fix or remove with gutcheck unignore):'); r.inactive.forEach((x) => out(`  ${x.repo}: ${x.rule}  ${x.why}`)); } });
     case 'drift': return done(await engine.drift(), (r) => {
       if (!r.rules) { out(r.note); return; }
       out(`Baseline: ${r.file}\n`);

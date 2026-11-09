@@ -168,7 +168,7 @@ handle('ignore:set', async (_e, { dir, id, reason, remove, allRepos } = {}) => {
   const r = known.get(dir);
   if (!r && !allRepos) return { ok: false, error: 'Unknown repo' };
   const key = allRepos ? '*' : r.ignoreKey;
-  const res = remove ? policy().removeIgnore(key, String(id || '')) : policy().setIgnore(key, String(id || ''), reason);
+  const res = remove ? policy().removeIgnore(key, String(id || '')) : policy().setIgnore(key, String(id || ''), reason, 'app');
   if (!res.ok) return res;
   audit({ ok: true, repo: allRepos ? 'all repos' : r.name, title: `${remove ? 'Stopped ignoring' : 'Ignored'} ${id}${remove ? '' : `: ${res.reason}`}`, via: 'app' });
   if (allRepos) { await ws.refreshAll(); return { ok: true, all: true, repos: [...known.values()] }; }

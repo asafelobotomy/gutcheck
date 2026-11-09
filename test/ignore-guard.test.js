@@ -66,13 +66,13 @@ test('C2/S9: a repo\'s .gutcheck.json cannot hide security or error findings, no
   assert.ok(own.ignored.some((f) => f.id === 'wf-injection' && f.ignoredIn === 'GutCheck'));
 });
 
-test('C3: an every-repo ignore needs 3 characters before *; a short one in ignores.json does nothing', () => {
+test('C3: an ignore needs 3 characters before *; a short one in ignores.json does nothing', () => {
   const d = tmp();
   try {
     const p = createPolicyStore(d);
     for (const id of ['n*', 'no*']) assert.equal(p.setIgnore('*', id, 'r').ok, false, id);
     assert.equal(p.setIgnore('*', 'no-*', 'r').ok, true);
-    assert.equal(p.setIgnore('o/app', 'no*', 'r').ok, true, 'a single repo may use a short prefix');
+    assert.equal(p.setIgnore('o/app', 'no*', 'r').ok, false, 'a single repo needs 3 characters too');
   } finally { rm(d); }
   const r = applyPolicy(result(SEC), { ignores: { '*': { 'n*': 'old rule' } } }, score);
   assert.ok(!r.ignored.length, 'a short every-repo rule written before this check is not applied');

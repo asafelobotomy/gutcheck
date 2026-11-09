@@ -10,8 +10,8 @@ const { createSettingsStore } = require('./settings');
 const { appendAudit, readAudit } = require('./audit');
 const { expandHome } = require('./util');
 const { createWorkspaceScanner } = require('./workspace-scan');
-const { createPolicyStore, driftReport, repoKey } = require('./policy');
-const { ignoreView } = require('./ignore-rules');
+const { createPolicyStore, driftReport, repoKey, inactiveIgnores } = require('./policy');
+const { ignoreView, agentIgnoreRefusal, wildcardOk, MIN_PREFIX } = require('./ignore-rules');
 const { createSeenStore } = require('./schedule');
 const FixAll = require('./renderer/fix-all');
 const { createSecretsCtl } = require('./secrets-ctl');
@@ -288,7 +288,11 @@ function createEngine(opts = {}) {
     let key = '*';
     let r = null;
     if (!allRepos) { const x = resolve(repo); if (x.error) return { ok: false, error: x.error }; r = x.repo; key = repoKey(r); }
-    const res = remove ? policy.removeIgnore(key, String(finding || '')) : policy.setIgnore(key, String(finding || ''), reason);
+    // An agent may not hide errors or security findings: only the user can, in the app or the CLI.
+    const scope = r ? [r] : [...known.values()].filter((x) => !x.error);
+    const refused = !remove && via === 'mcp' && wildcardOk(String(finding || ''), MIN_PREFIX.user) && agentIgnoreRefusal(String(finding || ''), scope.flatMap((x) => [...(x.findings || []), ...(x.ignored || [])]));
+    if (refused) return { ok: false, error: refused };
+    const res = remove ? policy.removeIgnore(key, String(finding || '')) : policy.setIgnore(key, String(finding || ''), reason, via);
     if (!res.ok) return res;
     appendAudit(auditFile, { ok: true, repo: r ? r.name : 'all repos', title: `${remove ? 'Stopped ignoring' : 'Ignored'} ${finding}${remove ? '' : `: ${res.reason}`}`, via: opts.via || 'cli' });
     if (r) await ws.refresh(r.path); else await ws.refreshAll(); // an ignore for every repo changes them all
@@ -298,7 +302,8 @@ function createEngine(opts = {}) {
   async function ignored({ onProgress } = {}) {
     const s = await ensure({ onProgress });
     if (!s.ok) return s;
-    return { ok: true, file: policy.ignoreFile, findings: [...known.values()].flatMap((r) => (r.ignored || []).map((f) => ({ repo: r.name, ...ignoreView(f), rule: f.ignoreRule }))) };
+    const inactive = inactiveIgnores(policy.load().ignores).map((x) => ({ repo: x.key === '*' ? 'every repo' : x.key, rule: x.id, reason: x.reason, why: x.why }));
+    return { ok: true, file: policy.ignoreFile, findings: [...known.values()].flatMap((r) => (r.ignored || []).map((f) => ({ repo: r.name, ...ignoreView(f), rule: f.ignoreRule }))), inactive };
   }
 
   // Baseline drift: per rule, the repos that do not meet it. init writes a starting baseline.json.
@@ -306,7 +311,7 @@ function createEngine(opts = {}) {
     if (init && store.load().readOnly) return { ok: false, error: READ_ONLY };
     if (init) { const i = policy.initBaseline(); await ws.refreshAll(); return { ok: true, file: i.file, created: i.created }; }
     const b = policy.load().baseline;
-    if (!b) return { ok: true, file: policy.baselineFile, baseline: null, note: `No baseline yet. Run "gutcheck baseline init" (or pass init: true) to create ${policy.baselineFile}, then edit it.` };
+    if (!b) return { ok: true, file: policy.baselineFile, baseline: null, note: via === 'mcp' ? `No baseline yet. The user can create one in the GutCheck app (Baseline) or with "gutcheck baseline init", then edit ${policy.baselineFile}.` : `No baseline yet. Run "gutcheck baseline init" to create ${policy.baselineFile}, then edit it.` };
     const s = await ensure({ onProgress });
     if (!s.ok) return s;
     const results = [...known.values()];
