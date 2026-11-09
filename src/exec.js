@@ -28,9 +28,28 @@ async function json(cmd, args, opts) {
 }
 
 // Scanning opens repos we did not necessarily write. A repo's own .git/config can name programs
-// to execute (core.fsmonitor, hooks), so read-only git calls disable both and never take the
-// index lock (so a scan cannot interfere with the user's own git commands).
-const READONLY_GIT = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
-const git = (args, opts) => run('git', [...READONLY_GIT, ...args], opts);
+// to execute, so read-only git calls switch off the ones a fixed -c can reach: fsmonitor, hooks,
+// signature checks (log.showSignature runs gpg.program), and the ext:: and fd:: transports. They
+// never take the index lock, so a scan cannot interfere with the user's own git commands.
+const READONLY_GIT = [
+  '--no-optional-locks',
+  '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
+  '-c', 'log.showSignature=false', '-c', 'gpg.program=false', '-c', 'gpg.ssh.program=false', '-c', 'gpg.x509.program=false',
+  '-c', 'protocol.ext.allow=never', '-c', 'protocol.fd.allow=never',
+];
+
+const { driverOverrides } = require('./git-drivers')(run, READONLY_GIT);
+
+// Every scan git call. Filter and diff drivers are named per repo, so they are read first (from a
+// short cache) and the repo-local ones are blanked; if that lookup fails the call is refused.
+async function git(args, opts = {}) {
+  let extra;
+  try {
+    extra = await driverOverrides(opts.cwd || process.cwd(), opts.env);
+  } catch (e) {
+    return { ok: false, code: null, stdout: '', stderr: `GutCheck refused to run git here: ${e.message}` };
+  }
+  return run('git', [...READONLY_GIT, ...extra, ...args], opts);
+}
 
 module.exports = { run, json, git, READONLY_GIT };

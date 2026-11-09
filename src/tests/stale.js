@@ -40,7 +40,8 @@ function xfailMarkers(tests) {
 
 // { line -> author time (seconds) } for the given lines of one file; uncommitted lines get now.
 async function blameLines(dir, rel, lines) {
-  const args = ['blame', '--line-porcelain', ...lines.flatMap((l) => ['-L', `${l},${l}`]), '--', rel];
+  // --no-textconv: a repo's diff driver must not run (audit B3), on top of exec.git's own guard.
+  const args = ['blame', '--no-textconv', '--line-porcelain', ...lines.flatMap((l) => ['-L', `${l},${l}`]), '--', rel];
   const r = await git(args, { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
   const out = {};
   if (!r.ok) return out;
