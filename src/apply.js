@@ -13,6 +13,9 @@ const defaultCtx = (over = {}) => {
   // Read-only git for plans and checks: exec.git's guards (repo drivers blanked, no lazy fetch).
   // A runner injected by tests gets the fixed options only, since it runs no real git.
   ctx.safeGit = ctx.safeGit || (ctx.run === run ? (args, cwd) => exec.git(args, { cwd }) : (args, cwd) => ctx.run('git', [...READONLY_GIT, ...args], { cwd, env: SAFE_GIT_ENV }));
+  // A repo's config entries for some keys, and those its own config decided (git-safety.js). An
+  // injected runner has no real repo behind it, so it sees none.
+  ctx.gitConfig = ctx.gitConfig || (ctx.run === run ? exec.configEntries : async () => ({ all: [], untrusted: [] }));
   // Recoverable removal. The app passes Electron's shell.trashItem; this fallback uses gio.
   ctx.trash = ctx.trash || (async (p) => {
     const t = await ctx.run('gio', ['trash', '--', p]);

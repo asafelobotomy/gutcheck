@@ -64,4 +64,4 @@ async function git(args, opts = {}) {
   return run('git', [...READONLY_GIT, ...extra, ...alias, ...args], { ...opts, env: { ...(opts.env || {}), ...SAFE_GIT_ENV } });
 }
 
-module.exports = { run, json, git, READONLY_GIT, SAFE_GIT_ENV, forgetGitDrivers: (dir) => drivers.forget(dir) };
+module.exports = { run, json, git, READONLY_GIT, SAFE_GIT_ENV, forgetGitDrivers: (dir) => drivers.forget(dir), configEntries: (dir, keys) => drivers.configEntries(dir, keys) };
