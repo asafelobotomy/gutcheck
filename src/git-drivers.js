@@ -18,12 +18,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const KEYS = '^((filter|diff)\\..+\\.(clean|smudge|process|textconv|command|required)|extensions\\.partialclone|remote\\..+\\.promisor|lfs\\.extension\\..+\\.(clean|smudge)|lfs\\.customtransfer\\..+\\.path|lfs\\.standalonetransferagent|include\\.path|includeif\\..+\\.path)$';
+const KEYS = '^((filter|diff)\\..+\\.(clean|smudge|process|textconv|command|required)|extensions\\.partialclone|remote\\..+\\.promisor|lfs\\.extension\\..+\\.(clean|smudge)|lfs\\.customtransfer\\..+\\.path|lfs\\.standalonetransferagent|lfs\\.storage|include\\.path|includeif\\..+\\.path)$';
 const DRIVER_RE = /^(filter|diff)\.(.+)\.(clean|smudge|process|textconv|command|required)$/;
 // git-lfs, run as a trusted global filter, reads the repo's config too and runs the programs these
-// name (an extension's clean/smudge, a custom transfer agent). Blanked like drivers; git-lfs then
+// name (an extension's clean/smudge, a custom transfer agent), and lfs.storage would make its
+// clean filter write objects outside the repo (blank: back to .git/lfs/objects). Blanked like drivers; git-lfs then
 // refuses the file, so the git call fails rather than run them. A tracked .lfsconfig cannot set them.
-const LFS_RE = /^lfs\.(extension\..+\.(clean|smudge)|customtransfer\..+\.path|standalonetransferagent)$/;
+const LFS_RE = /^lfs\.(extension\..+\.(clean|smudge)|customtransfer\..+\.path|standalonetransferagent|storage)$/;
 // A scan makes dozens of git calls per repo within a few seconds; 15 s covers one repo's scan.
 // The repo's config files, HEAD (for includeIf onbranch:) and every included file are watched
 // too, and scans and actions drop a repo's entry before they start (forget).

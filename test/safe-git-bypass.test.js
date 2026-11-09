@@ -184,3 +184,18 @@ test('a relative include is watched correctly when git runs from a subfolder', a
   assert.ok((await exec.git(['status', '--porcelain'], { cwd: sub })).ok);
   assert.equal(m.ran(), false, 'the newly included filter ran');
 });
+
+test('a repo lfs.storage outside the repo gets no objects from a scan', { skip: !hasLfs() && 'git-lfs is not installed' }, async () => {
+  execFileSync('git', ['lfs', 'install', '--skip-repo'], { cwd: ROOT, stdio: 'ignore' });
+  try {
+    const d = repo({ '.gitattributes': '*.bin filter=lfs diff=lfs merge=lfs -text\n' });
+    put(d, 'a.bin', 'x'.repeat(500));
+    sh(d, 'add', 'a.bin');
+    sh(d, 'commit', '-qm', 'lfs');
+    const outside = fresh('lfs-elsewhere');
+    sh(d, 'config', 'lfs.storage', outside);
+    put(d, 'a.bin', 'z'.repeat(500));
+    await collectLocal(d, {});
+    assert.equal(fs.existsSync(outside), false, 'git-lfs wrote outside the repo');
+  } finally { fs.writeFileSync(GLOBAL, '[protocol "file"]\n\tallow = always\n'); }
+});
