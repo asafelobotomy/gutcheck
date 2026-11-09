@@ -8,7 +8,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const exec = require('./exec');
 const { plural, printable, sq } = require('./util');
-const { ADAPTERS, TOOL_INFO } = require('./vault-adapters');
+const { ADAPTERS, TOOL_INFO, storeOf, targetKey } = require('./vault-adapters');
 const { findRepoSecrets, findWorkspaceSecrets, findHomeSecrets } = require('./secrets');
 const { createRecord, statusOf, secretAdvice } = require('./secret-status');
 const { scrub, findBin, containing, safePath, readPlanned } = require('./secrets-io');
@@ -167,14 +167,18 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     const fresh = await scan(ws);
     const rec = record.load();
     // Entries this link wrote: same tool and target. A named item (pass, gopass, KeePassXC) keeps its name.
-    const ours = (e) => !!e && typeof e === 'object' && e.tool === l.tool && JSON.stringify(e.target == null ? '' : e.target) === JSON.stringify(l.target == null ? '' : l.target);
+    // Targets are compared normalised, so relinking "" as "gutcheck" (or group "g" as "g/") keeps ownership.
+    const ours = (e) => !!e && typeof e === 'object' && e.tool === l.tool && targetKey(e.tool, e.target) === targetKey(l.tool, l.target);
     // One vault item per key (the title, or the pass/gopass name or KeePassXC entry): insert -f and
     // attachment-import -f would overwrite an item another file owns. A file whose key is taken is
     // left out of this plan, with a "skipped:" warning; the rest go ahead.
     const keyOf = (e) => e.key || (l.a.named ? e.itemId : e.title);
+    // Owners by the item they hold. A named tool's key is the full name (folder or group included), so
+    // every entry of the tool in the same store counts, whatever target it was saved under.
+    const inStore = (e) => (l.a.named ? !!e && typeof e === 'object' && e.tool === l.tool && storeOf(e.tool, e.target) === storeOf(l.tool, l.target) : ours(e));
     const byKey = new Map(); // key -> [{ real, e }]
     for (const [real, e] of Object.entries(rec.entries)) {
-      if (!ours(e)) continue;
+      if (!inStore(e)) continue;
       if (!byKey.has(keyOf(e))) byKey.set(keyOf(e), []);
       byKey.get(keyOf(e)).push({ real, e });
     }

@@ -135,3 +135,30 @@ test('names: an old-format name for a repo named root never meets the new root .
   assert.deepEqual(p.display.map((d) => d.text.split('  ←')[0]), ['pass insert -m -f gutcheck/root/.env', 'pass insert -m -f gutcheck/@root/.env']);
   assert.deepEqual(p.warnings, []);
 });
+
+test('owners: relinking to an equivalent target still never overwrites a gone owner\'s backup', async () => {
+  const { tmp, ws, envPath, mkCtl, dataDir } = setup();
+  const gone = path.join(tmp, 'gone', 'api', '.env'); // the file this name was saved from, no longer found
+  const base = { sha256: 'old', title: 'gutcheck: repo api/.env', at: '2026-11-01T00:00:00.000Z' };
+  const ctl = mkCtl({ run: okRun() });
+  for (const t of ['gutcheck', '/gutcheck/']) {
+    writeRecord(dataDir, { [gone]: { ...base, tool: 'pass', target: '', itemId: 'gutcheck/@repo/api/.env', key: 'gutcheck/@repo/api/.env' } });
+    ctl.link({ tool: 'pass', target: t });
+    const p = await ctl.plan([envPath], { via: 'app', ...ws });
+    assert.ok(p.ok, p.error);
+    assert.equal(p.display[0].text.split('  ←')[0], `pass insert -m -f gutcheck/@repo/api/.env${tag(envPath)}`, t);
+    assert.equal(p.warnings.length, 1, t);
+  }
+  writeRecord(dataDir, { [gone]: { ...base, tool: 'keepassxc', target: { db: '/d.kdbx', keyFile: '/k', group: 'g' }, itemId: 'g/@repo%2Fapi%2F.env', key: 'g/@repo%2Fapi%2F.env' } });
+  ctl.link({ tool: 'keepassxc', target: { db: '/d.kdbx', keyFile: '/k', group: 'g/' } });
+  const k = await ctl.plan([envPath], { via: 'app', ...ws });
+  assert.ok(k.ok, k.error);
+  assert.deepEqual(k.display.map((d) => d.text.split('  ←')[0]), [
+    `keepassxc-cli add --no-password -k /k /d.kdbx g/@repo%2Fapi%2F.env${tag(envPath)}`,
+    `keepassxc-cli attachment-import --no-password -k /k /d.kdbx g/@repo%2Fapi%2F.env${tag(envPath)} .env /dev/stdin`]);
+  // Another database is another store: the same entry name there is no clash.
+  ctl.link({ tool: 'keepassxc', target: { db: '/other.kdbx', keyFile: '/k', group: 'g' } });
+  const o = await ctl.plan([envPath], { via: 'app', ...ws });
+  assert.ok(o.ok, o.error);
+  assert.deepEqual(o.warnings, []);
+});

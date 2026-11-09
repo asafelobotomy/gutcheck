@@ -99,6 +99,8 @@ async function findRepoSecrets(dir, { name, problems = null, maxBuffer = LS_MAX_
   const repo = typeof name === 'string' && name ? name : path.basename(dir);
   const found = new Map(); // real path -> candidate
   const budget = { seen: 0 };
+  const dirs = new Map(); // folder -> its git dir, once per scan
+  const gitDirOf = (d) => { if (!dirs.has(d)) dirs.set(d, gitDir(d)); return dirs.get(d); };
 
   // root: this checkout's folder; prefix: its path under the top repo ('' or 'libs/sub/');
   // gitDirs: the git dirs of this checkout and the ones around it.
@@ -114,7 +116,7 @@ async function findRepoSecrets(dir, { name, problems = null, maxBuffer = LS_MAX_
     // there, so this one never reports them (they are scanned as that repo's own). A checkout whose git
     // dir is this one's (or an outer one's) is just a folder of it.
     const nested = new Map(); // rel folder -> boolean
-    const otherRepo = async (abs) => await isCheckout(abs) && !gitDirs.has(await gitDir(abs));
+    const otherRepo = async (abs) => await isCheckout(abs) && !gitDirs.has(await gitDirOf(abs));
     const isNested = async (relDir) => {
       if (!nested.has(relDir)) nested.set(relDir, gitlinks.has(relDir) || await otherRepo(path.join(root, relDir)));
       return nested.get(relDir);
@@ -147,7 +149,7 @@ async function findRepoSecrets(dir, { name, problems = null, maxBuffer = LS_MAX_
           if (depth >= MAX_DEPTH || NO_DESCEND.has(e.name)) continue;
           if (!await isNested(rel)) await walk(abs, depth + 1, rel + '/');
           else if (await isCheckout(abs)) { // a gitlink with no checkout is empty
-            const own = await gitDir(abs);
+            const own = await gitDirOf(abs);
             if (own && gitDirs.has(own)) continue; // a gitlink folder pointing back at an outer git dir
             await scanCheckout(abs, `${prefix}${rel}/`, depth + 1, own ? new Set([...gitDirs, own]) : gitDirs);
           }
@@ -159,7 +161,7 @@ async function findRepoSecrets(dir, { name, problems = null, maxBuffer = LS_MAX_
     await walk(root, depth0, '');
   }
 
-  const own = await gitDir(top);
+  const own = await gitDirOf(top);
   await scanCheckout(top, '', 0, new Set(own ? [own] : []));
   return [...found.values()];
 }

@@ -188,6 +188,22 @@ const gopass = passLike('gopass', 'gopass', ['-f'], {
   parseList: (o) => { const ls = nameLines(o); return ls ? new Set(ls) : null; },
 });
 
+// Where a tool's items live, in a comparable form: two links with equal stores share item names.
+// pass and gopass: one store (the subfolder is part of each name); KeePassXC: the database's real path.
+function storeOf(tool, t) {
+  if (tool === 'pass' || tool === 'gopass') return '';
+  if (tool !== 'keepassxc') return JSON.stringify(t == null ? '' : t);
+  let db = t && typeof t === 'object' ? String(t.db || '') : '';
+  try { db = fs.realpathSync(db); } catch { /* a missing database keeps its path */ }
+  return db;
+}
+// A link's target, normalised: "", "gutcheck" and "/gutcheck/" are one pass folder, "g" and "g/" one group.
+function targetKey(tool, t) {
+  if (tool === 'pass' || tool === 'gopass') return String(t || '').replace(/^\/+|\/+$/g, '') || 'gutcheck';
+  if (tool === 'keepassxc') return JSON.stringify([storeOf(tool, t), String((t && t.group) || 'gutcheck').replace(/\/+$/, '')]);
+  return storeOf(tool, t);
+}
+
 const ADAPTERS = { proton, '1password': onepassword, bitwarden, keepassxc, pass, gopass };
 
-module.exports = { ADAPTERS, TOOL_INFO, BW_NOTE_MAX, slug, textOf };
+module.exports = { storeOf, targetKey, ADAPTERS, TOOL_INFO, BW_NOTE_MAX, slug, textOf };
