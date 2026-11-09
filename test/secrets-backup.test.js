@@ -115,7 +115,8 @@ test('KeePassXC: a changed file is re-backed up with attachment-import -f onto i
   ctl.link({ tool: 'keepassxc', target: { db: '/h/v.kdbx', keyFile: '/h/v.keyx', group: 'gutcheck' } });
   const p = await ctl.plan([envPath], { via: 'app', ...ws });
   assert.ok((await ctl.apply(p.token, { via: 'app' })).ok);
-  const saves = () => calls.filter((c) => c.args[0] !== 'ls').map((c) => c.args);
+  // attachment-import reads /dev/stdin, so it runs as: /bin/sh -c 'cat | exec "$0" "$@"' <bin> <args>
+  const saves = () => calls.filter((c) => c.args[0] !== 'ls').map((c) => (c.cmd === '/bin/sh' ? c.args.slice(3) : c.args));
   assert.deepEqual(saves().map((a) => a[0]), ['add', 'attachment-import']);
   const entry = record().entries[envPath].itemId;
   assert.equal(entry, 'gutcheck/api%2F.env');

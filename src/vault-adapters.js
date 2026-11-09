@@ -63,7 +63,7 @@ const proton = make('proton', 'pass-cli', 'Vault name', {
     const parseId = (o) => { const t = String(o || '').trim(); return ID_RE.test(t) ? t : null; };
     if (cand.kind === 'ssh') {
       return { key: cand.title, args: ['item', 'create', 'ssh-key', 'import', '--from-private-key', '/dev/stdin', '--title', cand.title, '--vault-name', vault],
-        encode: (buf) => buf, parseId };
+        encode: (buf) => buf, stdinPath: true, parseId };
     }
     return { key: cand.title, args: ['item', 'create', 'note', '--vault-name', vault, '--from-template', '-'],
       encode: (buf) => JSON.stringify({ title: cand.title, note: textOf(buf), extra_fields: [] }), parseId };
@@ -132,7 +132,7 @@ const keepassxc = make('keepassxc', 'keepassxc-cli', 'Path to the .kdbx file, it
   saveCmd(cand, t, { update = false, itemId = null } = {}) {
     const entry = update && itemId ? itemId : kpEntry(cand, t);
     const [noPw, k, key, db] = kpBase(t);
-    const imp = { args: ['attachment-import', ...(update ? ['-f'] : []), noPw, k, key, db, entry, baseName(cand.rel), '/dev/stdin'], stdin: true, encode: (buf) => buf };
+    const imp = { args: ['attachment-import', ...(update ? ['-f'] : []), noPw, k, key, db, entry, baseName(cand.rel), '/dev/stdin'], stdin: true, stdinPath: true, encode: (buf) => buf };
     return { key: entry, steps: update ? [imp] : [{ args: ['add', noPw, k, key, db, entry] }, imp], parseId: () => entry };
   },
   listCmd: (t) => ({ args: ['ls', '-R', '-f', ...kpBase(t), (t.group || 'gutcheck').replace(/\/+$/, '')] }),

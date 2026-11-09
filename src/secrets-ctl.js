@@ -46,6 +46,15 @@ function checkTarget(tool, t) {
   return isText(s) && s.trim() ? { ok: true, target: s } : { ok: false };
 }
 
+// A step that opens a path (/dev/stdin) cannot read Node's stdin, which is a socket, not a pipe
+// (opening it fails with ENXIO). `cat` into the vault CLI gives it a real pipe. The checked absolute
+// bin is $0 and the arguments follow, so nothing is interpolated into the script; the secret is stdin only.
+const PIPE_SH = '/bin/sh';
+function pipeCall(bin, args) {
+  if (!fs.existsSync(PIPE_SH)) return { error: `${PIPE_SH} is missing, so this step cannot run.` };
+  return { cmd: PIPE_SH, args: ['-c', 'cat | exec "$0" "$@"', bin, ...args] };
+}
+
 function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env, home = os.homedir(), audit = () => {} }) {
   const record = createRecord(path.join(dataDir, 'secret-backups.json'));
   const plans = new Map();
@@ -210,7 +219,9 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
       if (step.encode) {
         try { input = step.encode(buf); } catch (e) { return fail(String((e && e.message) || 'Could not prepare the file for the password manager.').slice(0, 300)); }
       }
-      r = await run(p.bin, step.args, opts(input, p.ws));
+      const call = step.stdinPath ? pipeCall(p.bin, step.args) : { cmd: p.bin, args: step.args };
+      if (call.error) return fail(call.error);
+      r = await run(call.cmd, call.args, opts(input, p.ws));
       if (!r || !r.ok) return fail(failText(r || { code: null, stderr: '' }, l, buf, input));
     }
     const itemId = it.save.parseId(r.stdout);
@@ -311,4 +322,4 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
   return { tools, link, test, scan, plan, apply, verify, skip, unskip, PLAN_TTL };
 }
 
-module.exports = { createSecretsCtl, scrub, findBin, repoLabel, PLAN_TTL, MCP_REFUSAL, SCAN_FIRST };
+module.exports = { createSecretsCtl, scrub, pipeCall, findBin, repoLabel, PLAN_TTL, MCP_REFUSAL, SCAN_FIRST };
