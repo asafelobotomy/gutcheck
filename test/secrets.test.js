@@ -57,3 +57,151 @@ test('readHead reads only the first bytes', async () => {
     assert.ok(P.MAX_SECRET_BYTES > 0);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ---- discovery (src/secrets.js) ----
+const S = require('../src/secrets');
+const sh = (dir, ...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+const put = (dir, rel, content = 'x') => {
+  fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+  fs.writeFileSync(path.join(dir, rel), content);
+};
+const tmp = (n) => fs.mkdtempSync(path.join(os.tmpdir(), `gutcheck-${n}-`));
+const repo = () => {
+  const dir = tmp('secrets');
+  sh(dir, 'init', '-q', '-b', 'main');
+  sh(dir, 'config', 'user.name', 'T');
+  sh(dir, 'config', 'user.email', 't@e.com');
+  return dir;
+};
+const keygen = (file) => execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', file]);
+const OPENSSH = '-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n';
+
+test('repo: ignored and untracked secrets found; committed, template, big and node_modules skipped', async () => {
+  const dir = repo();
+  try {
+    put(dir, '.gitignore', '.env\n');
+    put(dir, '.env', 'A=1');
+    put(dir, '.env.example', 'A=');
+    put(dir, 'server.key', 'k');
+    sh(dir, 'add', '-A');
+    sh(dir, 'commit', '-qm', 'first');
+    put(dir, 'config/.env.local', 'B=2');
+    put(dir, 'node_modules/x/.env', 'C=3');
+    fs.writeFileSync(path.join(dir, 'big.pem'), Buffer.alloc(1024 * 1024 + 1, 'a'));
+    put(dir, 'test/fixtures/id_rsa', OPENSSH);
+    const c = await S.findRepoSecrets(dir);
+    assert.deepEqual(c.map((x) => x.rel).sort(), ['.env', 'config/.env.local', 'test/fixtures/id_rsa']);
+    assert.equal(c.find((x) => x.rel === 'test/fixtures/id_rsa').confidence, 'low');
+    assert.equal(c.find((x) => x.rel === '.env').confidence, 'high');
+    assert.match(c[0].sha256, /^[0-9a-f]{64}$/);
+    assert.equal(c.find((x) => x.rel === '.env').title, `gutcheck: ${path.basename(dir)}/.env`);
+    assert.equal(c.find((x) => x.rel === '.env').repo, path.basename(dir));
+    assert.equal(c.find((x) => x.rel === '.env').kind, 'file');
+    assert.equal(c.find((x) => x.rel === 'test/fixtures/id_rsa').kind, 'ssh');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('repo: a symlinked secret is reported once by its real path', async () => {
+  const dir = repo();
+  try {
+    put(dir, '.gitignore', '.env\n');
+    put(dir, 'shared/.env', 'A=1');
+    fs.mkdirSync(path.join(dir, 'app'));
+    fs.symlinkSync('../shared/.env', path.join(dir, 'app/.env'));
+    sh(dir, 'add', '.gitignore');
+    sh(dir, 'commit', '-qm', 'first');
+    const c = await S.findRepoSecrets(dir);
+    assert.equal(c.filter((x) => x.real.endsWith('shared/.env')).length, 1);
+    assert.equal(c.length, 1);
+    assert.ok(c.every((x) => x.abs === x.real));
+    assert.equal(c[0].rel, 'shared/.env');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('repo: a symlink to a tracked file or to outside the repo is dropped', async () => {
+  const dir = repo();
+  const outside = tmp('outside');
+  try {
+    put(dir, 'tracked.key', 'k');
+    sh(dir, 'add', '-A');
+    sh(dir, 'commit', '-qm', 'first');
+    put(outside, 'x.env', 'A=1');
+    fs.symlinkSync('tracked.key', path.join(dir, 'link.key'));
+    fs.symlinkSync(path.join(outside, 'x.env'), path.join(dir, '.env'));
+    assert.deepEqual(await S.findRepoSecrets(dir), []);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
+});
+
+test('workspace: loose .env files only, not templates or other files', async () => {
+  const root = tmp('ws');
+  try {
+    put(root, '.env', 'A=1');
+    put(root, '.env.example', 'A=');
+    put(root, 'server.key', 'k');
+    const c = await S.findWorkspaceSecrets(root);
+    assert.deepEqual(c.map((x) => x.title), ['gutcheck: workspace/.env']);
+    assert.equal(c[0].scope, 'workspace');
+    assert.equal(c[0].repo, null);
+    assert.deepEqual(await S.findWorkspaceSecrets('/nonexistent-gc'), []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('home: fixed list only, content-gated, unreadable files skipped', async () => {
+  const home = tmp('home');
+  try {
+    fs.mkdirSync(path.join(home, '.ssh'));
+    keygen(path.join(home, '.ssh/id_ed25519'));
+    put(home, '.ssh/known_hosts', 'host ssh-ed25519 AAAA');
+    put(home, '.ssh/config', 'Host *\n');
+    put(home, '.npmrc', '# registry=x\nregistry=https://r.example\n');
+    put(home, '.pypirc', '[pypi]\n');
+    put(home, '.docker/config.json', '{"auths":{}}');
+    put(home, '.aws/credentials', '[default]\n');
+    fs.chmodSync(path.join(home, '.aws/credentials'), 0);
+    const c = await S.findHomeSecrets({ home, env: {} });
+    const want = ['gutcheck: ~/.pypirc', 'gutcheck: ~/.ssh/id_ed25519'];
+    if (process.getuid && process.getuid() === 0) want.unshift('gutcheck: ~/.aws/credentials');
+    assert.deepEqual(c.map((x) => x.title).sort(), want.sort());
+    const k = c.find((x) => x.kind === 'ssh');
+    assert.equal(k.fingerprint.startsWith('SHA256:'), true);
+    assert.equal(k.keyType, 'ssh-ed25519');
+    assert.equal(k.scope, 'home');
+    assert.equal(k.repo, null);
+  } finally { fs.chmodSync(path.join(home, '.aws/credentials'), 0o600); fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test('home: .npmrc with _authToken and docker auths with auth are found', async () => {
+  const home = tmp('home');
+  try {
+    put(home, '.npmrc', '//registry.npmjs.org/:_authToken=abc\n');
+    put(home, '.docker/config.json', '{"auths":{"ghcr.io":{"auth":"eHg="}}}');
+    put(home, '.config/gcloud/application_default_credentials.json', '{}');
+    put(home, '.android/debug.keystore', 'k');
+    const c = await S.findHomeSecrets({ home, env: {} });
+    assert.deepEqual(c.map((x) => x.title).sort(), [
+      'gutcheck: ~/.android/debug.keystore', 'gutcheck: ~/.config/gcloud/application_default_credentials.json',
+      'gutcheck: ~/.docker/config.json', 'gutcheck: ~/.npmrc']);
+    // XDG_CONFIG_HOME moves the gcloud lookup
+    const x = await S.findHomeSecrets({ home, env: { XDG_CONFIG_HOME: path.join(home, 'nowhere') } });
+    assert.ok(!x.some((i) => /gcloud/.test(i.title)));
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test('home: gnupg private-keys folder is one entry whose hash changes with its keys', async () => {
+  const home = tmp('home');
+  try {
+    fs.mkdirSync(path.join(home, '.gnupg/private-keys-v1.d'), { recursive: true });
+    assert.deepEqual(await S.findHomeSecrets({ home, env: {} }), []);
+    put(home, '.gnupg/private-keys-v1.d/a.key', 'one');
+    const a = (await S.findHomeSecrets({ home, env: {} }))[0];
+    assert.equal(a.title, 'gutcheck: ~/.gnupg/private-keys-v1.d');
+    assert.equal(a.kind, 'file');
+    put(home, '.gnupg/private-keys-v1.d/b.key', 'two');
+    const b = (await S.findHomeSecrets({ home, env: {} }))[0];
+    assert.notEqual(a.sha256, b.sha256);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test('home: a missing HOME returns []', async () => {
+  assert.deepEqual(await S.findHomeSecrets({ home: '/nonexistent-gc', env: {} }), []);
+});
