@@ -17,7 +17,7 @@ function renderOverview() {
       const bulk = g.fixes.every((f) => f && BULKABLE.has(f.action.type)) && g.fixes.length > 1;
       return h('div', { class: 'rec' }, h('span', { class: 'n ' + sevClass(g.sev) }, g.repos.length),
         h('div', { class: 'grow' }, h('div', {}, `${g.title}  `, h('span', { class: 'pill' }, g.cat)), h('div', { class: 'repos' }, g.repos.join(', '))),
-        bulk ? btn(`Fix all ${g.fixes.length}…`, () => runActions(g.fixes, { ask: false })) : null);
+        bulk ? btn(`Fix all ${g.fixes.length}…`, () => runActions(g.fixes, { ask: false, hold: FixAll.automatic })) : null);
     }));
 }
 

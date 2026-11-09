@@ -253,9 +253,11 @@ function createEngine(opts = {}) {
     }
     const plans = resolved.length ? await service.planActions(resolved.map(({ dir, action }) => ({ dir, action }))) : [];
     const pub = (p) => (p.ok ? { ok: true, token: p.token, repo: p.repoName, title: p.title, risk: p.risk, commands: p.display.map((d) => d.text), warnings: p.warnings, undo: p.undo, note: p.note, confirmName: p.confirmName, ...(p.runsRepoCode ? { runsRepoCode: true } : {}) } : p);
-    // Fix all never runs the repo's own hooks or drivers on its own: those plans come back in `held`.
+    // Fix all never runs the repo's own hooks or drivers on its own: those plans come back in `held`,
+    // without a token, so a caller cannot apply them from this answer. Planning the one action
+    // explicitly ({ repo, action }) still returns a token, with the warning.
     const isHeld = (p, k) => resolved[k].all && p.ok && !FixAll.automatic(p);
-    const held = plans.filter(isHeld).map(pub);
+    const held = plans.filter(isHeld).map((p) => { const { token, ...rest } = pub(p); return { ...rest, note: 'This runs the repo\'s own code: ask the user to run this in the GutCheck app or CLI.' }; });
     return { ok: true, plans: [...plans.filter((p, k) => !isHeld(p, k)).map(pub), ...errors], ...(held.length ? { held } : {}), ...(decisions.length ? { decisions } : {}) };
   }
 

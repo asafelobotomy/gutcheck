@@ -142,7 +142,7 @@ async function runActions(items, { ask = true, lead = [], hold = null } = {}) {
   const plans = await window.api.planActions(items.map((i) => ({ dir: i.repo.path, action: stripUi(i.action) })));
   const bad = plans.filter((p) => !p.ok);
   const good = plans.filter((p) => p.ok);
-  if (bad.length && !good.length) return toast(bad.map((p) => (p.repoName ? p.repoName + ': ' : '') + p.error).join('\n'), 'bad');
+  if (bad.length && !good.length) return toast(bad.map((p) => (p.repoName ? p.repoName + ': ' : '') + p.error).join('\n'), bad.every((p) => p.nothing) ? '' : 'bad');
   if (bad.length) toast(`Could not plan ${bad.length} change${bad.length === 1 ? '' : 's'}:\n` + bad.map((p) => `${p.repoName || '?'}: ${p.error}`).join('\n'));
   const chosen = await confirmPlans(good, { lead, hold });
   if (!chosen || !chosen.length) return;
@@ -258,7 +258,7 @@ function renderRepo() {
   const fixable = all.actions.length + all.decisions.length;
   if (fixable) mk(`Fix all issues (${fixable})…`, () => fixAllIssues(r, all)).classList.add('primary');
   mk('Rescan', async (b) => { b.disabled = true; await refreshOne(r.path); });
-  mk('Fetch & prune', actOn(r, 'fetch'));
+  if (!r.git || !Array.isArray(r.git.remotes) || r.git.remotes.length) mk('Fetch & prune', actOn(r, 'fetch'));
   mk('Open folder', () => window.api.openFolder(r.path));
   if (r.remote) mk('Open on GitHub ↗', () => window.api.openUrl(r.remote.url));
   toolbar.append(copyButton(r.path, r.name));
