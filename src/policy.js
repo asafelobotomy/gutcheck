@@ -7,8 +7,12 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { canRepoIgnore, MIN_PREFIX, wildcardOk, SHORT_WHY, FROM_REPO } = require('./ignore-rules');
 
 const MAX_REASON = 300;
+const VIA = new Set(['cli', 'app', 'mcp']);
+// Who wrote a rule: anything but cli or app (another case, an unknown tool, a missing field) counts as an agent.
+const viaOf = (v) => (v == null ? undefined : VIA.has(v) ? v : 'mcp');
 const ID_RE = /^[A-Za-z0-9][\w.:/-]{0,120}\*?$/; // a finding id, or a prefix ending in * (pr-stale-*)
 
 const readJSON = (f) => { try { const v = JSON.parse(fs.readFileSync(f, 'utf8')); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
@@ -17,14 +21,16 @@ const writeJSON = (f, v) => { fs.writeFileSync(f + '.tmp', JSON.stringify(v, nul
 // The key ignores are stored under: owner/name for GitHub repos (stable across clones), else the folder name.
 const repoKey = (r) => (r.remote && r.remote.owner && !r.remote.unreachable ? `${r.remote.owner}/${r.remote.name}` : r.ref ? `${r.ref.owner}/${r.ref.name}` : path.basename(r.path || r.dir || ''));
 
-// Repo-local rules: .gutcheck.json { "ignore": { "<id>": "<reason>" } }. Read as data only.
+// Repo-local rules: .gutcheck.json { "ignore": { "<id>": "<reason>" } }. Read as data only: whoever
+// controls the repo writes them, so a wildcard needs 4 characters before its * and applyPolicy never
+// lets them hide a security or error finding (ignore-rules.js).
 function repoPolicy(dir) {
   const v = readJSON(path.join(dir, '.gutcheck.json'));
-  return v && v.ignore && typeof v.ignore === 'object' ? { ignore: clean(v.ignore) } : null;
+  return v && v.ignore && typeof v.ignore === 'object' ? { ignore: clean(v.ignore, MIN_PREFIX.repo) } : null;
 }
-function clean(map) {
+function clean(map, minPrefix = 0) {
   const out = {};
-  for (const [id, reason] of Object.entries(map || {})) if (ID_RE.test(id)) out[id] = String(typeof reason === 'string' ? reason : (reason && reason.reason) || '').slice(0, MAX_REASON);
+  for (const [id, reason] of Object.entries(map || {})) if (ID_RE.test(id) && wildcardOk(id, minPrefix)) out[id] = String(typeof reason === 'string' ? reason : (reason && reason.reason) || '').slice(0, MAX_REASON);
   return out;
 }
 
@@ -91,19 +97,24 @@ function driftOf(s, baseline, key) {
 function createPolicyStore(dir) {
   const ignoreFile = path.join(dir, 'ignores.json');
   const baselineFile = path.join(dir, 'baseline.json');
-  const loadIgnores = () => { const v = readJSON(ignoreFile) || {}; const out = {}; for (const [k, m] of Object.entries(v)) if (m && typeof m === 'object') out[k] = clean(m); return out; };
-  function setIgnore(key, id, reason) {
+  // ignores.json: { "<owner/name or *>": { "<id>": { reason, via } } }, via = who wrote it (cli, app or mcp).
+  // Files from before via was stored hold the reason as a plain string; those read as the user's.
+  const readRaw = () => { const v = readJSON(ignoreFile) || {}; const out = {}; for (const [k, m] of Object.entries(v)) if (m && typeof m === 'object' && !Array.isArray(m)) out[k] = m; return out; };
+  const loadIgnores = () => Object.fromEntries(Object.entries(readRaw()).map(([k, m]) => [k, clean(m)]));
+  const loadVia = () => Object.fromEntries(Object.entries(readRaw()).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).filter(([, v]) => v && typeof v === 'object').map(([id, v]) => [id, viaOf(v.via) || 'mcp']))]));
+  function setIgnore(key, id, reason, via = 'cli') {
     if (typeof key !== 'string' || !key || !ID_RE.test(String(id || ''))) return { ok: false, error: 'Name a repo and a finding id (a trailing * ignores every id that starts with it).' };
+    if (!wildcardOk(id, MIN_PREFIX.user)) return { ok: false, error: `An ignore needs at least ${MIN_PREFIX.user} characters before the *.` };
     const why = String(reason || '').trim().slice(0, MAX_REASON);
     if (!why) return { ok: false, error: 'Give a reason: it is shown wherever the finding would have been.' };
-    const all = loadIgnores();
-    all[key] = { ...(all[key] || {}), [id]: why };
+    const all = readRaw();
+    all[key] = { ...(all[key] || {}), [id]: { reason: why, via: VIA.has(via) ? via : 'cli' } };
     writeJSON(ignoreFile, all);
     return { ok: true, key, id, reason: why };
   }
   function removeIgnore(key, id) {
-    const all = loadIgnores();
-    if (!all[key] || !(id in all[key])) return { ok: false, error: `"${id}" is not ignored in GutCheck's settings for ${key}${key === '*' ? '' : ' (it may come from the repo\'s .gutcheck.json)'}.` };
+    const all = readRaw();
+    if (!all[key] || !(id in (loadIgnores()[key] || {}))) return { ok: false, error: `"${id}" is not ignored in GutCheck's settings for ${key}${key === '*' ? '' : ' (it may come from the repo\'s .gutcheck.json)'}.` };
     delete all[key][id];
     if (!Object.keys(all[key]).length) delete all[key];
     writeJSON(ignoreFile, all);
@@ -115,17 +126,18 @@ function createPolicyStore(dir) {
     writeJSON(baselineFile, DEFAULT_BASELINE);
     return { ok: true, file: baselineFile, created: true };
   }
-  return { load: () => ({ ignores: loadIgnores(), baseline: loadBaseline() }), setIgnore, removeIgnore, initBaseline, ignoreFile, baselineFile };
+  return { load: () => ({ ignores: loadIgnores(), ignoreVia: loadVia(), baseline: loadBaseline() }), setIgnore, removeIgnore, initBaseline, ignoreFile, baselineFile };
 }
 
 // Apply the policy to a scored result (mutates and returns it). score(findings) recomputes the score.
 function applyPolicy(res, policy, score) {
   if (!res || res.error || !policy) return res;
   const key = repoKey(res);
+  const user = (k, from) => Object.entries((policy.ignores || {})[k] || {}).filter(([id]) => wildcardOk(id, MIN_PREFIX.user)).map(([id, reason]) => ({ id, reason, from, via: viaOf(((policy.ignoreVia || {})[k] || {})[id]) }));
   const rules = [
-    ...Object.entries((policy.ignores || {})['*'] || {}).map(([id, reason]) => ({ id, reason, from: 'all repos' })),
-    ...Object.entries((policy.ignores || {})[key] || {}).map(([id, reason]) => ({ id, reason, from: 'GutCheck' })),
-    ...Object.entries((res.repoPolicy && res.repoPolicy.ignore) || {}).map(([id, reason]) => ({ id, reason, from: '.gutcheck.json' })),
+    ...user('*', 'all repos'),
+    ...user(key, 'GutCheck'),
+    ...Object.entries((res.repoPolicy && res.repoPolicy.ignore) || {}).filter(([id]) => wildcardOk(id, MIN_PREFIX.repo)).map(([id, reason]) => ({ id, reason, from: FROM_REPO })),
   ];
   let findings = res.findings;
   if (policy.baseline) {
@@ -137,13 +149,18 @@ function applyPolicy(res, policy, score) {
   const ignored = [];
   const kept = [];
   for (const f of findings) {
-    const rule = rules.find((r) => matches(r.id, f.id));
-    if (rule) ignored.push({ ...f, ignoredBecause: rule.reason, ignoredIn: rule.from, ignoreRule: rule.id }); else kept.push(f);
+    // Rules from the repo's .gutcheck.json or written by an AI agent never hide errors or security findings.
+    const rule = rules.find((r) => matches(r.id, f.id) && ((r.from !== FROM_REPO && r.via !== 'mcp') || canRepoIgnore(f)));
+    if (rule) ignored.push({ ...f, ignoredBecause: rule.reason, ignoredIn: rule.from, ignoreRule: rule.id, ...(rule.via ? { ignoredVia: rule.via } : {}) }); else kept.push(f);
   }
   res.ignoreKey = key;
   res.ignored = ignored;
   return Object.assign(res, score(kept));
 }
+
+// The user's rules that are stored but not applied (a * with too few characters before it, from an older
+// version), so they can be fixed or removed: [{ key, id, reason, why }].
+const inactiveIgnores = (ignores) => Object.entries(ignores || {}).flatMap(([key, m]) => Object.entries(m).filter(([id]) => !wildcardOk(id, MIN_PREFIX.user)).map(([id, reason]) => ({ key, id, reason, why: SHORT_WHY })));
 
 // Workspace-wide drift table: per rule, which repos have it and which do not.
 function driftReport(results, baseline) {
@@ -160,4 +177,4 @@ function driftReport(results, baseline) {
   });
 }
 
-module.exports = { RULES, DEFAULT_BASELINE, normalizeBaseline, driftOf, driftReport, applyPolicy, createPolicyStore, repoPolicy, repoKey, matches };
+module.exports = { inactiveIgnores, RULES, DEFAULT_BASELINE, normalizeBaseline, driftOf, driftReport, applyPolicy, createPolicyStore, repoPolicy, repoKey, matches };

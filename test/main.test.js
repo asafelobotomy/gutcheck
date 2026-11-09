@@ -168,3 +168,13 @@ test('secrets: every channel is registered; Read-only blocks the ones that write
   assert.ok(Array.isArray(await call('secrets:tools')), 'still readable in Read-only mode');
   assert.equal((await call('settings:get')).vault, undefined, 'nothing was linked');
 });
+
+test('ignores and the baseline: Read-only refuses ignore:set and baseline:init and writes nothing', async () => {
+  const { call, userData } = load();
+  await call('settings:set', { readOnly: true });
+  const ro = { ok: false, error: 'Read-only mode is on.' };
+  assert.deepEqual(await call('ignore:set', { allRepos: true, id: 'no-*', reason: 'x' }), ro);
+  assert.deepEqual(await call('ignore:set', { allRepos: true, id: 'no-topics', remove: true }), ro);
+  assert.deepEqual(await call('baseline:init'), ro);
+  for (const f of ['ignores.json', 'baseline.json']) assert.ok(!fs.existsSync(path.join(userData, f)), f);
+});

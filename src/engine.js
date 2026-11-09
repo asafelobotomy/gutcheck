@@ -10,7 +10,8 @@ const { createSettingsStore } = require('./settings');
 const { appendAudit, readAudit } = require('./audit');
 const { expandHome } = require('./util');
 const { createWorkspaceScanner } = require('./workspace-scan');
-const { createPolicyStore, driftReport, repoKey } = require('./policy');
+const { createPolicyStore, driftReport, repoKey, inactiveIgnores } = require('./policy');
+const { ignoreView, agentIgnoreRefusal, wildcardOk, MIN_PREFIX } = require('./ignore-rules');
 const { createSeenStore } = require('./schedule');
 const FixAll = require('./renderer/fix-all');
 const { createSecretsCtl } = require('./secrets-ctl');
@@ -55,6 +56,8 @@ const ACTION_CATALOG = {
 };
 
 // opts: { allowActions: bool, env } . Without allowActions every plan is refused, whatever the app's switch says.
+const READ_ONLY = 'Read-only mode is on in the GutCheck app. The user can turn it off in the app header.';
+
 function createEngine(opts = {}) {
   const env = opts.env || process.env;
   const dir = dataDir(env);
@@ -157,7 +160,7 @@ function createEngine(opts = {}) {
     const x = resolve(repo);
     if (x.error) return { ok: false, error: x.error };
     const r = x.repo;
-    return { ok: true, ...summary(r), git: r.git, prs: r.prs, failedRuns: r.ci && r.ci.failed, findings: (r.findings || []).map((f) => finding(r, f)), ignored: (r.ignored || []).map((f) => ({ id: f.id, title: f.title, reason: f.ignoredBecause, from: f.ignoredIn })), drift: r.drift || undefined };
+    return { ok: true, ...summary(r), git: r.git, prs: r.prs, failedRuns: r.ci && r.ci.failed, findings: (r.findings || []).map((f) => finding(r, f)), ignored: (r.ignored || []).map(ignoreView), drift: r.drift || undefined };
   }
 
   async function report({ repo, onProgress } = {}) {
@@ -202,7 +205,7 @@ function createEngine(opts = {}) {
   // uses that finding's own suggested fix, so a caller can go straight from a finding to its plan.
   async function plan({ items, onProgress } = {}) {
     if (!allowActions) return { ok: false, error: OFF };
-    if (store.load().readOnly) return { ok: false, error: 'Read-only mode is on in the GutCheck app. The user can turn it off in the app header.' };
+    if (store.load().readOnly) return { ok: false, error: READ_ONLY };
     const s = await ensure({ onProgress });
     if (!s.ok) return s;
     if (!Array.isArray(items) || !items.length) return { ok: false, error: 'Pass items: [{ repo, action: { type, ... } } or { repo, finding }].' };
@@ -279,12 +282,17 @@ function createEngine(opts = {}) {
 
   // Ignore a finding with a reason (or stop ignoring it). Stored in GutCheck's data folder, logged.
   async function ignore({ repo, finding, reason, remove = false, allRepos = false, onProgress } = {}) {
+    if (store.load().readOnly) return { ok: false, error: READ_ONLY }; // ignores change scores and the report
     const s = await ensure({ onProgress });
     if (!s.ok) return s;
     let key = '*';
     let r = null;
     if (!allRepos) { const x = resolve(repo); if (x.error) return { ok: false, error: x.error }; r = x.repo; key = repoKey(r); }
-    const res = remove ? policy.removeIgnore(key, String(finding || '')) : policy.setIgnore(key, String(finding || ''), reason);
+    // An agent may not hide errors or security findings: only the user can, in the app or the CLI.
+    const scope = r ? [r] : [...known.values()].filter((x) => !x.error);
+    const refused = !remove && via === 'mcp' && wildcardOk(String(finding || ''), MIN_PREFIX.user) && agentIgnoreRefusal(String(finding || ''), scope.flatMap((x) => [...(x.findings || []), ...(x.ignored || [])]));
+    if (refused) return { ok: false, error: refused };
+    const res = remove ? policy.removeIgnore(key, String(finding || '')) : policy.setIgnore(key, String(finding || ''), reason, via);
     if (!res.ok) return res;
     appendAudit(auditFile, { ok: true, repo: r ? r.name : 'all repos', title: `${remove ? 'Stopped ignoring' : 'Ignored'} ${finding}${remove ? '' : `: ${res.reason}`}`, via: opts.via || 'cli' });
     if (r) await ws.refresh(r.path); else await ws.refreshAll(); // an ignore for every repo changes them all
@@ -294,14 +302,16 @@ function createEngine(opts = {}) {
   async function ignored({ onProgress } = {}) {
     const s = await ensure({ onProgress });
     if (!s.ok) return s;
-    return { ok: true, file: policy.ignoreFile, findings: [...known.values()].flatMap((r) => (r.ignored || []).map((f) => ({ repo: r.name, id: f.id, title: f.title, reason: f.ignoredBecause, from: f.ignoredIn, rule: f.ignoreRule }))) };
+    const inactive = inactiveIgnores(policy.load().ignores).map((x) => ({ repo: x.key === '*' ? 'every repo' : x.key, rule: x.id, reason: x.reason, why: x.why }));
+    return { ok: true, file: policy.ignoreFile, findings: [...known.values()].flatMap((r) => (r.ignored || []).map((f) => ({ repo: r.name, ...ignoreView(f), rule: f.ignoreRule }))), inactive };
   }
 
   // Baseline drift: per rule, the repos that do not meet it. init writes a starting baseline.json.
   async function drift({ init = false, onProgress } = {}) {
+    if (init && store.load().readOnly) return { ok: false, error: READ_ONLY };
     if (init) { const i = policy.initBaseline(); await ws.refreshAll(); return { ok: true, file: i.file, created: i.created }; }
     const b = policy.load().baseline;
-    if (!b) return { ok: true, file: policy.baselineFile, baseline: null, note: `No baseline yet. Run "gutcheck baseline init" (or pass init: true) to create ${policy.baselineFile}, then edit it.` };
+    if (!b) return { ok: true, file: policy.baselineFile, baseline: null, note: via === 'mcp' ? `No baseline yet. The user can create one in the GutCheck app (Baseline) or with "gutcheck baseline init", then edit ${policy.baselineFile}.` : `No baseline yet. Run "gutcheck baseline init" to create ${policy.baselineFile}, then edit it.` };
     const s = await ensure({ onProgress });
     if (!s.ok) return s;
     const results = [...known.values()];

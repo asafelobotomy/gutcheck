@@ -42,7 +42,7 @@ test('cli: ignore with a reason, list it, stop ignoring; drift after baseline in
     assert.equal(ig.code, 0, ig.err);
     assert.match(ig.out, /Ignoring no-remote in alpha: scratch repo only/);
     const list = await run(['ignored', '--root', root], env);
-    assert.match(list.out, /alpha: No GitHub remote {2}\[no-remote\]\n {4}scratch repo only {2}\(GutCheck\)/);
+    assert.match(list.out, /alpha: No GitHub remote {2}\[no-remote\]\n {4}Ignored by you \(GutCheck settings\): scratch repo only/);
     const f = JSON.parse((await run(['findings', '--repo', 'alpha', '--json', '--root', root], env)).out);
     assert.ok(!f.findings.some((x) => x.id === 'no-remote'), 'ignored findings are gone from findings');
     assert.equal((await run(['unignore', 'alpha', 'no-remote', '--root', root], env)).code, 0);
@@ -74,6 +74,6 @@ test('mcp engine: ignoring needs --allow-actions on the server; drift and new ar
     await rw.scan({ root });
     assert.equal((await tool('gutcheck_ignore').run(rw, { repo: 'alpha', finding: 'no-remote', reason: 'scratch' })).ok, true);
     const d = await rw.repoDetail({ repo: 'alpha' });
-    assert.deepEqual(d.ignored, [{ id: 'no-remote', title: 'No GitHub remote', reason: 'scratch', from: 'GutCheck' }]);
+    assert.deepEqual(d.ignored, [{ id: 'no-remote', title: 'No GitHub remote', reason: '"scratch"', from: 'Ignored through an AI agent (MCP)', note: 'Written by an AI agent through MCP, not in GutCheck by the user.' }]);
   } finally { for (const d of [root, data]) fs.rmSync(d, { recursive: true, force: true }); }
 });

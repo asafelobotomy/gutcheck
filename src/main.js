@@ -11,7 +11,7 @@ const { createTrayController } = require('./tray');
 const { setAutostart, isAutostart, HIDDEN_FLAG } = require('./autostart');
 const { createSettingsStore } = require('./settings');
 const { createAgentConnect } = require('./agent-connect');
-const { createPolicyStore, driftReport } = require('./policy');
+const { createPolicyStore, driftReport, inactiveIgnores } = require('./policy');
 const sched = require('./schedule');
 const { createWorkspaceScanner } = require('./workspace-scan');
 const { dataDir } = require('./paths');
@@ -164,17 +164,19 @@ handle('audit:list', () => readAudit(auditFile()));
 // Ignores (with a reason) and the baseline: GutCheck's own data, not the repos. Each change is logged.
 const rescanKnown = (dir) => ws.refresh(dir); // null if the workspace was rescanned meanwhile
 handle('ignore:set', async (_e, { dir, id, reason, remove, allRepos } = {}) => {
+  if (loadSettings().readOnly) return { ok: false, error: 'Read-only mode is on.' };
   const r = known.get(dir);
   if (!r && !allRepos) return { ok: false, error: 'Unknown repo' };
   const key = allRepos ? '*' : r.ignoreKey;
-  const res = remove ? policy().removeIgnore(key, String(id || '')) : policy().setIgnore(key, String(id || ''), reason);
+  const res = remove ? policy().removeIgnore(key, String(id || '')) : policy().setIgnore(key, String(id || ''), reason, 'app');
   if (!res.ok) return res;
   audit({ ok: true, repo: allRepos ? 'all repos' : r.name, title: `${remove ? 'Stopped ignoring' : 'Ignored'} ${id}${remove ? '' : `: ${res.reason}`}`, via: 'app' });
   if (allRepos) { await ws.refreshAll(); return { ok: true, all: true, repos: [...known.values()] }; }
   return { ok: true, res: await rescanKnown(dir) };
 });
-handle('drift:get', () => { const b = policyNow().baseline; return { file: policy().baselineFile, rules: b ? driftReport([...known.values()], b) : null }; });
+handle('drift:get', () => { const p = policyNow(); const b = p.baseline; return { file: policy().baselineFile, rules: b ? driftReport([...known.values()], b) : null, inactive: inactiveIgnores(p.ignores) }; });
 handle('baseline:init', async () => {
+  if (loadSettings().readOnly) return { ok: false, error: 'Read-only mode is on.' };
   const i = policy().initBaseline();
   await ws.refreshAll(); // every repo's drift changes
   return { ...i, repos: [...known.values()] };

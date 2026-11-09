@@ -11,7 +11,9 @@ const REWRITE_WORTH = 0.3; // history-only data must be at least this share of t
 const REWRITE_MIN = 200 * 1024 * 1024; // ...and at least this big, before a rewrite is worth its cost
 const BINARY_EXT = /\.(png|jpe?g|gif|webp|tiff?|psd|exr|hdr|blend|glb|gltf|fbx|obj|npy|npz|zip|7z|tar|gz|mp[34]|wav|ogg|mov|webm|pdf|bin|so|dll|exe|appimage|apk)$/i;
 
-const ext = (p) => { const m = /\.([^./]+)$/.exec(p); return m ? m[1].toLowerCase() : '(none)'; };
+// Extensions end up in shell commands (report-fixes.js sizeStep), so only plain ones are kept by name.
+const SAFE_EXT = /^[A-Za-z0-9_+-]{1,16}$/;
+const ext = (p) => { const m = /\.([^./]+)$/.exec(p); return !m ? '(none)' : SAFE_EXT.test(m[1]) ? m[1].toLowerCase() : '(other)'; };
 const folder = (p) => { const s = p.split('/'); return s.length > 2 ? s.slice(0, 2).join('/') + '/' : s.length > 1 ? s[0] + '/' : '(root)'; };
 const top = (m, n) => [...m.entries()].map(([k, v]) => ({ name: k, bytes: v.bytes, count: v.count })).sort((a, b) => b.bytes - a.bytes).slice(0, n);
 const bump = (m, k, bytes) => { const v = m.get(k) || { bytes: 0, count: 0 }; v.bytes += bytes; v.count++; m.set(k, v); };
@@ -74,8 +76,8 @@ function historyVerdict(h) {
   if (!h) return null;
   const parts = [`Of ${fmt(h.total)} stored: current files ${fmt(h.current)}, older versions ${fmt(h.oldVersions)}, deleted files ${fmt(h.deleted)}${h.unreachable ? `, unreferenced ${fmt(h.unreachable)} (git gc removes it)` : ''}.`];
   if (h.rewriteWorthIt) parts.push(`Rewriting history could save about ${fmt(h.historyOnly)}${h.deletedFolders.length ? ` (deleted: ${h.deletedFolders.slice(0, 3).map((f) => `${f.name} ${fmt(f.bytes)}`).join(', ')})` : ''}. That changes every commit id and needs a force-push: GutCheck does not do it, but the report gives the steps.`);
-  else parts.push(`Rewriting history would save about ${fmt(h.historyOnly)} (${Math.round((100 * h.historyOnly) / Math.max(1, h.total))}%): most of the size is the files you have now. Biggest: ${h.folders.slice(0, 3).map((f) => `${f.name} ${fmt(f.bytes)}`).join(', ')}. ${h.binaryCurrent / Math.max(1, h.current) > 0.5 ? 'Mostly binary files (' + h.extensions.slice(0, 3).map((e) => e.name).join(', ') + '): Git LFS for new versions, or keeping archives and generated files out of git, are what would help.' : 'Consider whether everything here belongs in git.'}`);
+  else parts.push(`Rewriting history would save about ${fmt(h.historyOnly)} (${Math.round((100 * h.historyOnly) / Math.max(1, h.total))}%): most of the size is the files you have now. Biggest: ${h.folders.slice(0, 3).map((f) => `${f.name} ${fmt(f.bytes)}`).join(', ')}. ${h.binaryCurrent / Math.max(1, h.current) > 0.5 ? 'Mostly binary files (' + h.extensions.filter((e) => SAFE_EXT.test(e.name)).slice(0, 3).map((e) => e.name).join(', ') + '): Git LFS for new versions, or keeping archives and generated files out of git, are what would help.' : 'Consider whether everything here belongs in git.'}`);
   return parts.join(' ');
 }
 
-module.exports = { analyzeHistory, historyVerdict, REWRITE_WORTH, REWRITE_MIN };
+module.exports = { analyzeHistory, historyVerdict, SAFE_EXT, REWRITE_WORTH, REWRITE_MIN };

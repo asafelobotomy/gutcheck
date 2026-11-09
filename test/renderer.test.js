@@ -316,3 +316,22 @@ test('agent usage asks before reading transcripts, starts servers only when tick
   assert.deepEqual(asked[1], { type: 'plugin-disable', label: 'Turn off…', plugin: 'x@m' });
   assert.equal(t.$$('.overlay').length, 0, 'the results close when a fix starts');
 });
+
+test('the Ignored list says when an AI agent wrote a rule, and the Baseline view lists rules that are not applied', async () => {
+  const t = await boot();
+  const panel = t.w.ignoredPanel({ ignored: [
+    { title: 'Agent one', ignoredBecause: 'r', ignoredIn: 'GutCheck', ignoredVia: 'mcp', ignoreRule: 'a' },
+    { title: 'Odd via', ignoredBecause: 'r', ignoredIn: 'all repos', ignoredVia: 'Cursor', ignoreRule: 'b' },
+    { title: 'Mine', ignoredBecause: 'r', ignoredIn: 'GutCheck', ignoredVia: 'app', ignoreRule: 'c' },
+  ] });
+  const text = panel.map((n) => n.textContent);
+  assert.match(text[1], /ignored through an AI agent \(MCP\)/);
+  assert.match(text[2], /ignored through an AI agent \(MCP\)/);
+  assert.match(text[3], /ignored here/);
+  assert.ok(!/AI agent/.test(text[3]));
+  t.w.api.drift = async () => ({ file: '/d/baseline.json', rules: null, inactive: [{ key: '*', id: 'n*', reason: 'old', why: 'needs 3 characters before *' }] });
+  click(t.$('#baseline'));
+  await tick();
+  assert.match(t.$('#detail').textContent, /Ignore rules not applied/);
+  assert.match(t.$('#detail').textContent, /every repo: n\* \(needs 3 characters before \*\)/);
+});

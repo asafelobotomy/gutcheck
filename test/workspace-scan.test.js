@@ -71,7 +71,7 @@ test('ignoring a finding in every repo and creating a baseline refresh every rep
   try {
     const e = engineFor(data, { allowActions: true });
     await e.scan({ root });
-    const id = (await e.findings()).findings.find((f) => f.repo === 'alpha').id;
+    const id = (await e.findings()).findings.find((f) => f.repo === 'alpha' && require('../src/ignore-rules').canRepoIgnore(f)).id; // an agent (MCP) may ignore it
     assert.ok((await e.findings()).findings.some((f) => f.repo === 'beta' && f.id === id), 'both repos share the finding');
     assert.ok((await e.ignore({ allRepos: true, finding: id, reason: 'not here' })).ok);
     assert.ok(!(await e.findings()).findings.some((f) => f.id === id), 'gone from every repo without a rescan');
