@@ -18,11 +18,23 @@ const NO_DESCEND = new Set([...HEAVY_DIRS, '.git', '.venv', 'venv', '.next', '.n
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const posix = (p) => p.split(path.sep).join('/');
 
+// The tracked paths, and the gitlinks (submodules, mode 160000) among them. Read-only, via exec.git.
 async function trackedFiles(dir) {
-  const r = await git(['ls-files', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
+  const r = await git(['ls-files', '-s', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
   if (!r.ok) return null; // fail closed: an unknown tracked set must never make committed files look unbacked
-  return new Set(r.stdout.split('\0').filter(Boolean));
+  const tracked = new Set();
+  const gitlinks = new Set();
+  for (const rec of r.stdout.split('\0')) {
+    const tab = rec.indexOf('\t');
+    if (tab < 0) continue;
+    const p = rec.slice(tab + 1);
+    tracked.add(p);
+    if (rec.startsWith('160000 ')) gitlinks.add(p);
+  }
+  return { tracked, gitlinks };
 }
+
+const hasGitEntry = async (abs) => { try { await fsp.lstat(path.join(abs, '.git')); return true; } catch { return false; } };
 
 // Build a candidate for one regular file, or null (too big, unreadable, not a file).
 async function makeCandidate({ real, scope, repo, rel, title, inSshDir = false, onlyKind = null, gate = null }) {
@@ -49,18 +61,31 @@ async function makeCandidate({ real, scope, repo, rel, title, inSshDir = false, 
 async function findRepoSecrets(dir, { name } = {}) {
   let root;
   try { root = await fsp.realpath(dir); } catch { return []; }
-  const tracked = await trackedFiles(root);
-  if (!tracked) return [];
+  const idx = await trackedFiles(root);
+  if (!idx) return [];
+  const { tracked, gitlinks } = idx;
   const repo = typeof name === 'string' && name ? name : path.basename(dir);
   const found = new Map(); // real path -> candidate
   let seen = 0;
+  // A folder that is a submodule (a gitlink) or holds its own .git is another repo: what is in it
+  // is committed or ignored there, so the parent never reports or backs it up.
+  const nested = new Map(); // rel folder -> boolean
+  const isNested = async (relDir) => {
+    if (!nested.has(relDir)) nested.set(relDir, gitlinks.has(relDir) || await hasGitEntry(path.join(root, relDir)));
+    return nested.get(relDir);
+  };
+  const inNested = async (rel) => {
+    const parts = rel.split('/');
+    for (let i = 1; i < parts.length; i++) if (await isNested(parts.slice(0, i).join('/'))) return true;
+    return false;
+  };
 
   const consider = async (abs, relHere) => {
     let real;
     try { real = await fsp.realpath(abs); } catch { return; }
     const rel = posix(path.relative(root, real));
     if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return; // target outside the repo
-    if (tracked.has(rel) || found.has(real)) return;
+    if (tracked.has(rel) || found.has(real) || await inNested(rel)) return; // a link may point into a submodule
     const c = await makeCandidate({ real, scope: 'repo', repo, rel, title: `gutcheck: ${repo}/${rel}` });
     if (c) found.set(real, c);
   };
@@ -73,7 +98,7 @@ async function findRepoSecrets(dir, { name } = {}) {
       const rel = prefix + e.name;
       const abs = path.join(d, e.name);
       if (e.isDirectory()) {
-        if (depth < MAX_DEPTH && !NO_DESCEND.has(e.name)) await walk(abs, depth + 1, rel + '/');
+        if (depth < MAX_DEPTH && !NO_DESCEND.has(e.name) && !await isNested(rel)) await walk(abs, depth + 1, rel + '/');
       } else if ((e.isFile() || e.isSymbolicLink()) && P.looksSecret(rel)) {
         await consider(abs, rel);
       }
