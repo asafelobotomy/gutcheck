@@ -68,7 +68,7 @@ test('invisible characters never reach ignore reasons, report text or command bl
   const r = result([F('no-topics', 'info')], { prs: [{ number: 3, title: 'fix' + INVIS, headRefName: 'b' + INVIS, updatedAt: new Date().toISOString() }], git: { branch: 'main' + INVIS, mergedBranches: ['x' + INVIS] } });
   r.findings.push(F('git-merged'));
   const text = buildReport({ repos: [r] });
-  assert.ok(!new RegExp('[\\u200b\\u200c\\u200d\\u2060\\u2064\\ufeff\\u061c\\u180e]|[\\u{E0000}-\\u{E007F}]', 'u').test(text), 'no invisible characters');
+  assert.ok(!new RegExp('[\\u200b\\u2060\\u2064\\ufeff\\u061c\\u180e]|[\\u{E0000}-\\u{E007F}]', 'u').test(text), 'no invisible characters (prose may keep ZWNJ/ZWJ)');
 });
 
 test('the Why and Note lines are flattened, so a folder name cannot forge a step', () => {

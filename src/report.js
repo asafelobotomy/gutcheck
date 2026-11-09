@@ -13,11 +13,11 @@ const { upkeepFix } = require('./report-upkeep');
 const { ignoredLines } = require('./ignore-rules');
 const { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches } = require('./checks');
 const { daysAgo, sq, plural } = require('./util');
-const { flat, INVISIBLE_RE, hasInvisible } = require('./text-safe');
+const { flatProse, INVISIBLE_RE, unsafeName } = require('./text-safe');
 
 // Longest text kept from each untrusted field (names, paths, details), so one field cannot swamp the report.
 const LEN = { short: 80, title: 120, path: 200, text: 300, detail: 400, long: 1500 };
-const t = (s, n = LEN.title) => flat(String(s == null ? '' : s).replace(/`/g, ' '), n); // one line, no invisible characters or backticks
+const t = (s, n = LEN.title) => flatProse(String(s == null ? '' : s).replace(/`/g, ' '), n); // one line, no invisible characters or backticks
 const SEV = { error: 0, warn: 1, info: 2 };
 const MAX_CLUTTER_LINES = 40;
 
@@ -50,6 +50,9 @@ function fixFor(f, r) {
   const R = slug ? ` -R ${slug}` : '';
   const def = (r.remote && r.remote.defaultBranch) || 'main';
   const D = sq(def); // branch names come from GitHub and may contain shell metacharacters
+  const defOk = !unsafeName(def); // a name with invisible characters is left out of commands, never altered
+  const safe = (names) => (names || []).filter((b) => !unsafeName(b));
+  const here = (b) => (b && !unsafeName(b) ? sq(b) : 'HEAD');
   const num = (/-(\d+)$/.exec(f.id) || [])[1];
   const run = num && ((r.ci && r.ci.failed) || []).find((x) => String(x.databaseId) === num);
   const id = f.id;
@@ -74,7 +77,7 @@ function fixFor(f, r) {
   // Pull before anything is committed: a fast-forward needs no local commits (Fix all runs the same order).
   if (id === 'git-behind') return { phase: 1, rank: 1, why: 'Local branch is behind its upstream.', cmds: ['git pull --ff-only'], note: 'Pull before committing anything, so it can fast-forward.' };
   if (id === 'git-ahead') return { phase: 1, rank: 3, why: 'Unpushed commits exist only on this machine.', cmds: ['git push'] };
-  if (id === 'git-no-upstream') return { phase: 1, rank: 4, why: 'Branch is not tracking a remote.', cmds: [`git push -u origin ${sq(g.branch || 'HEAD')}`] };
+  if (id === 'git-no-upstream') return { phase: 1, rank: 4, why: 'Branch is not tracking a remote.', cmds: [`git push -u origin ${here(g.branch)}`] };
 
   if (id.startsWith('ci-failed-') && run && run.workflowName === 'Dependabot Updates') return { phase: 2, rank: 3, why: 'Dependabot could not make one update.', cmds: [`gh run view ${num}${R} --log-failed   # why the update failed`], note: 'This run cannot be re-run. Usually the dependency has a version conflict: update it by hand (and fix what breaks), or leave it for Dependabot\'s next scheduled attempt. Do not re-run it.' };
   if (id.startsWith('ci-failed-')) return { phase: 2, rank: 0, why: run ? `Workflow "${t(run.workflowName)}" failed on ${t(run.headBranch)}.` : 'A CI run failed.', cmds: [`gh run view ${num}${R} --log-failed`, '# fix the cause in the code, commit, push; or if it was a flaky failure:', `gh run rerun ${num} --failed${R}`], note: run && run.url ? `Run URL: ${t(run.url, LEN.path)}` : undefined };
@@ -83,7 +86,7 @@ function fixFor(f, r) {
     const pr = (r.prs || []).find((p) => String(p.number) === num);
     if (pr && /^dependabot\//.test(pr.headRefName || '')) return { phase: 2, rank: 1, why: 'Dependabot\'s PR is out of date with the default branch.', cmds: [`gh pr comment ${num}${R} --body '@dependabot rebase'`], note: 'Dependabot rebases and re-runs the checks; merge it once they pass. If it says it cannot, close the PR and Dependabot opens a fresh one.' };
   }
-  if (id.startsWith('pr-conflict-')) return { phase: 2, rank: 1, why: 'The PR cannot merge until conflicts are resolved.', cmds: [`gh pr checkout ${num}${R}`, `git fetch origin && git merge ${sq('origin/' + def)}`, '# resolve conflicts, run the tests', 'git commit && git push'] };
+  if (id.startsWith('pr-conflict-')) return { phase: 2, rank: 1, why: 'The PR cannot merge until conflicts are resolved.', cmds: [`gh pr checkout ${num}${R}`, defOk ? `git fetch origin && git merge ${sq('origin/' + def)}` : '# merge the default branch into it', '# resolve conflicts, run the tests', 'git commit && git push'] };
   if (id.startsWith('pr-superseded-')) return { phase: 2, rank: 3, why: 'The default branch already has these versions.', cmds: [`gh pr close ${num}${R} --comment 'Superseded: the default branch already has these versions.'`], note: 'Dependabot also closes it by itself on its next run. Ask the owner before closing PRs.' };
   if (id.startsWith('pr-ci-')) return { phase: 2, rank: 2, why: 'Checks are failing on the PR.', cmds: [`gh pr checks ${num}${R}`, `gh pr checkout ${num}${R}`, '# fix, commit, push'] };
   if (id.startsWith('pr-ready-')) return { phase: 2, rank: 4, why: 'Approved, mergeable and passing.', cmds: [`gh pr merge ${num} --squash --delete-branch${R}`], note: 'Confirm with the owner before merging.' };
@@ -116,14 +119,14 @@ function fixFor(f, r) {
   if (id === 'alerts-off') return { phase: 4, rank: 4, why: 'You will not hear about vulnerable dependencies.', cmds: slug ? [`gh api -X PUT repos/${slug}/vulnerability-alerts`] : [] };
   if (id === 'no-dependabot-config') return { phase: 4, rank: 5, why: 'No automatic update PRs.', cmds: [], note: 'Add .github/dependabot.yml with a weekly schedule for each ecosystem in use.' };
 
-  if (id === 'git-merged') return { phase: 5, rank: 0, why: 'These branches are already merged, so deleting them loses nothing.', cmds: [`git branch -d ${(g.mergedBranches || []).map(sq).join(' ')}`] };
+  if (id === 'git-merged') { const m = safe(g.mergedBranches); return { phase: 5, rank: 0, why: 'These branches are already merged, so deleting them loses nothing.', cmds: m.length ? [`git branch -d ${m.map(sq).join(' ')}`] : [] }; }
   if (id === 'git-stale') {
-    const stale = staleBranches(g).map((b) => b.name);
+    const stale = defOk ? safe(staleBranches(g).map((b) => b.name)) : [];
     return { phase: 5, rank: 1, why: `Unmerged branches untouched for ${STALE_BRANCH_DAYS}+ days.`, cmds: stale.map((b) => `git log --oneline ${D}..${sq(b)}   # unique commits on ${t(b, LEN.short)}`), note: 'Ask the owner per branch: merge, keep, or delete. Never force-delete (-D) or delete remote branches without approval.' };
   }
 
   if (id === 'no-remote') return { phase: 7, rank: 0, why: 'Not backed up anywhere.', cmds: ['gh repo create <name> --private --source . --remote origin --push'], note: 'Ask the owner whether it should be private or public before creating it.' };
-  if (id === 'no-protection') return { phase: 7, rank: 1, why: 'Anyone with write access can force-push to, or delete, the default branch.', cmds: slug ? [`echo '${JSON.stringify(PROTECTION.minimal.body)}' | gh api -X PUT ${sq(`repos/${slug}/branches/${def}/protection`)} -H 'Accept: application/vnd.github+json' --input -`] : [], note: 'Needs admin rights; private repos on a free plan will get an error. A ruleset (Settings > Rules) does the same job and can cover several branches. This minimal rule keeps direct pushes working. Requiring pull requests (the Basic or Strict preset) blocks direct pushes and push-to-release flows, so ask the owner how they work first.', ref: REFS.rulesets };
+  if (id === 'no-protection') return { phase: 7, rank: 1, why: 'Anyone with write access can force-push to, or delete, the default branch.', cmds: slug && defOk ? [`echo '${JSON.stringify(PROTECTION.minimal.body)}' | gh api -X PUT ${sq(`repos/${slug}/branches/${def}/protection`)} -H 'Accept: application/vnd.github+json' --input -`] : [], note: 'Needs admin rights; private repos on a free plan will get an error. A ruleset (Settings > Rules) does the same job and can cover several branches. This minimal rule keeps direct pushes working. Requiring pull requests (the Basic or Strict preset) blocks direct pushes and push-to-release flows, so ask the owner how they work first.', ref: REFS.rulesets };
   if (id === 'no-license') return { phase: 3, rank: 0, why: r.remote && r.remote.isPublic ? 'Public code without a licence cannot legally be reused.' : 'Needed only once the code is shared.', cmds: [], note: 'Ask the owner which licence they want (MIT is a common permissive choice) and add it as LICENSE at the top level.', ref: REFS.license };
   if (id === 'inactive') return { phase: 7, rank: 2, why: 'No pushes for a year.', cmds: slug ? [`gh repo archive ${slug}   # only if the project is finished, ask first`] : [] };
   if (id === 'many-issues') return { phase: 7, rank: 3, why: 'Lots of open issues.', cmds: slug ? [`gh issue list${R} --state open --limit 50`] : [], note: 'Triage with the owner.' };
@@ -196,9 +199,8 @@ function fence(cmds) {
   return `${f}bash\n${body}\n${f}`;
 }
 
-// File names with control or invisible characters, or backticks, are not safe to paste into a shell: they are left
-// out of the commands (and the note says so), to be removed in GutCheck instead.
-const unsafeName = (s) => s.includes('`') || hasInvisible(s);
+// File names with control or invisible characters, or backticks (unsafeName, text-safe.js), are left out of
+// the commands (and the note says so), to be removed in GutCheck instead.
 
 function clutterStep(c) {
   if (!c || !c.items || !c.items.length) return null;
@@ -242,7 +244,7 @@ function stepsFor(r, c, q, tt, sec) {
     .sort((a, b) => a.phase - b.phase || a.rank - b.rank || SEV[a.sev] - SEV[b.sev]);
   // Every commit above still needs to reach GitHub: one push at the end, as Fix all does.
   if (r.remote && !r.remote.unreachable && out.some((s) => s.cmds.some((c) => /\bgit (?:add -A && git )?commit\b/.test(c)))) {
-    out.push({ phase: PHASES.length - 1, rank: 0, sev: 'info', title: 'Push the commits', why: 'The commits made in the steps above exist only on this machine until they are pushed.', cmds: [r.git && r.git.upstream ? 'git push' : `git push -u origin ${sq((r.git && r.git.branch) || 'HEAD')}`] });
+    out.push({ phase: PHASES.length - 1, rank: 0, sev: 'info', title: 'Push the commits', why: 'The commits made in the steps above exist only on this machine until they are pushed.', cmds: [r.git && r.git.upstream ? 'git push' : `git push -u origin ${unsafeName((r.git && r.git.branch) || '') ? 'HEAD' : sq((r.git && r.git.branch) || 'HEAD')}`] });
   }
   return out;
 }
@@ -257,9 +259,9 @@ function renderSteps(steps, level = 2) {
     if (s.phase !== phase) { phase = s.phase; out.push(`${ph} Phase ${phase + 1}: ${PHASES[phase]}\n`); }
     out.push(`${st} Step ${n++} [${s.sev}] ${t(s.title, LEN.path)}`);
     if (s.detail) out.push(`Detail: ${t(s.detail, LEN.detail)}`);
-    out.push(`Why: ${flat(s.why, LEN.long)}`); // why and note can name folders and files (historyVerdict)
+    out.push(`Why: ${flatProse(s.why, LEN.long)}`); // why and note can name folders and files (historyVerdict)
     if (s.cmds.length) out.push(fence(s.cmds));
-    if (s.note) out.push(`Note: ${flat(s.note, LEN.long)}`);
+    if (s.note) out.push(`Note: ${flatProse(s.note, LEN.long)}`);
     if (s.ref) out.push(`Source: ${s.ref}`);
     out.push('');
   }

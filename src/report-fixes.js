@@ -5,6 +5,11 @@
 
 const { sq } = require('./util');
 const { historyVerdict, SAFE_EXT } = require('./history');
+const { unsafeName } = require('./text-safe');
+
+// Names from git or the filesystem with invisible characters are left out of commands, never altered.
+const ok = (n) => !unsafeName(n);
+const urlOr = (u) => (u && ok(u) ? u : 'https://github.com/OWNER/REPO.git');
 
 const GH = 'https://docs.github.com/en/';
 const REFS = {
@@ -47,7 +52,7 @@ function hygieneFix(id, r) {
   const api = (p) => (slug ? sq(`repos/${slug}${p}`) : `repos/OWNER/REPO${p}`);
   const h = r.hygiene || {};
   const steps = {
-    'remote-credentials': { phase: 0, rank: 3, why: 'A token in .git/config is readable by anything that can read the repo folder.', cmds: ['git remote get-url origin   # shows the token: do NOT paste the output anywhere', `git remote set-url origin ${sq(r.originUrl || 'https://github.com/OWNER/REPO.git')}`, 'gh auth setup-git   # let gh supply credentials instead'], note: 'Revoke the token at its provider first (GitHub: Settings > Developer settings). Never print or copy the old URL.', ref: REFS.sensitive },
+    'remote-credentials': { phase: 0, rank: 3, why: 'A token in .git/config is readable by anything that can read the repo folder.', cmds: ['git remote get-url origin   # shows the token: do NOT paste the output anywhere', `git remote set-url origin ${sq(urlOr(r.originUrl))}`, 'gh auth setup-git   # let gh supply credentials instead'], note: 'Revoke the token at its provider first (GitHub: Settings > Developer settings). Never print or copy the old URL.', ref: REFS.sensitive },
     'wf-injection': { phase: 0, rank: 4, why: 'Untrusted text (PR titles, branch names, issue bodies) is expanded inside a shell script, so an attacker can run commands with the workflow\'s token and secrets.', cmds: [], note: 'In each listed run: step, move the expression into env: (for example `env: TITLE: ${{ github.event.pull_request.title }}`) and use "$TITLE" in the script, quoted. Do not change what the step does.', ref: REFS.injection },
     'wf-pr-target': { phase: 0, rank: 5, why: 'pull_request_target and workflow_run run with write access and secrets; checking out the PR head runs an outsider\'s code with them.', cmds: [], note: 'Prefer the plain pull_request trigger. If privileges are really needed, split the workflow: an unprivileged pull_request job builds/tests, and a workflow_run job that never checks out PR code does the privileged part. Ask the owner before changing triggers.', ref: REFS.prTarget },
     'wf-pr-target-review': { phase: 7, rank: 9, why: 'A privileged trigger is in use.', cmds: [], note: 'Confirm none of these workflows check out or run code from the pull request.', ref: REFS.prTarget },
@@ -58,10 +63,10 @@ function hygieneFix(id, r) {
     'dependabot-no-actions': { phase: 4, rank: 6, why: 'Pinned actions never get updates without it.', cmds: [], note: 'Add to .github/dependabot.yml under updates:\\n  - package-ecosystem: "github-actions"\\n    directory: "/"\\n    schedule:\\n      interval: "weekly"', ref: REFS.dependabot },
     'git-no-commits': { phase: 1, rank: 5, why: 'Nothing is recorded yet.', cmds: ['git status', 'git add <files>', 'git commit -m "Initial commit"'], note: 'Check for secrets and clutter before the first commit.' },
     'git-stashes': { phase: 1, rank: 6, why: 'Stashes are easy to forget and cannot be recovered once dropped.', cmds: ['git stash list', 'git stash show -p stash@{0}   # review each one', 'git stash branch <new-branch> stash@{0}   # keep it as a branch'], note: 'Ask the owner per stash: keep as a branch, or drop with git stash drop. Never run git stash clear.', ref: REFS.stash },
-    'git-gone': { phase: 5, rank: 2, why: 'Their remote branches were deleted (usually after a merged PR).', cmds: [...(h.goneBranches || []).slice(0, 20).map((b) => `git branch -d ${sq(b)}`)], note: '-d refuses to delete unmerged work; if it refuses, show the owner `git log origin/HEAD..<branch>` and ask before using -D.', ref: REFS.branch },
+    'git-gone': { phase: 5, rank: 2, why: 'Their remote branches were deleted (usually after a merged PR).', cmds: [...(h.goneBranches || []).filter(ok).slice(0, 20).map((b) => `git branch -d ${sq(b)}`)], note: '-d refuses to delete unmerged work; if it refuses, show the owner `git log origin/HEAD..<branch>` and ask before using -D.', ref: REFS.branch },
     'git-worktrees': { phase: 7, rank: 6, why: 'Git still tracks worktrees whose folders are gone.', cmds: ['git worktree prune -n -v   # preview', 'git worktree prune -v'], note: 'If a folder was moved rather than deleted, use git worktree repair instead.', ref: REFS.worktree },
     'git-submodules': { phase: 7, rank: 7, why: 'Code the project depends on is missing from this checkout.', cmds: ['git submodule status', 'git submodule update --init --recursive'], ref: REFS.submodule },
-    'remote-http': { phase: 0, rank: 10, why: 'http:// sends code and credentials unencrypted.', cmds: [`git remote set-url origin ${sq((r.originUrl || '').replace(/^http:/i, 'https:') || 'https://github.com/OWNER/REPO.git')}`] },
+    'remote-http': { phase: 0, rank: 10, why: 'http:// sends code and credentials unencrypted.', cmds: [`git remote set-url origin ${sq(urlOr((r.originUrl || '').replace(/^http:/i, 'https:')))}`] },
     'repo-size': sizeStep(h.history),
     'history-large-blobs': { phase: 7, rank: 8, why: 'Every clone downloads these, and GitHub rejects pushes with files over 100 MB.', cmds: [...((h.historyBlobs || []).filter((b) => /^[0-9a-f]{40,64}$/.test(b.id)).slice(0, 5).map((b) => `git log --all --oneline --find-object=${b.id}   # ${(b.size / 1048576).toFixed(0)} MB`))], note: 'Find which file each object is, then ask the owner: keep, move to Git LFS (git lfs migrate import), or remove with git filter-repo. Both rewrite history; back up first and coordinate before any force-push.', ref: REFS.largeFiles },
     'git-loose': { phase: 7, rank: 9, why: 'Unpacked objects waste space and slow git down.', cmds: ['git count-objects -vH', 'git gc   # safe default; do not use --prune=now', 'git maintenance start   # optional: keep it tidy automatically'], ref: REFS.gc },
@@ -112,13 +117,13 @@ function sizeStep(hist) {
   const cmds = [
     ...(exts.length ? ['# 1. Stop it growing (no rewrite): track big binaries with Git LFS from now on', `git lfs track ${exts.map((e) => sq('*.' + e)).join(' ')}`, 'git add .gitattributes && git commit -m "Track binaries with Git LFS"'] : []),
     '# 2. Keep generated or archived files out of git (no rewrite; history keeps old copies)',
-    ...big.filter((f) => /archive|_out|cache|build|dist|shots/i.test(f)).map((f) => `git rm -r --cached -- ${sq(f.replace(/\/$/, ''))}   # then add it to .gitignore`),
+    ...big.filter((f) => ok(f) && /archive|_out|cache|build|dist|shots/i.test(f)).map((f) => `git rm -r --cached -- ${sq(f.replace(/\/$/, ''))}   # then add it to .gitignore`),
   ];
   if (hist.rewriteWorthIt || hist.historyOnly >= 200 * 1024 * 1024) cmds.push(
     '# 3. Only with the owner: shrink history (rewrites every commit id, needs a force-push)',
     'git clone --mirror . ../backup-before-rewrite.git   # full backup first',
     'git filter-repo --analyze   # needs git-filter-repo; review .git/filter-repo/analysis',
-    ...hist.deletedFolders.filter((f) => f.bytes >= 10 * 1024 * 1024).slice(0, 3).map((f) => `git filter-repo --invert-paths --path ${sq(f.name)}   # folder no longer in the tree: removes only old files`),
+    ...hist.deletedFolders.filter((f) => ok(f.name) && f.bytes >= 10 * 1024 * 1024).slice(0, 3).map((f) => `git filter-repo --invert-paths --path ${sq(f.name)}   # folder no longer in the tree: removes only old files`),
     ...(exts.length ? ['git lfs migrate import --everything --include=' + sq(exts.map((e) => `*.${e}`).join(',')) + '   # or move old binaries into LFS'] : []),
   );
   return { ...base, why: historyVerdict(hist), cmds, note: 'Steps 1 and 2 are safe and stop the growth. Step 3 rewrites history: do it only if the owner asks, after the backup, then force-push every branch and tag and tell everyone with a clone to re-clone. GitHub LFS storage has quotas. Encrypted files (git-crypt, if used) must stay listed in .gitattributes after any rewrite.' };
