@@ -141,23 +141,31 @@ test('B3: the tests scan\'s git blame does not run a textconv driver, and still 
   assert.ok(t.upkeep, 'scanTests completed');
 });
 
-test('B4: npm outdated gets a scrubbed environment and a pinned registry', async () => {
-  const d = repo({ 'package.json': JSON.stringify({ dependencies: { leftpad: '1.0.0' } }), '.npmrc': 'registry=http://127.0.0.1:9/leak/${GH_TOKEN}/\n' });
+// Runs the deep scan's npm with a fake npm first on PATH and the given parent env; returns npm's env.
+async function npmEnvFor(extra) {
+  const d = repo({ 'package.json': JSON.stringify({ dependencies: { leftpad: '1.0.0' } }), '.npmrc': 'registry=http://127.0.0.1:9/leak/${GH_TOKEN}/\nproxy=http://127.0.0.1:9/\n' });
   fs.mkdirSync(path.join(d, 'node_modules'));
   const bin = path.join(ROOT, `bin${++n}`);
   const out = path.join(ROOT, `npm-env${n}`);
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, 'npm'), `#!/bin/sh\nenv > '${out}'\necho "ARGS $*" >> '${out}'\necho '{}'\n`, { mode: 0o755 });
-  const saved = { PATH: process.env.PATH, GH_TOKEN: process.env.GH_TOKEN, AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY, npm_config_registry: process.env.npm_config_registry, HTTPS_PROXY: process.env.HTTPS_PROXY };
-  Object.assign(process.env, { PATH: `${bin}:${process.env.PATH}`, GH_TOKEN: 'gh-secret-x', AWS_SECRET_ACCESS_KEY: 'aws-secret-x', npm_config_registry: 'http://127.0.0.1:9/', HTTPS_PROXY: 'http://127.0.0.1:9/' });
+  const all = { PATH: `${bin}:${process.env.PATH}`, ...extra };
+  const saved = Object.fromEntries(Object.keys(all).map((k) => [k, process.env[k]]));
+  for (const [k, v] of Object.entries(all)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   try {
     await collectLocal(d, { deep: true });
   } finally {
     for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   }
-  const env = Object.fromEntries(fs.readFileSync(out, 'utf8').split('\n').filter((l) => l.includes('=') && !l.startsWith('ARGS')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
-  assert.match(fs.readFileSync(out, 'utf8'), /ARGS outdated --json/);
-  for (const k of ['GH_TOKEN', 'AWS_SECRET_ACCESS_KEY', 'HTTPS_PROXY', 'GIT_CONFIG_GLOBAL']) assert.equal(env[k], undefined, `${k} reached npm`);
+  const text = fs.readFileSync(out, 'utf8');
+  assert.match(text, /ARGS outdated --json/);
+  return { bin, env: Object.fromEntries(text.split('\n').filter((l) => l.includes('=') && !l.startsWith('ARGS')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])) };
+}
+const NO_PROXY_ENV = { HTTPS_PROXY: undefined, https_proxy: undefined, HTTP_PROXY: undefined, http_proxy: undefined, NO_PROXY: undefined, no_proxy: undefined, NODE_EXTRA_CA_CERTS: undefined };
+
+test('B4: npm outdated gets a scrubbed environment and a pinned registry', async () => {
+  const { bin, env } = await npmEnvFor({ ...NO_PROXY_ENV, GH_TOKEN: 'gh-secret-x', AWS_SECRET_ACCESS_KEY: 'aws-secret-x', npm_config_registry: 'http://127.0.0.1:9/' });
+  for (const k of ['GH_TOKEN', 'AWS_SECRET_ACCESS_KEY', 'GIT_CONFIG_GLOBAL']) assert.equal(env[k], undefined, `${k} reached npm`);
   assert.ok(!Object.values(env).some((v) => v.includes('secret-x')), 'a secret value reached npm');
   assert.equal(env.npm_config_registry, 'https://registry.npmjs.org/');
   // `false`, not empty: npm ignores an empty env value and would take the proxy from the .npmrc.
@@ -169,6 +177,16 @@ test('B4: npm outdated gets a scrubbed environment and a pinned registry', async
   assert.equal(env.npm_config_audit, 'false');
   assert.equal(env.HOME, HOME);
   assert.ok(env.PATH.startsWith(bin));
+});
+
+test('B4: npm keeps the user\'s own proxy and extra CA certificates from the environment', async () => {
+  const { env } = await npmEnvFor({ ...NO_PROXY_ENV, HTTPS_PROXY: 'http://proxy.corp:3128', http_proxy: 'http://proxy.corp:3129', NO_PROXY: 'localhost,.corp', NODE_EXTRA_CA_CERTS: '/etc/corp-ca.pem', GH_TOKEN: 'gh-secret-x' });
+  assert.equal(env.npm_config_https_proxy, 'http://proxy.corp:3128');
+  assert.equal(env.npm_config_proxy, 'http://proxy.corp:3129');
+  assert.equal(env.npm_config_noproxy, 'localhost,.corp');
+  assert.equal(env.NODE_EXTRA_CA_CERTS, '/etc/corp-ca.pem');
+  assert.equal(env.HTTPS_PROXY, undefined, 'passed only as npm settings');
+  assert.equal(env.GH_TOKEN, undefined);
 });
 
 test('READONLY_GIT carries the fixed hardening options', () => {
