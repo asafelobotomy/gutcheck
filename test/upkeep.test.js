@@ -141,10 +141,10 @@ test('baseline: drift finding per repo, public-only rules, skips, and the worksp
   assert.ok(!ok.findings.some((f) => f.id === 'baseline-drift'));
 });
 
-test('the report tells an LLM which findings the owner ignored, and has steps for the new findings', () => {
+test('the report tells an LLM which findings the user ignored, and has steps for the new findings', () => {
   const r = applyPolicy(result([{ id: 'no-topics', severity: 'info', title: 't', category: 'Project setup' }, { id: 'automerge-ungated', severity: 'warn', title: 'auto.yml auto-merges', category: 'Dependencies' }], { git: {}, scannedAt: 'now' }), { ignores: { 'o/app': { 'no-topics': 'not needed' } } }, score);
   const text = buildReport({ repos: [r] });
-  assert.match(text, /Ignored by the owner \(do not suggest fixing these\): no-topics \(not needed\)/);
+  assert.match(text, /Ignored by you \(GutCheck settings\); do not suggest fixing these: no-topics \(not needed\)/);
   assert.match(text, /version-update:semver-patch/);
 });
 

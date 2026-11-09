@@ -9,7 +9,8 @@ const { PROTECTION } = require('./protection');
 const { hygieneFix, secretFix, REFS } = require('./report-fixes');
 const { agentFix } = require('./agents');
 const { testsSection, testsFix } = require('./tests/report');
-const { upkeepFix, ignoredLine } = require('./report-upkeep');
+const { upkeepFix } = require('./report-upkeep');
+const { ignoredLines } = require('./ignore-rules');
 const { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches } = require('./checks');
 const { daysAgo, sq, plural } = require('./util');
 
@@ -167,7 +168,7 @@ function snapshot(r) {
   L.push(`- Open PRs: ${(r.prs || []).length}; failing CI runs: ${((r.ci && r.ci.failed) || []).length}; Dependabot alerts: ${Math.max((r.alerts || []).length, r.alertsTotal || 0)}`);
   if (r.deps && r.deps.manifests && r.deps.manifests.length) L.push(`- Manifests: ${r.deps.manifests.join(', ')}`);
   if (r.release && r.release.latest) L.push(`- Release: latest tag ${t(r.release.latest, LEN.short)}${r.release.commitsSince != null ? `, ${r.release.commitsSince} commit${r.release.commitsSince === 1 ? '' : 's'} since` : ''}${r.release.manifest ? `; ${r.release.manifest.file} says ${t(r.release.manifest.version, LEN.short)}` : ''}`);
-  const ig = ignoredLine(r, t);
+  const ig = ignoredLines(r, t);
   if (ig) L.push(ig);
   return L.join('\n');
 }

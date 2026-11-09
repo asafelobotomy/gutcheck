@@ -7,6 +7,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { canRepoIgnore, MIN_PREFIX, wildcardOk, FROM_REPO } = require('./ignore-rules');
 
 const MAX_REASON = 300;
 const ID_RE = /^[A-Za-z0-9][\w.:/-]{0,120}\*?$/; // a finding id, or a prefix ending in * (pr-stale-*)
@@ -17,14 +18,16 @@ const writeJSON = (f, v) => { fs.writeFileSync(f + '.tmp', JSON.stringify(v, nul
 // The key ignores are stored under: owner/name for GitHub repos (stable across clones), else the folder name.
 const repoKey = (r) => (r.remote && r.remote.owner && !r.remote.unreachable ? `${r.remote.owner}/${r.remote.name}` : r.ref ? `${r.ref.owner}/${r.ref.name}` : path.basename(r.path || r.dir || ''));
 
-// Repo-local rules: .gutcheck.json { "ignore": { "<id>": "<reason>" } }. Read as data only.
+// Repo-local rules: .gutcheck.json { "ignore": { "<id>": "<reason>" } }. Read as data only: whoever
+// controls the repo writes them, so a wildcard needs 4 characters before its * and applyPolicy never
+// lets them hide a security or error finding (ignore-rules.js).
 function repoPolicy(dir) {
   const v = readJSON(path.join(dir, '.gutcheck.json'));
-  return v && v.ignore && typeof v.ignore === 'object' ? { ignore: clean(v.ignore) } : null;
+  return v && v.ignore && typeof v.ignore === 'object' ? { ignore: clean(v.ignore, MIN_PREFIX.repo) } : null;
 }
-function clean(map) {
+function clean(map, minPrefix = 0) {
   const out = {};
-  for (const [id, reason] of Object.entries(map || {})) if (ID_RE.test(id)) out[id] = String(typeof reason === 'string' ? reason : (reason && reason.reason) || '').slice(0, MAX_REASON);
+  for (const [id, reason] of Object.entries(map || {})) if (ID_RE.test(id) && wildcardOk(id, minPrefix)) out[id] = String(typeof reason === 'string' ? reason : (reason && reason.reason) || '').slice(0, MAX_REASON);
   return out;
 }
 
@@ -94,6 +97,7 @@ function createPolicyStore(dir) {
   const loadIgnores = () => { const v = readJSON(ignoreFile) || {}; const out = {}; for (const [k, m] of Object.entries(v)) if (m && typeof m === 'object') out[k] = clean(m); return out; };
   function setIgnore(key, id, reason) {
     if (typeof key !== 'string' || !key || !ID_RE.test(String(id || ''))) return { ok: false, error: 'Name a repo and a finding id (a trailing * ignores every id that starts with it).' };
+    if (key === '*' && !wildcardOk(id, MIN_PREFIX.allRepos)) return { ok: false, error: `An ignore for every repo needs at least ${MIN_PREFIX.allRepos} characters before the *.` };
     const why = String(reason || '').trim().slice(0, MAX_REASON);
     if (!why) return { ok: false, error: 'Give a reason: it is shown wherever the finding would have been.' };
     const all = loadIgnores();
@@ -123,9 +127,9 @@ function applyPolicy(res, policy, score) {
   if (!res || res.error || !policy) return res;
   const key = repoKey(res);
   const rules = [
-    ...Object.entries((policy.ignores || {})['*'] || {}).map(([id, reason]) => ({ id, reason, from: 'all repos' })),
+    ...Object.entries((policy.ignores || {})['*'] || {}).filter(([id]) => wildcardOk(id, MIN_PREFIX.allRepos)).map(([id, reason]) => ({ id, reason, from: 'all repos' })),
     ...Object.entries((policy.ignores || {})[key] || {}).map(([id, reason]) => ({ id, reason, from: 'GutCheck' })),
-    ...Object.entries((res.repoPolicy && res.repoPolicy.ignore) || {}).map(([id, reason]) => ({ id, reason, from: '.gutcheck.json' })),
+    ...Object.entries((res.repoPolicy && res.repoPolicy.ignore) || {}).filter(([id]) => wildcardOk(id, MIN_PREFIX.repo)).map(([id, reason]) => ({ id, reason, from: FROM_REPO })),
   ];
   let findings = res.findings;
   if (policy.baseline) {
@@ -137,7 +141,7 @@ function applyPolicy(res, policy, score) {
   const ignored = [];
   const kept = [];
   for (const f of findings) {
-    const rule = rules.find((r) => matches(r.id, f.id));
+    const rule = rules.find((r) => matches(r.id, f.id) && (r.from !== FROM_REPO || canRepoIgnore(f)));
     if (rule) ignored.push({ ...f, ignoredBecause: rule.reason, ignoredIn: rule.from, ignoreRule: rule.id }); else kept.push(f);
   }
   res.ignoreKey = key;

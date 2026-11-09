@@ -24,11 +24,4 @@ function upkeepFix(id, r) {
   return null;
 }
 
-// One line for the repo snapshot: what the owner has accepted, so nobody re-suggests it.
-function ignoredLine(r, t) {
-  const list = r.ignored || [];
-  if (!list.length) return null;
-  return `- Ignored by the owner (do not suggest fixing these): ${list.slice(0, 12).map((f) => `${t(f.id, 60)} (${t(f.ignoredBecause, 120)})`).join('; ')}${list.length > 12 ? `; and ${list.length - 12} more` : ''}`;
-}
-
-module.exports = { upkeepFix, ignoredLine, REFS };
+module.exports = { upkeepFix, REFS };
