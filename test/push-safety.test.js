@@ -105,6 +105,17 @@ test('B5: a branch named --mirror is refused', async () => {
   assert.equal(heads(), before);
 });
 
+test('push: push.followTags and push.recurseSubmodules in repo config do not widen the push', async () => {
+  const { d, bare } = setup();
+  sh(d, 'tag', '-a', '-m', 'release', 'v9.9.9');
+  sh(d, 'config', 'push.followTags', 'true');
+  sh(d, 'config', 'push.recurseSubmodules', 'on-demand');
+  const r = await push(d);
+  assert.ok(r.planned.ok && r.applied.ok, JSON.stringify(r));
+  assert.equal(sh(bare, 'tag', '--list'), '', 'a tag was pushed that the preview did not show');
+  assert.ok(r.planned.steps[0].args.includes('--no-follow-tags') && r.planned.steps[0].args.includes('--recurse-submodules=no'));
+});
+
 test('push: a normal push to a same-name upstream still works', async () => {
   const { d, bare } = setup();
   const r = await push(d);
@@ -122,7 +133,7 @@ test('push: a normal push sends the branch to its upstream branch, and -u sets a
   assert.ok(r.planned.ok && r.applied.ok, JSON.stringify(r));
   assert.equal(sh(bare, 'rev-parse', 'develop'), sh(d, 'rev-parse', 'dev'));
   assert.equal(sh(bare, 'branch', '--list', 'dev'), '', 'pushed to the upstream branch, not a new one');
-  assert.match(r.planned.display[0].text, /^git push -- origin refs\/heads\/dev:refs\/heads\/develop$/);
+  assert.match(r.planned.display[0].text, /^git push --no-follow-tags --recurse-submodules=no -- origin refs\/heads\/dev:refs\/heads\/develop$/);
 
   sh(d, 'switch', '-q', '-c', 'fresh');
   commit(d, 'fresh\n');
@@ -130,5 +141,5 @@ test('push: a normal push sends the branch to its upstream branch, and -u sets a
   assert.ok(f.planned.ok && f.applied.ok, JSON.stringify(f));
   assert.equal(sh(bare, 'rev-parse', 'fresh'), sh(d, 'rev-parse', 'fresh'));
   assert.equal(sh(d, 'rev-parse', '--abbrev-ref', 'fresh@{u}'), 'origin/fresh');
-  assert.match(f.planned.display[0].text, /^git push -u -- origin refs\/heads\/fresh:refs\/heads\/fresh$/);
+  assert.match(f.planned.display[0].text, /^git push --no-follow-tags --recurse-submodules=no -u -- origin refs\/heads\/fresh:refs\/heads\/fresh$/);
 });

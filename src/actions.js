@@ -78,7 +78,8 @@ const ACTIONS = {
       }
       if (!REMOTE_RE.test(remote)) fail(`Refusing to push: "${cleanText(remote, 60)}" is not a safe remote name.`);
       if (!validBranch(dest)) fail(`Refusing to push: "${cleanText(dest, 60)}" is not a safe branch name.`);
-      const args = ['push', ...(r.git.upstream ? [] : ['-u']), '--', remote, `refs/heads/${b}:refs/heads/${dest}`];
+      // No tags or submodules either: push.followTags and push.recurseSubmodules would add them.
+      const args = ['push', '--no-follow-tags', '--recurse-submodules=no', ...(r.git.upstream ? [] : ['-u']), '--', remote, `refs/heads/${b}:refs/heads/${dest}`];
       return { risk: 'safe', title: `Push ${b}`, steps: [git(args, r.path, undefined, ['-c', `remote.${remote}.mirror=false`, '-c', 'push.default=simple'])] };
     },
   },
