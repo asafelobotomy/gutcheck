@@ -13,10 +13,11 @@ const { upkeepFix } = require('./report-upkeep');
 const { ignoredLines } = require('./ignore-rules');
 const { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches } = require('./checks');
 const { daysAgo, sq, plural } = require('./util');
+const { flat, INVISIBLE_RE, hasInvisible } = require('./text-safe');
 
 // Longest text kept from each untrusted field (names, paths, details), so one field cannot swamp the report.
-const LEN = { short: 80, title: 120, path: 200, text: 300, detail: 400 };
-const t = (s, n = LEN.title) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
+const LEN = { short: 80, title: 120, path: 200, text: 300, detail: 400, long: 1500 };
+const t = (s, n = LEN.title) => flat(String(s == null ? '' : s).replace(/`/g, ' '), n); // one line, no invisible characters or backticks
 const SEV = { error: 0, warn: 1, info: 2 };
 const MAX_CLUTTER_LINES = 40;
 
@@ -189,15 +190,15 @@ function clutterSection(c) {
 // flattened so nothing can start a new line, and the fence is longer than any run of backticks inside,
 // so no text can close it and pose as a step of its own.
 function fence(cmds) {
-  const body = cmds.map((c) => String(c).replace(/[\u0000-\u001f\u007f]/g, ' ')).join('\n');
+  const body = cmds.map((c) => String(c).replace(INVISIBLE_RE, ' ')).join('\n');
   const longest = Math.max(0, ...(body.match(/`+/g) || []).map((m) => m.length));
   const f = '`'.repeat(Math.max(3, longest + 1));
   return `${f}bash\n${body}\n${f}`;
 }
 
-// File names with control characters or backticks are not safe to paste into a shell: they are left
+// File names with control or invisible characters, or backticks, are not safe to paste into a shell: they are left
 // out of the commands (and the note says so), to be removed in GutCheck instead.
-const UNSAFE_NAME = /[\u0000-\u001f\u007f`]/;
+const unsafeName = (s) => s.includes('`') || hasInvisible(s);
 
 function clutterStep(c) {
   if (!c || !c.items || !c.items.length) return null;
@@ -206,8 +207,8 @@ function clutterStep(c) {
   const envs = c.items.filter((i) => i.category === 'env');
   const cmds = [];
   const listed = hi.slice(0, MAX_CLUTTER_LINES);
-  const unsafe = listed.filter((i) => UNSAFE_NAME.test(String(i.path))).length;
-  for (const i of listed) if (!UNSAFE_NAME.test(String(i.path))) cmds.push(i.mode === 'delete' ? `rm -rf -- ${sq(i.path)}` : `gio trash -- ${sq(i.path)}`);
+  const unsafe = listed.filter((i) => unsafeName(String(i.path))).length;
+  for (const i of listed) if (!unsafeName(String(i.path))) cmds.push(i.mode === 'delete' ? `rm -rf -- ${sq(i.path)}` : `gio trash -- ${sq(i.path)}`);
   return {
     phase: 6, rank: 2,
     title: `Remove ${plural(c.items.length, 'clutter item')}`,
@@ -256,9 +257,9 @@ function renderSteps(steps, level = 2) {
     if (s.phase !== phase) { phase = s.phase; out.push(`${ph} Phase ${phase + 1}: ${PHASES[phase]}\n`); }
     out.push(`${st} Step ${n++} [${s.sev}] ${t(s.title, LEN.path)}`);
     if (s.detail) out.push(`Detail: ${t(s.detail, LEN.detail)}`);
-    out.push(`Why: ${s.why}`);
+    out.push(`Why: ${flat(s.why, LEN.long)}`); // why and note can name folders and files (historyVerdict)
     if (s.cmds.length) out.push(fence(s.cmds));
-    if (s.note) out.push(`Note: ${s.note}`);
+    if (s.note) out.push(`Note: ${flat(s.note, LEN.long)}`);
     if (s.ref) out.push(`Source: ${s.ref}`);
     out.push('');
   }
