@@ -156,3 +156,15 @@ test('agents: Read-only blocks connecting, reviewing does not save the actions c
   await call('open:url', 'https://evil.example/');
   assert.deepEqual(opened, [['url', 'https://cursor.com/docs/context/mcp']]);
 });
+
+test('secrets: every channel is registered; Read-only blocks the ones that write or run a CLI', async () => {
+  const { handlers, call } = load();
+  for (const c of ['secrets:scan', 'secrets:tools', 'secrets:link', 'secrets:test', 'secrets:plan', 'secrets:apply', 'secrets:verify', 'secrets:skip']) assert.ok(handlers.has(c), c);
+  assert.ok(Array.isArray(await call('secrets:tools')), 'the tool list stays readable');
+  await call('settings:set', { readOnly: true });
+  const ro = { ok: false, error: 'Read-only mode is on.' };
+  assert.deepEqual(await call('secrets:plan', { paths: ['/x'] }), ro);
+  for (const ch of ['secrets:link', 'secrets:test', 'secrets:apply', 'secrets:verify', 'secrets:skip']) assert.deepEqual(await call(ch, {}), ro, ch);
+  assert.ok(Array.isArray(await call('secrets:tools')), 'still readable in Read-only mode');
+  assert.equal((await call('settings:get')).vault, undefined, 'nothing was linked');
+});

@@ -86,3 +86,28 @@ test('a clutter file name cannot break out of the command block or inject a step
     assert.ok(!(inner.match(/`+/g) || []).some((m) => m.length >= f));
   }
 });
+
+test('secrets: a repo secret file becomes a phase 0 step that runs gutcheck secrets --backup, never its contents', async () => {
+  const { createSecretsCtl } = require('../src/secrets-ctl');
+  const dir = await messyRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gutcheck-report-home-'));
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'gutcheck-report-data-'));
+  try {
+    const ctl = createSecretsCtl({ dataDir: data, settings: { load: () => ({}), update: () => ({}) }, env: { PATH: '' }, home });
+    const sec = await ctl.scan({ repos: [{ path: dir, name: path.basename(dir) }] });
+    const advice = sec.advice.filter((a) => a.repo === path.basename(dir));
+    assert.ok(advice.some((a) => a.id === 'secret-unbacked'), JSON.stringify(sec.advice));
+    const r = await scanRepo(dir, {});
+    const md = buildReport({ repos: [r], secrets: new Map([[dir, { advice }]]) });
+    assert.match(md, /Phase 1: Protect secrets and access[\s\S]*secret file[s]? exists? only on this machine/);
+    assert.match(md, /This file exists only on this machine; losing the disk loses the secret\./);
+    assert.match(md, /```bash\ngutcheck secrets --backup\n```/);
+    assert.match(md, /Note: Ask the owner first: this copies secrets into their password manager\./);
+    assert.ok(!md.includes('hunter2'), 'the file contents never reach the report');
+    // Workspace and home advice go in the workspace section; empty paths (test keys only) still work.
+    const ws = { id: 'ws-secret-unbacked', category: 'Secrets', severity: 'info', title: '1 secret file exists only on this machine', detail: 'Probably test keys: ~/.ssh/test_key', fix: { type: 'secret-backup', paths: [] } };
+    const mk = (name) => ({ ...r, path: '/w/' + name, name });
+    const wmd = buildReport({ repos: [mk('a'), mk('b')], workspace: [ws], root: '/w' });
+    assert.match(wmd, /## Workspace-level tidy-up[\s\S]*Probably test keys: ~\/\.ssh\/test_key[\s\S]*gutcheck secrets --backup/);
+  } finally { for (const d of [dir, home, data]) fs.rmSync(d, { recursive: true, force: true }); }
+});

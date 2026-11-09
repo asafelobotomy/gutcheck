@@ -208,3 +208,36 @@ test('cli: argument parsing, help, version, unknown command, fix previews withou
     assert.match((await run(['history'], env)).out, /alpha: Create and switch to feat.*\(cli\)/);
   } finally { cleanup(root, dataD); }
 });
+
+test('secrets over MCP: read-only list with titles and statuses only; backing up is refused even with --allow-actions', async () => {
+  const root = workspace();
+  const home = tmp('gutcheck-mcphome-');
+  const dataD = tmp('gutcheck-data-');
+  try {
+    fs.writeFileSync(path.join(root, 'alpha', '.env'), 'API_TOKEN=mcp-hunter2\n');
+    fs.mkdirSync(path.join(home, '.aws'));
+    fs.writeFileSync(path.join(home, '.aws', 'credentials'), '[default]\naws_secret_access_key=mcp-hunter3\n');
+    const c = client(createEngine({ env: { ...envFor(dataD), HOME: home, XDG_CONFIG_HOME: path.join(home, '.config') }, allowActions: true, via: 'mcp' }));
+    await c.req('initialize', { protocolVersion: PROTOCOLS[0] });
+    const tool = (await c.req('tools/list')).result.tools.find((t) => t.name === 'gutcheck_secrets');
+    assert.ok(tool, 'gutcheck_secrets is listed');
+    assert.equal(tool.annotations.readOnlyHint, true);
+    await c.call('gutcheck_overview', { root });
+    const r = await c.call('gutcheck_secrets', {});
+    assert.equal(r.isError, false, r.content[0].text);
+    const d = data(r);
+    assert.equal(d.linked, false);
+    const titles = d.items.map((x) => x.title).sort();
+    assert.deepEqual(titles, ['gutcheck: alpha/.env', 'gutcheck: ~/.aws/credentials']);
+    for (const x of d.items) assert.deepEqual(Object.keys(x).sort(), ['confidence', 'kind', 'status', 'title']);
+    const txt = r.content[0].text;
+    for (const bad of [root, home, 'sha256', 'hunter']) assert.ok(!txt.includes(bad), bad);
+    assert.ok(d.advice.length >= 2);
+
+    const p = await c.call('gutcheck_plan', { items: [{ secretBackup: ['/x'] }] });
+    assert.equal(p.isError, true);
+    assert.match(p.content[0].text, /only from the GutCheck app or CLI/);
+    const a = await c.call('gutcheck_apply', { tokens: ['s:0123456789abcdef0123456789abcdef'] });
+    assert.match(a.content[0].text, /only from the GutCheck app or CLI/);
+  } finally { cleanup(root, home, dataD); }
+});

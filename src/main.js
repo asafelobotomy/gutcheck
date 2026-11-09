@@ -15,6 +15,8 @@ const { createPolicyStore, driftReport } = require('./policy');
 const sched = require('./schedule');
 const { createWorkspaceScanner } = require('./workspace-scan');
 const { dataDir } = require('./paths');
+const { createSecretsCtl } = require('./secrets-ctl');
+const { registerIpc: registerSecretsIpc } = require('./secrets-glue');
 
 // The CLI and MCP server find the data folder through paths.js (GUTCHECK_DATA_DIR first); the app
 // uses the same one, so all three share settings, ignores and History.
@@ -141,7 +143,9 @@ const trendStore = {
   write: (a) => { const f = trendFile(); fs.writeFileSync(f + '.tmp', JSON.stringify(a)); fs.renameSync(f + '.tmp', f); },
 };
 const rescan = async (dir) => (await ws.refresh(dir)) || known.get(dir); // same depth as the scan it came from
-const service = createService({ known, settings: loadSettings, audit, trash: (f) => shell.trashItem(f), clipboard, rescan, trendStore, updateSettings });
+// Secret files and their password-manager backup: the only code that runs a vault CLI (secrets-ctl.js).
+const secretsCtl = createSecretsCtl({ dataDir: app.getPath('userData'), settings: { load: loadSettings, update: updateSettings }, audit: (e) => audit({ ...e, via: 'app' }) });
+const service = createService({ known, settings: loadSettings, audit, trash: (f) => shell.trashItem(f), clipboard, rescan, trendStore, updateSettings, secretsCtl });
 ws = createWorkspaceScanner({ known, service, policy: policyNow, seen: seen(), onBegin: (total) => send('scan:begin', { total }), onRepo: (res, done, total) => send('scan:repo', { res, done, total }) });
 
 handle('action:plan', (_e, { items } = {}) => service.planActions(items));
@@ -153,6 +157,7 @@ handle('quality:scan', (_e, { dirs } = {}) => service.qualityScan(dirs));
 handle('tests:scan', (_e, { dirs } = {}) => service.testsScan(dirs));
 handle('quality:set', (_e, patch) => service.setQualitySettings(patch));
 handle('report:copy', (_e, { dir } = {}) => service.copyReport(dir));
+registerSecretsIpc(handle, service.secrets, () => !!loadSettings().readOnly); // secrets:scan, tools, link, test, plan, apply, verify, skip
 
 handle('audit:list', () => readAudit(auditFile()));
 

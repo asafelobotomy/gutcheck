@@ -81,7 +81,14 @@ function hygieneFix(id, r) {
     'code-scanning-off': { phase: 7, rank: 3, why: 'Common vulnerabilities in the code go unnoticed.', cmds: [`gh api -X PATCH ${api('/code-scanning/default-setup')} -f state=configured`], note: 'Needs GitHub Actions enabled. Results appear under Security > Code scanning.', ref: REFS.codeScanning },
     'private-reporting-off': { phase: 7, rank: 4, why: 'Researchers otherwise have to report vulnerabilities in public.', cmds: [`gh api -X PUT ${api('/private-vulnerability-reporting')}`], ref: REFS.pvr },
   };
-  return steps[id] || null;
+  return steps[id] || secretFix(id);
+}
+
+// Local secret files that no password manager holds (secret-status.js), per repo and for the workspace/home.
+const SECRET_IDS = new Set(['secret-unbacked', 'secret-changed', 'ws-secret-unbacked', 'ws-secret-changed']);
+function secretFix(id) {
+  if (!SECRET_IDS.has(id)) return null;
+  return { phase: 0, rank: 2, why: 'This file exists only on this machine; losing the disk loses the secret.', cmds: ['gutcheck secrets --backup'], note: 'Ask the owner first: this copies secrets into their password manager.' };
 }
 
 // The repo-size step depends on where the space is (history.js, deep scans). History rewrites are
@@ -115,4 +122,4 @@ function sizeStep(hist) {
   return { ...base, why: historyVerdict(hist), cmds, note: 'Steps 1 and 2 are safe and stop the growth. Step 3 rewrites history: do it only if the owner asks, after the backup, then force-push every branch and tag and tell everyone with a clone to re-clone. GitHub LFS storage has quotas. Encrypted files (git-crypt, if used) must stay listed in .gitattributes after any rewrite.' };
 }
 
-module.exports = { hygieneFix, sizeStep, REFS };
+module.exports = { hygieneFix, secretFix, sizeStep, REFS };

@@ -13,6 +13,8 @@ const { createWorkspaceScanner } = require('./workspace-scan');
 const { createPolicyStore, driftReport, repoKey } = require('./policy');
 const { createSeenStore } = require('./schedule');
 const FixAll = require('./renderer/fix-all');
+const { createSecretsCtl } = require('./secrets-ctl');
+const { engineSecrets, SECRET_TYPES, MCP_REFUSAL } = require('./secrets-glue');
 
 const OFF = 'Actions are turned off: start GutCheck with --allow-actions to plan and apply changes. Everything else works read-only.';
 
@@ -81,10 +83,15 @@ function createEngine(opts = {}) {
     known, settings, audit: (e) => appendAudit(auditFile, { ...e, via: opts.via || 'cli' }),
     rescan: async (d) => (await ws.refresh(d)) || known.get(d), trendStore,
     updateSettings: (p) => store.update(p && p.quality ? { quality: p.quality } : {}), // headless callers may only change quality settings
+    // The secrets controller links nothing from here (the app does); it reads the vault setting, backs up and verifies.
+    secretsCtl: createSecretsCtl({ dataDir: dir, settings: store, env, home: env.HOME || os.homedir(), audit: (e) => appendAudit(auditFile, { ...e, via: opts.via || 'cli' }) }),
   });
 
   ws = createWorkspaceScanner({ known, service, policy: policy.load, seen });
   const root = () => ws.root();
+  const via = opts.via || 'cli';
+  // Secret files: a read for everyone; backup, verify and skip for the CLI only (MCP is refused).
+  const secrets = engineSecrets({ service, via, readOnly: () => !!store.load().readOnly, ensure: (o) => ensure(o) });
 
   // Scan a workspace (default: the folder last scanned from the command line or MCP, else the app's).
   // Concurrent calls for the same folder share one scan; another folder waits for it, then scans.
@@ -199,6 +206,7 @@ function createEngine(opts = {}) {
     const s = await ensure({ onProgress });
     if (!s.ok) return s;
     if (!Array.isArray(items) || !items.length) return { ok: false, error: 'Pass items: [{ repo, action: { type, ... } } or { repo, finding }].' };
+    if (via === 'mcp' && items.some((it) => it && (it.secretBackup !== undefined || SECRET_TYPES.has(it.action && it.action.type)))) return { ok: false, error: MCP_REFUSAL };
     const resolved = [];
     const errors = [];
     const decisions = [];
@@ -207,6 +215,11 @@ function createEngine(opts = {}) {
       if (it && it.agentFix && typeof it.agentFix === 'object') {
         const p = agentsCtl().planFix(it.agentFix, [...known.values()].filter((r) => !r.error));
         errors.push(p.ok ? { ok: true, token: 'a:' + p.token, repo: 'Agent setup', title: p.title, risk: p.risk || 'caution', commands: p.display, note: p.note } : { ok: false, repoName: 'Agent setup', error: p.error });
+        continue;
+      }
+      if (it && it.secretBackup !== undefined) { // { secretBackup: [paths] }: the CLI's own backup preview
+        const p = await secrets.plan(it.secretBackup);
+        errors.push(p.ok ? { ok: true, token: p.token, repo: 'Secrets', title: p.title, risk: p.risk, commands: p.display.map((d) => d.text), note: p.note } : { ok: false, repoName: 'Secrets', error: p.error });
         continue;
       }
       const x = resolve(it && it.repo);
@@ -231,6 +244,7 @@ function createEngine(opts = {}) {
       if (!action && it.finding) {
         const f = (x.repo.findings || []).find((y) => y.id === it.finding);
         if (!f) { errors.push({ ok: false, repoName: x.repo.name, error: `No finding "${it.finding}" in ${x.repo.name}.` }); continue; }
+        if (f.fix && SECRET_TYPES.has(f.fix.type)) { errors.push({ ok: false, repoName: x.repo.name, error: via === 'mcp' ? MCP_REFUSAL : 'Back up secret files with gutcheck secrets --backup.' }); continue; }
         if (!f.fix) { errors.push({ ok: false, repoName: x.repo.name, error: `Finding "${it.finding}" has no automatic fix. Follow its detail or the report's steps.` }); continue; }
         const { label, ...fix } = f.fix;
         action = { ...fix, ...(it.params && typeof it.params === 'object' ? it.params : {}), type: fix.type }; // params fill in what the fix needs (a commit message...)
@@ -249,7 +263,8 @@ function createEngine(opts = {}) {
     const failed = new Set(); // a failed plan stops the later ones for the same repo
     const startedAt = Date.now(); // plans fresh now stay valid for the whole batch
     for (const t of tokens) {
-      if (typeof t === 'string' && t.startsWith('a:')) { const r = store.load().readOnly ? { ok: false, error: 'Read-only mode is on in the GutCheck app.' } : await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm, failed, startedAt })));
+      if (typeof t === 'string' && t.startsWith('s:')) res.push({ title: 'Back up secret files', ...(await secrets.apply(t)), repoName: 'Secrets' });
+      else if (typeof t === 'string' && t.startsWith('a:')) { const r = store.load().readOnly ? { ok: false, error: 'Read-only mode is on in the GutCheck app.' } : await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm, failed, startedAt })));
     }
     return { ok: res.every((r) => r.ok), results: res.map((r) => ({ ok: r.ok, ...(r.skipped ? { skipped: true } : {}), repo: r.repoName, title: r.title, error: r.error, steps: (r.results || []).map((x) => ({ cmd: x.text, ok: x.ok, output: x.out || undefined })) })) };
   }
@@ -309,7 +324,7 @@ function createEngine(opts = {}) {
 
   const history = ({ limit = 50 } = {}) => ({ ok: true, entries: readAudit(auditFile, Math.max(1, Math.min(500, limit))) });
 
-  return { scan, repos, findings, repoDetail, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
+  return { scan, repos, findings, repoDetail, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, secrets: secrets.list, secretsPlan: secrets.plan, secretsApply: secrets.apply, secretsVerify: secrets.verify, secretsSkip: secrets.skip, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
 }
 
 module.exports = { createEngine, dataDir, ACTION_CATALOG };

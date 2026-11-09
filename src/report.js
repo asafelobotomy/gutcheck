@@ -6,7 +6,7 @@
 // to treat it as data. Env file contents never reach this module.
 
 const { PROTECTION } = require('./protection');
-const { hygieneFix, REFS } = require('./report-fixes');
+const { hygieneFix, secretFix, REFS } = require('./report-fixes');
 const { agentFix } = require('./agents');
 const { testsSection, testsFix } = require('./tests/report');
 const { upkeepFix, ignoredLine } = require('./report-upkeep');
@@ -221,11 +221,11 @@ function clutterStep(c) {
   };
 }
 
-function stepsFor(r, c, q, tt) {
+function stepsFor(r, c, q, tt, sec) {
   const steps = [];
   // The Tests review covers "no tests" better (stacks, CI), so the code-quality version is dropped when it ran.
   const qAdvice = ((q && q.advice) || []).filter((f) => !(tt && f.id === 'q-no-tests'));
-  for (const f of [...(r.findings || []), ...((c && c.advice) || []), ...qAdvice, ...((tt && tt.advice) || [])]) {
+  for (const f of [...(r.findings || []), ...((c && c.advice) || []), ...qAdvice, ...((tt && tt.advice) || []), ...((sec && sec.advice) || [])]) {
     const fx = fixFor(f, r);
     if (!fx) continue;
     steps.push({ ...fx, id: f.id, sev: f.severity, title: f.title, detail: f.detail });
@@ -280,10 +280,10 @@ function qualitySection(q) {
   return L.length > 1 ? L.join('\n') + '\n' : '';
 }
 
-function repoSection(r, c, level = 2, q = null, tt = null) {
+function repoSection(r, c, level = 2, q = null, tt = null, sec = null) {
   const h = '#'.repeat(level);
   if (r.error) return `${h} ${t(r.name)}\n\nGutCheck could not scan this repo: ${t(r.error, LEN.text)}\n`;
-  const steps = stepsFor(r, c, q, tt);
+  const steps = stepsFor(r, c, q, tt, sec);
   const body = steps.length ? `\n${h}# Action plan (do in this order)\n\n${renderSteps(steps, level)}` : '\nNo issues found. Nothing to do.\n';
   return `${h} ${t(r.name)}\n\n${snapshot(r)}\n${prTable(r)}${clutterSection(c)}${qualitySection(q)}${testsSection(tt)}${body}`;
 }
@@ -299,8 +299,8 @@ Rules:
 - When finished, re-run the checks (\`git status\`, \`gh pr list\`, \`gh run list\`) and give the user a short summary of what changed and what still needs a human decision.
 `;
 
-// repos: scan results; clutter: Map(path -> clutter result); workspace: advice[] (optional)
-function buildReport({ repos, clutter = new Map(), quality = new Map(), tests = new Map(), workspace = [], root = null }) {
+// repos: scan results; clutter, quality, tests, secrets: Map(path -> result with advice); workspace: advice[] (optional)
+function buildReport({ repos, clutter = new Map(), quality = new Map(), tests = new Map(), secrets = new Map(), workspace = [], root = null }) {
   const ok = repos.filter((r) => !r.error);
   const single = repos.length === 1;
   const out = [];
@@ -312,13 +312,14 @@ function buildReport({ repos, clutter = new Map(), quality = new Map(), tests = 
     const sorted = [...repos].sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
     out.push('Repos, worst first:\n' + sorted.map((r) => `- ${t(r.name)}: ${r.error ? 'scan failed' : `${r.grade} (${r.score}/100), ${plural(r.findings.length, 'finding')}`}`).join('\n') + '\n');
     if (workspace.length) {
-      const ws = workspace.map((f) => ({ ...f, phase: 7, rank: 9, why: t(f.detail, LEN.detail), cmds: f.cmds || [], sev: f.severity }));
-      out.push(`## Workspace-level tidy-up\n\n${renderSteps(ws.map((s) => ({ ...s, detail: '' })), 1)}`);
+      // Secret files keep their own step (and their file list as the detail); the rest use the detail as the why.
+      const ws = workspace.map((f) => (secretFix(f.id) ? { ...f, ...secretFix(f.id), sev: f.severity } : { ...f, phase: 7, rank: 9, why: t(f.detail, LEN.detail), cmds: f.cmds || [], sev: f.severity, detail: '' }));
+      out.push(`## Workspace-level tidy-up\n\n${renderSteps(ws.sort((a, b) => a.phase - b.phase), 1)}`);
     }
     out.push('## Repositories\n\nHandle repos in the order listed above.\n');
-    for (const r of sorted) out.push(repoSection(r, clutter.get(r.path), 3, quality.get(r.path), tests.get(r.path)));
+    for (const r of sorted) out.push(repoSection(r, clutter.get(r.path), 3, quality.get(r.path), tests.get(r.path), secrets.get(r.path)));
   } else {
-    out.push(repoSection(repos[0], clutter.get(repos[0].path), 2, quality.get(repos[0].path), tests.get(repos[0].path)));
+    out.push(repoSection(repos[0], clutter.get(repos[0].path), 2, quality.get(repos[0].path), tests.get(repos[0].path), secrets.get(repos[0].path)));
   }
   out.push('## Verification\n\nAfter the steps above, each repo should show: `git status` clean, no unpushed commits, no failing `gh run list --status failure` on the default branch, and no leftover clutter. Report anything you could not finish and why.\n');
   return out.join('\n');

@@ -13,6 +13,7 @@ const { buildReport } = require('./report');
 const Metrics = require('./renderer/metrics');
 const { scanQuality, normalizeSettings, LINE_LIMITS } = require('./quality');
 const { scanTests } = require('./tests');
+const { createSecretsService } = require('./secrets-glue');
 
 const { DAYS_PER_YEAR } = require('./util');
 
@@ -24,13 +25,17 @@ const publicPlan = (token, p) => ({ ok: true, token, type: p.type, repoPath: p.r
 
 // deps: { known: Map(path -> scan result), settings: () => obj, audit: (entry) => void,
 //         trash: (path) => Promise, clipboard: { writeText }, rescan?: (dir) => Promise<result>,
-//         trendStore?: { read(): array, write(array) }, updateSettings?: (patch) => settings }
-function createService({ known, settings, audit, trash, clipboard = { writeText() {} }, rescan = (d) => scanRepo(d, { deep: false }), trendStore = null, updateSettings = () => ({}) }) {
+//         trendStore?: { read(): array, write(array) }, updateSettings?: (patch) => settings,
+//         secretsCtl?: createSecretsCtl() (the secrets scan and backup; left out, there is no secrets section) }
+function createService({ known, settings, audit, trash, clipboard = { writeText() {} }, rescan = (d) => scanRepo(d, { deep: false }), trendStore = null, updateSettings = () => ({}), secretsCtl = null }) {
   const plans = new Map(); // token -> { plan, expires } (only these stored plans can ever run)
   const busy = new Set(); // repo paths with an action in flight
   let clutterScanning = false;
   let qualityScanning = false;
   let testsScanning = false;
+  const secrets = secretsCtl ? createSecretsService({ ctl: secretsCtl, known, settings }) : null;
+  // Read-only: secret files in the repos (`dirs` limits them), the workspace root and home, with their backup status.
+  const secretsScan = (dirs) => (secrets ? secrets.scan(dirs) : { ok: false, error: 'Secrets are not available here.' });
 
   // ---- Trend history: a small snapshot per scan (scores and totals only), local to this machine ----
   const rootKey = (r) => (r ? path.resolve(r) : ''); // '/w' and '/w/' are the same workspace
@@ -212,7 +217,9 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
       try { tests.set(r.path, await scanTests(r.path)); } catch {}
     }
     const root = settings().root;
-    const text = buildReport({ repos, clutter, quality, tests, workspace: dir ? [] : (await wsAdvice(root)) || [], root: dir ? null : root });
+    const sec = secrets ? await secrets.reportAdvice(dir) : { byPath: new Map(), workspace: [] };
+    const workspace = dir ? [] : [...sec.workspace, ...((await wsAdvice(root)) || [])];
+    const text = buildReport({ repos, clutter, quality, tests, secrets: sec.byPath, workspace, root: dir ? null : root });
     return { ok: true, text, repos: repos.length };
   }
 
@@ -227,7 +234,7 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
   const forgetPlans = () => plans.clear();
   const hasPlans = () => [...plans.values()].some((v) => v.expires >= Date.now()); // a review may be open
 
-  return { planActions, applyActions, forgetPlans, hasPlans, clutterScan, qualityScan, testsScan, qualitySettings, setQualitySettings, reportText, copyReport, wsAdvice, recordScan, trend };
+  return { planActions, applyActions, forgetPlans, hasPlans, clutterScan, qualityScan, testsScan, secretsScan, secrets, qualitySettings, setQualitySettings, reportText, copyReport, wsAdvice, recordScan, trend };
 }
 
 module.exports = { createService };

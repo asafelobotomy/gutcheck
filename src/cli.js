@@ -22,6 +22,13 @@ Usage: gutcheck <command> [options]
                                 coverage and mutation results (read-only); run them with
                                 fix <repo> tests-run kind=coverage|mutation --yes
   workspace                     workspace and machine advice (git config, disk, AI agent setup)
+  secrets                       secret files that exist only on this machine (env files, keys,
+                                credentials in your home folder) and whether they are backed up
+  secrets --backup [--yes]      preview copying every unbacked or changed one into the password
+                                manager linked in the app; --yes runs it
+  secrets --verify              check the backed-up items are still in the password manager
+  secrets --skip <path> <reason...>
+                                don't back up that file (shown as skipped, with the reason)
   actions                       actions that fix accepts, with parameters
   fix <repo> <finding|action> [key=value...]
                                 plan a fix and show the exact commands; add --yes to run them
@@ -55,7 +62,7 @@ function parseValue(k, v) {
 
 function parseArgs(argv) {
   const o = { _: [], flags: {} };
-  const takesValue = new Set(['root', 'repo', 'severity', 'category', 'confirm', 'limit']);
+  const takesValue = new Set(['root', 'repo', 'severity', 'category', 'confirm', 'limit', 'skip']);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith('--')) {
@@ -106,6 +113,45 @@ async function fixAll(engine, repo, f, out, err) {
   if (Object.keys(confirm).length && f.confirm !== plans.find((x) => x.confirmName).confirmName) { err(`gutcheck: some steps are dangerous: add --confirm ${plans.find((x) => x.confirmName).confirmName}`); return 1; }
   const r = await engine.apply({ tokens: plans.map((x) => x.token), confirm });
   for (const x of r.results) { out(`${x.ok ? 'ok     ' : x.skipped ? 'SKIPPED' : 'FAILED '}  ${x.title || ''}`); if (x.error) err(`gutcheck: ${x.error}`); }
+  return r.ok ? 0 : 1;
+}
+
+// gutcheck secrets: the status table, or --backup [--yes], --verify, --skip <path> <reason...>.
+async function secretsCmd(engine, f, rest, out, err, json) {
+  const fail = (r) => { err(`gutcheck: ${r.error}`); return 1; };
+  if (Object.prototype.hasOwnProperty.call(f, 'skip')) {
+    const r = await engine.secretsSkip(typeof f.skip === 'string' ? f.skip : '', rest.join(' '));
+    if (!r.ok) return fail(r);
+    out(`Not backing up ${f.skip}: ${rest.join(' ')}`);
+    return 0;
+  }
+  if (f.verify) {
+    const r = await engine.secretsVerify();
+    if (!r.ok) return fail(r);
+    if (f.json) json(r); else out(`Checked ${r.checked}: ${r.missing} missing from the password manager, ${r.mismatch} with a different key.`);
+    return 0;
+  }
+  const list = await engine.secrets();
+  if (!list.ok) return fail(list);
+  if (!f.backup) {
+    if (f.json) { json(list); return 0; }
+    out(list.linked ? `Password manager: ${list.tool}\n` : 'No password manager linked: link one in the GutCheck app (Secrets > Settings).\n');
+    for (const x of list.items) out(`  ${x.status.padEnd(9)} ${x.kind.padEnd(5)} ${String(x.size).padStart(8)}  ${x.title.replace(/^gutcheck: /, '')}${x.note ? `  (${x.note})` : ''}${x.sameAs ? '  (same as a backed-up file)' : ''}`);
+    if (!list.items.length) out('No secret files found.');
+    return 0;
+  }
+  // Everything unbacked or changed that can be saved as one file; probable test keys are left to the app.
+  const todo = list.items.filter((x) => x.saveable && x.confidence !== 'low' && !['backed', 'skipped'].includes(x.status));
+  if (!todo.length) { out('Nothing to back up.'); return 0; }
+  const p = await engine.secretsPlan(todo.map((x) => x.path));
+  if (!p.ok) return fail(p);
+  out(`${p.title}  (risk: ${p.risk})`);
+  p.display.forEach((d) => out(`  $ ${d.text}`));
+  out(`  ${p.note}`);
+  if (!f.yes) { out('\nNothing was run. Add --yes to run exactly these commands.'); return 0; }
+  const r = await engine.secretsApply(p.token);
+  if (r.error) err(`gutcheck: ${r.error}`);
+  for (const x of r.results || []) out(`  ${x.ok ? 'ok    ' : 'FAILED'}  ${x.text}${x.out ? `\n    ${x.out.replace(/\n/g, '\n    ')}` : ''}`);
   return r.ok ? 0 : 1;
 }
 
@@ -184,6 +230,7 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
     case 'clutter': return done(await engine.clutter({ repos: rest }));
     case 'quality': return done(await engine.quality({ repos: rest }));
     case 'tests': return done(await engine.tests({ repos: rest }), (r) => r.repos.forEach((x) => { out(`\n${x.name}: ${x.testCases} tests in ${x.testFiles} files${x.results && x.results.coverage ? `, coverage ${x.results.coverage.percent}%` : ''}${x.results && x.results.mutation ? `, mutation score ${x.results.mutation.score}%` : ''}`); (x.advice || []).forEach((a) => out(`  ${icon[a.severity]} ${a.title}${a.fix ? `  (gutcheck fix ${x.name} tests-run kind=${a.fix.kind}${a.fix.stack ? ` stack=${a.fix.stack}` : ''})` : ''}\n      ${String(a.detail).slice(0, 300)}`)); }));
+    case 'secrets': return secretsCmd(engine, f, rest, out, err, json);
     case 'workspace': return done(await engine.workspace(), (r) => r.advice.forEach((x) => out(`${icon[x.severity]} ${x.title}\n    ${x.detail}${x.ref ? `\n    Source: ${x.ref}` : ''}`)));
     case 'fix': {
       const [repo, what, ...kv] = rest;
