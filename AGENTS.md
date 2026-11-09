@@ -12,7 +12,7 @@ GutCheck is an Electron app (plus a CLI and an MCP server) that checks the healt
 
 ## Layout
 
-- `src/exec.js`: `run` and the scans' `git`; `src/git-drivers.js` blanks repo-local filter and diff drivers before each scan git call.
+- `src/exec.js`: `run` and the scans' `git`; `src/git-drivers.js` blanks the repo's own filter and diff drivers before each scan or plan git call; `ctx.safeGit` (apply.js) is that layer for plans and checks.
 - `src/main.js`: Electron wiring only (IPC, window, tray). `src/entry.js` picks app, `--cli` or `--mcp`.
 - `src/service.js`, `src/engine.js`: the logic behind the IPC handlers and the headless CLI/MCP, with dependencies injected so it runs without Electron. `src/workspace-scan.js` is the one workspace scan all three use (it owns the `known` map).
 - Checks: `scanner.js` collects, `checks.js` and `checks-hygiene.js` turn it into findings, `report.js` and `report-fixes.js` write the "Copy for LLM" plan.
