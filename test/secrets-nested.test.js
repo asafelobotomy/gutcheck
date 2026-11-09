@@ -112,3 +112,32 @@ test('repo: a tracked list too big to read is reported as a problem, not as no s
     assert.equal((await S.findRepoSecrets(r)).length, 1, 'the default buffer fits');
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
+
+test('repo: a nested .git that resolves to the parent\'s own git dir is the parent\'s folder', async () => {
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'gc-samegit-')));
+  try {
+    const r = gitRepo(path.join(tmp, 'r'));
+    put(r, 'a/deploy.pem', '-----BEGIN PRIVATE KEY-----\nx\n');
+    put(r, 'b/deploy.pem', '-----BEGIN PRIVATE KEY-----\ny\n');
+    sh(r, 'add', '-A');
+    sh(r, 'commit', '-qm', 'keys');
+    fs.symlinkSync(path.join(r, '.git'), path.join(r, 'a', '.git'));
+    put(r, 'b/.git', 'gitdir: ../.git\n');
+    put(r, 'b/.env', 'UNTRACKED=1\n');
+    const problems = [];
+    assert.deepEqual((await S.findRepoSecrets(r, { problems })).map((x) => x.rel), ['b/.env'], 'committed in the parent');
+    assert.deepEqual(problems, []);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('repo: a nested checkout git cannot list is reported, not silently dropped', async () => {
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'gc-nestfail-')));
+  try {
+    const r = gitRepo(path.join(tmp, 'r'));
+    put(r, 'wt/.git', 'gitdir: /nowhere-gc\n');
+    put(r, 'wt/.env', 'WT=1\n');
+    const problems = [];
+    assert.deepEqual(await S.findRepoSecrets(r, { name: 'r', problems }), []);
+    assert.deepEqual(problems, [{ repo: 'r', error: 'Secrets not checked in r/wt: git could not list its tracked files.' }]);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});

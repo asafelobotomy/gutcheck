@@ -80,6 +80,14 @@ async function makeCandidate({ real, scope, repo, rel, title, inSshDir = false, 
   } catch { return null; }
 }
 
+// The checkout's git dir, resolved (a .git link or "gitdir: ../.git" can lead back to a parent's).
+async function gitDir(dir) {
+  const r = await git(['rev-parse', '--absolute-git-dir'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
+  const d = r.ok ? r.stdout.trim() : '';
+  if (!d) return null;
+  try { return await fsp.realpath(d); } catch { return d; }
+}
+
 // opts.name: the repo's label in titles and advice (default: the folder name). Callers pass the path
 // relative to the workspace root, so two nested repos named alike never share a vault item title.
 // opts.problems: an array that gets { repo, error } when a tracked list could not be read.
@@ -92,20 +100,23 @@ async function findRepoSecrets(dir, { name, problems = null, maxBuffer = LS_MAX_
   const found = new Map(); // real path -> candidate
   const budget = { seen: 0 };
 
-  // root: this checkout's folder; prefix: its path under the top repo ('' or 'libs/sub/').
-  async function scanCheckout(root, prefix, depth0) {
+  // root: this checkout's folder; prefix: its path under the top repo ('' or 'libs/sub/');
+  // gitDirs: the git dirs of this checkout and the ones around it.
+  async function scanCheckout(root, prefix, depth0, gitDirs) {
     const idx = await trackedFiles(root, maxBuffer);
     if (!idx.tracked) {
       const where = prefix ? `${repo}/${prefix.slice(0, -1)}` : repo;
-      if (idx.error && problems) problems.push({ repo, error: `Secrets not checked in ${where}: ${idx.error}.` });
+      if (problems) problems.push({ repo, error: `Secrets not checked in ${where}: ${idx.error || 'git could not list its tracked files'}.` });
       return;
     }
     const { tracked, gitlinks } = idx;
     // A folder that is a gitlink or a checkout is another repo: its files are committed or ignored
-    // there, so this one never reports them (they are scanned as that repo's own).
+    // there, so this one never reports them (they are scanned as that repo's own). A checkout whose git
+    // dir is this one's (or an outer one's) is just a folder of it.
     const nested = new Map(); // rel folder -> boolean
+    const otherRepo = async (abs) => await isCheckout(abs) && !gitDirs.has(await gitDir(abs));
     const isNested = async (relDir) => {
-      if (!nested.has(relDir)) nested.set(relDir, gitlinks.has(relDir) || await isCheckout(path.join(root, relDir)));
+      if (!nested.has(relDir)) nested.set(relDir, gitlinks.has(relDir) || await otherRepo(path.join(root, relDir)));
       return nested.get(relDir);
     };
     const inNested = async (rel) => {
@@ -135,7 +146,11 @@ async function findRepoSecrets(dir, { name, problems = null, maxBuffer = LS_MAX_
         if (e.isDirectory()) {
           if (depth >= MAX_DEPTH || NO_DESCEND.has(e.name)) continue;
           if (!await isNested(rel)) await walk(abs, depth + 1, rel + '/');
-          else if (await isCheckout(abs)) await scanCheckout(abs, `${prefix}${rel}/`, depth + 1); // a gitlink with no checkout is empty
+          else if (await isCheckout(abs)) { // a gitlink with no checkout is empty
+            const own = await gitDir(abs);
+            if (own && gitDirs.has(own)) continue; // a gitlink folder pointing back at an outer git dir
+            await scanCheckout(abs, `${prefix}${rel}/`, depth + 1, own ? new Set([...gitDirs, own]) : gitDirs);
+          }
         } else if ((e.isFile() || e.isSymbolicLink()) && P.looksSecret(rel)) {
           await consider(abs);
         }
@@ -144,7 +159,8 @@ async function findRepoSecrets(dir, { name, problems = null, maxBuffer = LS_MAX_
     await walk(root, depth0, '');
   }
 
-  await scanCheckout(top, '', 0);
+  const own = await gitDir(top);
+  await scanCheckout(top, '', 0, new Set(own ? [own] : []));
   return [...found.values()];
 }
 
