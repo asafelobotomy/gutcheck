@@ -164,6 +164,7 @@ handle('audit:list', () => readAudit(auditFile()));
 // Ignores (with a reason) and the baseline: GutCheck's own data, not the repos. Each change is logged.
 const rescanKnown = (dir) => ws.refresh(dir); // null if the workspace was rescanned meanwhile
 handle('ignore:set', async (_e, { dir, id, reason, remove, allRepos } = {}) => {
+  if (loadSettings().readOnly) return { ok: false, error: 'Read-only mode is on.' };
   const r = known.get(dir);
   if (!r && !allRepos) return { ok: false, error: 'Unknown repo' };
   const key = allRepos ? '*' : r.ignoreKey;
@@ -175,6 +176,7 @@ handle('ignore:set', async (_e, { dir, id, reason, remove, allRepos } = {}) => {
 });
 handle('drift:get', () => { const b = policyNow().baseline; return { file: policy().baselineFile, rules: b ? driftReport([...known.values()], b) : null }; });
 handle('baseline:init', async () => {
+  if (loadSettings().readOnly) return { ok: false, error: 'Read-only mode is on.' };
   const i = policy().initBaseline();
   await ws.refreshAll(); // every repo's drift changes
   return { ...i, repos: [...known.values()] };
