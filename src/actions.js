@@ -38,7 +38,7 @@ const GIT_STEP = [
   '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'protocol.fd.allow=never',
   '-c', 'log.showSignature=false', '-c', 'gpg.program=false', '-c', 'gpg.ssh.program=false', '-c', 'gpg.x509.program=false',
   '-c', 'commit.gpgSign=false', '-c', 'tag.gpgSign=false', '-c', 'gpg.ssh.defaultKeyCommand=',
-  '-c', 'core.alternateRefsCommand=', '-c', 'core.alternateRefsPrefixes=',
+  '-c', 'core.alternateRefsCommand=true', '-c', 'core.alternateRefsPrefixes=', // true: lists no refs (an empty command makes git print "cannot run")
   '-c', 'submodule.recurse=false', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false',
 ];
 const git = (args, dir, note, pre = []) => ({ kind: 'cmd', cmd: 'git', args: [...GIT_STEP, ...pre, ...args], cwd: dir, display: show('git', args), note });
@@ -328,6 +328,8 @@ async function plan(repo, action, ctx = {}) {
       warnings: [...(out.warnings || []), ...code.warnings],
       // Fix all leaves these out of what it runs on its own (renderer/fix-all.js).
       runsRepoCode: code.runsRepoCode,
+      // What recheck() inspects again just before the plan runs.
+      inspected: { uses: out.uses || [], remotes: out.remotes || [], pushes: !!out.pushes, target: out.target || null },
       undo: out.undo || null,
       body: out.body || null,
       note: [out.note, code.note].filter(Boolean).join(' ') || null,
@@ -339,5 +341,18 @@ async function plan(repo, action, ctx = {}) {
   }
 }
 
+// Just before a stored plan runs: inspect the repo again, since an earlier plan in the same batch
+// (a pull) can bring files that add hooks, filters or settings. Returns why the plan is held, or null.
+async function recheck(p, ctx = {}) {
+  if (!p || !p.inspected) return null;
+  const held = (why) => `Held: the repo changed after the preview. ${why} Review it again.`;
+  try {
+    const code = await inspect(defaultCtx(ctx), p.repoPath, p.inspected, fail);
+    const fresh = code.warnings.filter((w) => !(p.warnings || []).includes(w));
+    if ((code.runsRepoCode && !p.runsRepoCode) || fresh.length) return held(fresh.join(' '));
+  } catch (e) { return held(e.message); }
+  return null;
+}
+
 // Execute a plan produced by plan(). Stops at the first failing step.
-module.exports = { plan, apply };
+module.exports = { plan, apply, recheck };

@@ -42,7 +42,7 @@ const READONLY_GIT = [
   // run the repo's askpass program or credential helper.
   '-c', 'core.askPass=', '-c', 'credential.helper=',
   // Run when git lists an alternate object store's refs (fetch negotiation, connectivity checks).
-  '-c', 'core.alternateRefsCommand=', '-c', 'core.alternateRefsPrefixes=',
+  '-c', 'core.alternateRefsCommand=true', '-c', 'core.alternateRefsPrefixes=', // true lists none; empty prints "cannot run"
 ];
 
 // No lazy fetch: in a partial clone a missing object would be fetched, which runs the repo's

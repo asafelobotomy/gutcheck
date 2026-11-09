@@ -38,11 +38,13 @@ function discover(root, maxDepth = 2) {
   return found.sort();
 }
 
-// Only GitHub itself (audit B13): https://github.com/o/r, git@github.com:o/r or
-// ssh://git@github.com/o/r, optionally ending in .git. Not "github.com" anywhere in a path or a
-// local folder, so a local or other remote is never treated as GitHub.
+// Only GitHub itself (audit B13): the host must be github.com or www.github.com (any case), after
+// an https, http, git, ssh, git+ssh or ssh+git scheme with optional user info and port, or in the
+// scp form [user@]github.com:o/r. Not "github.com" elsewhere in an address, a lookalike host, a
+// <helper>:: address or a local folder, so those are never treated as GitHub.
+const GITHUB_RE = /^(?:(?:https?|git|ssh|git\+ssh|ssh\+git):\/\/(?:[^@/]*@)?(?:www\.)?github\.com(?::\d+)?\/|(?:[A-Za-z0-9._-]+@)?(?:www\.)?github\.com:)([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/i;
 function parseGithubRemote(url) {
-  const m = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(url || '');
+  const m = GITHUB_RE.exec(url || '');
   return m ? { owner: m[1], name: m[2] } : null;
 }
 

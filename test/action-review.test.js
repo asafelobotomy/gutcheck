@@ -36,7 +36,7 @@ test('review 1: a post-checkout hook that arrives with the branch is named, and 
   assert.equal(p.risk, 'caution');
   assert.equal(p.runsRepoCode, true);
   assert.match(p.warnings.join('\n'), /post-checkout hook \(\.husky\/post-checkout, in the files of topic\)/);
-  assert.match(p.warnings.join('\n'), /keeps its hooks in its own files \(\.husky\)/);
+  assert.match(p.warnings.join('\n'), /own git config chooses its hooks folder \(\.husky\)/);
 });
 
 test('review 1: merge (post-merge), pull and commit are marked whenever the hooks folder is inside the repo', async () => {

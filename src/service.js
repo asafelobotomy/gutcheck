@@ -106,6 +106,9 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
       if (busy.has(p.repoPath)) { note({ ok: false, repoName: p.repoName, title: p.title, error: 'Another action is running on this repo.' }, p); continue; }
       busy.add(p.repoPath);
       try {
+        // An earlier plan in the batch (a pull) may have brought hooks, filters or settings since the preview.
+        const held = await actions.recheck(p);
+        if (held) { note({ ok: false, held: true, repoName: p.repoName, title: p.title, error: held }, p); continue; }
         const r = await actions.apply(p, { trash });
         audit({ repo: p.repoName, path: p.repoPath, action: p.type, risk: p.risk, title: p.title, ok: r.ok, steps: r.results.map((x) => ({ cmd: x.text, ok: x.ok })) });
         let res = null;

@@ -47,10 +47,34 @@ test('parseGithubRemote handles ssh and https', () => {
   assert.deepEqual(parseGithubRemote('https://github.com/a/b.git'), { owner: 'a', name: 'b' });
 });
 
+test('parseGithubRemote accepts the usual GitHub address forms (B13)', () => {
+  for (const url of [
+    'https://github.com/a/b', 'https://github.com/a/b.git', 'https://github.com/a/b/', 'http://github.com/a/b', 'HTTPS://GitHub.COM/a/b',
+    'https://user:tok@github.com/a/b.git', 'https://www.github.com/a/b', 'https://github.com:443/a/b',
+    'git://github.com/a/b.git', 'ssh://git@github.com/a/b.git', 'ssh://git@github.com:22/a/b', 'SSH://git@GitHub.com/a/b', 'git+ssh://git@github.com/a/b',
+    'git@github.com:a/b.git', 'org-123@github.com:a/b', 'github.com:a/b', 'git@www.github.com:a/b',
+  ]) assert.deepEqual(parseGithubRemote(url), { owner: 'a', name: 'b' }, url);
+});
+
 test('parseGithubRemote only accepts GitHub itself, not "github.com" inside another address (B13)', () => {
-  for (const url of ['/tmp/github.com/a/b', 'file:///srv/github.com/a/b', 'https://evil.example/github.com/a/b', 'https://github.com.evil.example/a/b', 'evil::github.com:a/b', 'git@evil.example:github.com/a/b', 'http://github.com/a/b', 'ext::sh github.com/a/b']) {
-    assert.equal(parseGithubRemote(url), null, url);
-  }
+  for (const url of [
+    '/tmp/github.com/a/b', 'file:///srv/github.com/a/b', 'https://evil.example/github.com/a/b', 'https://github.com.evil.example/a/b',
+    'https://evilgithub.com/a/b', 'https://github.com@evil.example/a/b', 'evil::github.com:a/b', 'github.com::a/b', 'git@evil.example:github.com/a/b',
+    'ext::sh github.com/a/b', 'ftp://github.com/a/b', './github.com:a/b', 'https://github.com/a', 'https://github.com/a/b/c',
+  ]) assert.equal(parseGithubRemote(url), null, url);
+});
+
+test('a token in the origin URL never reaches the local scan result', async () => {
+  const { collectLocal } = require('../src/scanner');
+  const d = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'gutcheck-tok-'));
+  const { execFileSync } = require('node:child_process');
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: d });
+  execFileSync('git', ['remote', 'add', 'origin', 'https://someone:ghp_SECRETTOKEN@github.com/a/b.git'], { cwd: d });
+  try {
+    const r = await collectLocal(d, {}); // local only: no GitHub call
+    assert.ok(!JSON.stringify(r).includes('SECRETTOKEN'));
+    assert.equal(r.originUrl, 'https://github.com/a/b.git');
+  } finally { require('node:fs').rmSync(d, { recursive: true, force: true }); }
 });
 
 test('parseGithubRemote rejects unexpected characters', () => {

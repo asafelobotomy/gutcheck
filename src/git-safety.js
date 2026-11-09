@@ -72,31 +72,61 @@ const USES = {
   'ref-update': { hooks: ['reference-transaction'] },
 };
 
-const CODE_KEYS = '^(core\\.hookspath|hook\\..+\\.(command|event)|filter\\..+\\.(clean|smudge|process)|merge\\..+\\.driver|lfs\\.(extension\\..+\\.(clean|smudge)|customtransfer\\..+\\.path|standalonetransferagent)|commit\\.gpgsign)$';
+const CODE_KEYS = '^(core\\.hookspath|hook\\..+\\.(command|event)|filter\\..+\\.(clean|smudge|process)|merge\\..+\\.driver|lfs\\.(extension\\..+\\.(clean|smudge)|customtransfer\\..+\\.path|standalonetransferagent)|commit\\.gpgsign|include\\.path|includeif\\..+\\.path)$';
 
 const expand = (v) => (v.startsWith('~/') ? path.join(os.homedir(), v.slice(2)) : v);
 const inside = (dir, f) => { const rel = path.relative(dir, f); return !rel.startsWith('..') && !path.isAbsolute(rel); };
 const shown = (dir, f) => (f !== dir && inside(dir, f) ? path.relative(dir, f) : f);
 const runnable = (f) => { try { return fs.statSync(f).isFile() && (fs.accessSync(f, fs.constants.X_OK), true); } catch { return false; } };
+const label = (v) => String(v).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80);
+// A path with its symlinks resolved, as far as it exists (the rest may arrive later).
+function real(p) {
+  const rest = [];
+  for (let cur = p; ;) {
+    try { return path.join(fs.realpathSync(cur), ...rest); } catch {}
+    const up = path.dirname(cur);
+    if (up === cur) return p;
+    rest.unshift(path.basename(cur));
+    cur = up;
+  }
+}
+// Inside the work tree after symlinks, or anywhere under /proc (/proc/self/cwd is git's own cwd when
+// it runs, not ours when we look): such a path can name the repo's own files.
+const inTree = (dir, p) => p.startsWith('/proc/') || real(p).startsWith('/proc/') || inside(real(dir), real(p));
 
-// The hooks folder whose files are the repo's code (null when it is the user's own: an absolute
-// core.hooksPath from the user's config, outside the work tree), and that folder relative to the
-// work tree when it is inside it: then the repo's tracked files are its hooks, whoever set the path.
+// The hooks folder whose files are the repo's code (dir; null when it is the user's own: their
+// config's core.hooksPath, outside the work tree), why the repo's files can add or change hooks
+// (tree: a core.hooksPath from the repo's own config, whatever its value, or any inside the work
+// tree), and the folder relative to the work tree for listing a branch's hooks (rel).
 async function repoHooks(ctx, dir, all, untrusted) {
   // Not the command line's: the config read itself runs with core.hooksPath=/dev/null.
   const hp = all.filter((e) => e.key === 'core.hookspath' && e.origin !== 'command line:').pop();
   if (hp && hp.value) {
-    const v = expand(hp.value);
-    const abs = path.resolve(dir, v);
-    const inTree = !path.isAbsolute(v) || inside(dir, abs) ? path.relative(dir, abs) : null;
-    return { dir: !untrusted.includes(hp) && !inTree ? null : abs, inTree };
+    const abs = path.resolve(dir, expand(hp.value));
+    const own = !untrusted.includes(hp);
+    const there = inTree(dir, abs);
+    const rel = there && inside(dir, abs) && abs !== dir ? path.relative(dir, abs) : null;
+    const tree = !own ? `This repo's own git config chooses its hooks folder (${label(hp.value)}), so this step can run hooks that come with its files.`
+      : there ? `Your git config keeps hooks in each repo's files (${label(hp.value)}), so this step can run hooks that come with this repo's files.` : null;
+    return { dir: own && !there && path.isAbsolute(expand(hp.value)) ? null : abs, tree, rel };
   }
   // No core.hooksPath: the hooks folder of the repo's common dir (a linked worktree shares it).
   // Same as `git rev-parse --git-path hooks`, which reads the core.hooksPath safeGit blanks.
   const c = await ctx.safeGit(['rev-parse', '--git-common-dir'], dir);
   const common = c.ok && c.stdout.trim();
   if (!common) throw new Error('Could not find this repo\'s hooks folder.');
-  return { dir: path.join(path.resolve(dir, common), 'hooks'), inTree: null };
+  return { dir: path.join(path.resolve(dir, common), 'hooks'), tree: null, rel: null };
+}
+
+// A config file the repo's own config includes from its work tree (it may not exist yet): a pull
+// or checkout can then bring new hooks, filters or a hooks folder with the files.
+function includedFromTree(dir, untrusted) {
+  for (const e of untrusted) {
+    if (!/^include(if\..+)?\.path$/.test(e.key) || !e.value) continue;
+    const from = e.origin.startsWith('file:') ? path.dirname(path.resolve(dir, e.origin.slice(5))) : dir;
+    if (inTree(dir, path.resolve(from, expand(e.value)))) return `This repo's git config reads settings from its own files (${label(e.value)}), so this step can run hooks or filters that come with them.`;
+  }
+  return null;
 }
 
 // Executable hooks for these names in the files of `target` (a ref) under the in-tree hooks folder.
@@ -118,8 +148,9 @@ async function repoCode(ctx, dir, kinds, target) {
   const found = [];
   const h = await repoHooks(ctx, dir, all, untrusted);
   if (h.dir) for (const n of hooks) { const f = path.join(h.dir, n); if (runnable(f)) found.push(`${n} hook (${shown(dir, f)})`); }
-  const tree = h.inTree != null && uses.some((u) => u.tree);
-  if (tree) found.push(...(await hooksInTarget(ctx, dir, h.inTree, target, hooks)));
+  const treeStep = uses.some((u) => u.tree);
+  const tree = treeStep ? [h.tree, includedFromTree(dir, untrusted)].filter(Boolean) : [];
+  if (treeStep && h.rel) found.push(...(await hooksInTarget(ctx, dir, h.rel, target, hooks)));
   // Config-based hooks (git 2.54+): hook.<name>.command on hook.<name>.event.
   const events = new Map();
   for (const e of all) {
@@ -143,7 +174,7 @@ async function repoCode(ctx, dir, kinds, target) {
   // The user's own config signs commits (steps run with commit.gpgSign=false).
   const sign = all.filter((e) => e.key === 'commit.gpgsign' && e.origin !== 'command line:').pop();
   const signs = !!sign && !untrusted.includes(sign) && /^(true|yes|on|1)$/i.test(sign.value || '');
-  return { hooks: found, drivers: [...drivers], tree: tree ? shown(dir, path.resolve(dir, h.inTree)) || '.' : null, signs };
+  return { hooks: found, drivers: [...drivers], tree, signs };
 }
 
 // Checks a planned action (out.uses: the kinds of git step it runs; out.remotes and out.pushes:
@@ -161,7 +192,7 @@ async function inspect(ctx, dir, out, refuse) {
   }
   const code = await repoCode(ctx, dir, uses, out.target);
   const warnings = [];
-  if (code.tree) warnings.push(`This repo keeps its hooks in its own files (${code.tree}), so this step can run hooks that come with them. That is the repo's code, not GutCheck's.`);
+  for (const t of code.tree) warnings.push(`${t} That is the repo's code, not GutCheck's.`);
   if (code.hooks.length) warnings.push(`This runs the repo's own ${code.hooks.join(', ')}. That is the repo's code, not GutCheck's.`);
   if (code.drivers.length) warnings.push(`This runs programs the repo's own git config names for its files (${code.drivers.join(', ')}). That is the repo's code, not GutCheck's.`);
   const commits = uses.includes('commit') || uses.includes('merge');
