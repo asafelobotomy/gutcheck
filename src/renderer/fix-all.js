@@ -18,7 +18,7 @@
     'delete-merged': 5, 'worktree-prune': 5, push: 6,
     'split-instructions': 4, 'permissions-prune': 5,
     'run-rerun': 7, 'pr-close': 8, 'pr-merge': 8, 'repo-edit': 9, 'security-enable': 9, 'protect-branch': 10,
-    'lsp-setup': 11, 'tests-run': 12,
+    'lsp-setup': 11, 'tests-run': 12, 'rescue-bundle': -1,
   };
   const step = (a) => (a.type === 'add-file' && a.template === 'gitignore' ? 1 : STEP[a.type] ?? 9);
   const AUTO = new Set(['add-file', 'run-rerun', 'pull', 'push', 'delete-merged', 'security-enable', 'protect-branch', 'gitignore-append', 'worktree-prune', 'repo-edit', 'permissions-prune']);
@@ -49,6 +49,8 @@
       // Both stay on "leave it": an abort discards conflict resolutions, a register writes the user's global config.
       case 'git-op-abort': return { ...base, pick: 1, choices: [{ label: `${fix.label.replace('…', '')} (discards any conflict resolution done so far)`, action: fix }, leave('Leave it for me to finish')] };
       case 'maintenance-register': return { ...base, pick: 1, choices: [{ label: 'Register it (adds it to maintenance.repo in your global git config)', action: fix }, leave('Skip')] };
+      // Pushing is the usual fix; a rescue copy is offered but never picked for the owner.
+      case 'rescue-bundle': return { ...base, pick: 1, choices: [{ label: 'Save a rescue copy outside the workspace (the repo is not changed)', action: fix }, leave('Skip')] };
       case 'tests-run': return { ...base, pick: 1, choices: [{ label: 'Run it (executes the project\'s code)', action: fix }, leave('Skip')] };
       default: return { ...base, pick: 0, choices: [{ label: fix.label || 'Do it', action: fix }, leave()] };
     }

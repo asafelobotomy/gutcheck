@@ -165,3 +165,12 @@ test('cli: gutcheck local-only lists repos with local work, plain and --json', a
     assert.equal(json.repos[0].untracked, 1);
   } finally { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(dataDir, { recursive: true, force: true }); }
 });
+
+test('Fix all offers the rescue copy as a choice that starts on Skip', () => {
+  const FixAll = require('../src/renderer/fix-all');
+  const p = FixAll.plan({ findings: [{ id: 'git-unpushed-branches', severity: 'warn', title: 't', fix: { type: 'rescue-bundle', label: 'Save a rescue copy' } }] });
+  assert.equal(p.actions.length, 0);
+  const d = p.decisions[0];
+  assert.equal(d.choices[d.pick].action, null);
+  assert.equal(d.choices[0].action.type, 'rescue-bundle');
+});

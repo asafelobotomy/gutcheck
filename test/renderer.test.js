@@ -335,3 +335,15 @@ test('the Ignored list says when an AI agent wrote a rule, and the Baseline view
   assert.match(t.$('#detail').textContent, /Ignore rules not applied/);
   assert.match(t.$('#detail').textContent, /every repo: n\* \(needs 3 characters before \*\)/);
 });
+
+test('repo view offers Save a rescue copy, which plans rescue-bundle for that repo', async () => {
+  const t = await boot();
+  await scan(t);
+  click(t.$('#repos li'));
+  const b = t.$$('#detail button').find((x) => x.textContent === 'Save a rescue copy…');
+  assert.ok(b, 'button shown');
+  click(b);
+  await tick();
+  const plan = t.calls.find((c) => c[0] === 'plan');
+  assert.deepEqual(plan[1], [{ dir: '/w/gamma', action: { type: 'rescue-bundle' } }]);
+});
