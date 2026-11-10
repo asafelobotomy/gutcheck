@@ -5,14 +5,17 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { auditExtra } = require('./workflows-extra');
+
 const MAX_WORKFLOWS = 50;
 const MAX_BYTES = 256 * 1024;
 const SHA_RE = /^[0-9a-f]{40}$/;
 
 // Attacker-controllable contexts (GitHub docs, "Understanding the risk of script injections"):
 // github.head_ref and github.event.* values ending in body, default_branch, email, head_ref, label,
-// message, name, page_name, ref or title.
-const UNTRUSTED = /\$\{\{[^}]*\b(github\.head_ref|github\.event\.[\w.[\]'"*-]*?\b(?:body|default_branch|email|head_ref|label|message|name|page_name|ref|title))\b[^}]*\}\}/;
+// message, name, page_name, ref or title. Added: workflow_run head_branch and display_title (the branch name and
+// PR title of the run that triggered it, both set by whoever opened the PR).
+const UNTRUSTED = /\$\{\{[^}]*\b(github\.head_ref|github\.event\.[\w.[\]'"*-]*?\b(?:body|default_branch|email|head_ref|head_branch|display_title|label|message|name|page_name|ref|title))\b[^}]*\}\}/;
 const PR_HEAD_CHECKOUT = /\$\{\{\s*github\.event\.pull_request\.head\.(?:sha|ref)\s*\}\}|\$\{\{\s*github\.head_ref\s*\}\}|refs\/pull\/\$\{\{/;
 
 const indentOf = (l) => l.length - l.trimStart().length;
@@ -54,6 +57,7 @@ function auditWorkflow(rel, text) {
     else if (/^\s+permissions:/.test(line) && !run.has(i + 1)) { res.jobPermissions = true; if (/write-all/.test(line)) res.writeAll = true; }
     if (/^\s*runs-on:.*self-hosted/.test(line)) res.selfHosted = true;
   });
+  res.extra = auditExtra(lines, run, UNTRUSTED);
   return res;
 }
 
@@ -80,6 +84,7 @@ function auditWorkflows(dir) {
     writeAll: files.filter((f) => f.writeAll).map((f) => f.file),
     selfHosted: files.filter((f) => f.selfHosted).map((f) => f.file),
     codeql: files.some((f) => f.codeql),
+    extra: Object.fromEntries(Object.keys(files[0] ? files[0].extra : {}).map((k) => [k, files.flatMap((f) => f.extra[k].map((e) => ({ file: f.file, ...e })))])),
   };
 }
 

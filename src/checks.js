@@ -3,6 +3,7 @@
 // `fix` is an optional action descriptor the UI can offer as a button.
 
 const { daysAgo, DAYS_PER_YEAR } = require('./util');
+const { checkWorkflowAudits } = require('./checks-workflows');
 const { checkWorkflows, checkGitHygiene, checkProject, checkSecurityFeatures } = require('./checks-hygiene');
 const { checkAgents } = require('./agents');
 const { checkDepAutomation } = require('./dep-automation');
@@ -165,7 +166,7 @@ function score(findings) {
 
 function evaluate(snapshot) {
   return score([...checkCI(snapshot), ...checkPRs(snapshot), ...checkBranches(snapshot), ...checkFiles(snapshot), ...checkDeps(snapshot), ...checkDepAutomation(snapshot), ...checkRepoSettings(snapshot),
-    ...checkWorkflows(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkRelease(snapshot), ...checkSecurityFeatures(snapshot), ...checkAgents(snapshot)]);
+    ...checkWorkflows(snapshot), ...checkWorkflowAudits(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkRelease(snapshot), ...checkSecurityFeatures(snapshot), ...checkAgents(snapshot)]);
 }
 
 module.exports = { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches, evaluate, score, checkPRs, checkFiles, checkDeps, checkRepoSettings };
