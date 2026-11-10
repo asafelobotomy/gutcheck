@@ -243,6 +243,12 @@ async function finish(local, ghRes, opts) {
       remote = { ...ghRes.snap, ci: { failed: [], error: null } };
       if (local.hasWorkflows && !remote.remote.archived) remote.ci = await gh.fetchFailedRuns(ref, remote.remote.defaultBranch, dir, { force: opts.force });
       if (remote.remote.viewerPermission === 'ADMIN' && !remote.remote.archived) remote.security = await gh.fetchSecurity(ref, { force: opts.force });
+      if (remote.remote.viewerPermission === 'ADMIN' && !remote.remote.archived) {
+        // Only repos with release-style tags need the tag-ruleset read; only repos with workflows need the Actions settings.
+        const rel = local.release || {};
+        if (rel.vTags > 0 || rel.latest || remote.remote.latestRelease) remote.tagRulesets = await gh.fetchTagRulesets(ref, { force: opts.force });
+        if (local.hasWorkflows) remote.actionsSettings = await gh.fetchActionsSettings(ref, { force: opts.force });
+      }
       if ((remote.alertsTotal || 0) > (remote.alerts || []).length) { const all = await gh.fetchAlerts(ref); if (all && all.length) remote.alerts = all; }
       // A private repo on a free plan cannot have branch protection at all: do not ask for what cannot be done.
       if (remote.protection === false && !remote.remote.isPublic) remote.remote.protectionUnavailable = !(await gh.protectionAvailable(ref));

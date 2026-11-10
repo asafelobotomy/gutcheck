@@ -12,6 +12,7 @@ const { testsSection, testsFix } = require('./tests/report');
 const { upkeepFix } = require('./report-upkeep');
 const { runtimeFix } = require('./report-runtime');
 const { gitStateFix } = require('./report-gitstate');
+const { rulesFix } = require('./report-rules');
 const { ignoredLines } = require('./ignore-rules');
 const { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches } = require('./checks');
 const { daysAgo, sq, plural } = require('./util');
@@ -63,7 +64,7 @@ function fixFor(f, r) {
   if (id.startsWith('q-')) return qualityFix(id);
   if (id.startsWith('t-')) return testsFix(id);
   if (id.startsWith('agent-')) return agentFix(id) || { phase: 7, rank: 9, why: t(f.detail, LEN.text), cmds: [] };
-  const hy = secretFix(id, f.fix) || hygieneFix(id, r) || upkeepFix(id, r) || runtimeFix(id, r) || gitStateFix(id, r);
+  const hy = secretFix(id, f.fix) || hygieneFix(id, r) || upkeepFix(id, r) || runtimeFix(id, r) || gitStateFix(id, r) || rulesFix(id, r);
   if (hy) return hy;
   if (id === 'env-tracked') return { phase: 0, rank: 0, why: 'Committed secrets are readable by anyone with repo access and stay in history.', cmds: ['# for each file listed above:', 'git rm --cached <file>', 'git commit -m "Stop tracking env files"'], note: 'Tell the owner to rotate every secret those files held. Removing them from history needs a history rewrite: do NOT do that without explicit approval.' };
   if (id === 'env-not-ignored') return { phase: 0, rank: 1, why: 'One careless "git add ." would commit your secrets.', cmds: ["printf '\\n.env\\n.env.*\\n!.env.example\\n' >> .gitignore"], note: 'Check .gitignore does not already contain these lines first.' };
