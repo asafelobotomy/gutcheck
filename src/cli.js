@@ -5,6 +5,7 @@
 
 const { createEngine } = require('./engine');
 const { printable: P } = require('./util');
+const { summarizeLocalOnly } = require('./local-only');
 const { version } = require('../package.json');
 
 const HELP = `GutCheck ${version}: health checks for every git repo in a folder.
@@ -23,6 +24,7 @@ Usage: gutcheck <command> [options]
                                 coverage and mutation results (read-only); run them with
                                 fix <repo> tests-run kind=coverage|mutation --yes
   workspace                     workspace and machine advice (git config, disk, AI agent setup)
+  local-only                    repos holding work that exists only on this machine
   secrets                       secret files that exist only on this machine (env files, keys,
                                 credentials in your home folder) and whether they are backed up
   secrets --backup [--yes]      preview copying every unbacked or changed one into the password
@@ -244,6 +246,7 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
     case 'quality': return done(await engine.quality({ repos: rest }));
     case 'tests': return done(await engine.tests({ repos: rest }), (r) => r.repos.forEach((x) => { out(`\n${x.name}: ${x.testCases} tests in ${x.testFiles} files${x.results && x.results.coverage ? `, coverage ${x.results.coverage.percent}%` : ''}${x.results && x.results.mutation ? `, mutation score ${x.results.mutation.score}%` : ''}`); (x.advice || []).forEach((a) => out(`  ${icon[a.severity]} ${a.title}${a.fix ? `  (gutcheck fix ${x.name} tests-run kind=${a.fix.kind}${a.fix.stack ? ` stack=${a.fix.stack}` : ''})` : ''}\n      ${String(a.detail).slice(0, 300)}`)); }));
     case 'secrets': return secretsCmd(engine, f, rest, out, err, json);
+    case 'local-only': return done(await engine.localOnly(), (r) => { if (!r.repos.length) out('No repo holds work that exists only on this machine.'); r.repos.forEach((x) => out(`${P(x.repo)}: ${summarizeLocalOnly(x)}`)); });
     case 'workspace': return done(await engine.workspace(), (r) => r.advice.forEach((x) => out(`${icon[x.severity]} ${x.title}\n    ${x.detail}${x.ref ? `\n    Source: ${x.ref}` : ''}`)));
     case 'fix': {
       const [repo, what, ...kv] = rest;

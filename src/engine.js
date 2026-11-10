@@ -154,6 +154,13 @@ function createEngine(opts = {}) {
     return { ok: true, total: out.length, findings: out.slice(0, Math.max(1, Math.min(1000, limit))), categories: [...new Set(pool.flatMap((r) => r.findings.map((f) => f.category)))].sort() };
   }
 
+  // Repos holding work that exists only on this machine (scan data; read-only).
+  async function localOnly({ onProgress } = {}) {
+    const s = await ensure({ onProgress });
+    if (!s.ok) return s;
+    return { ok: true, repos: [...known.values()].filter((r) => !r.error && r.localOnly && r.localOnly.any).map((r) => ({ repo: r.name, ...r.localOnly })) };
+  }
+
   async function repoDetail({ repo, onProgress } = {}) {
     const s = await ensure({ onProgress });
     if (!s.ok) return s;
@@ -340,7 +347,7 @@ function createEngine(opts = {}) {
 
   const history = ({ limit = 50 } = {}) => ({ ok: true, entries: readAudit(auditFile, Math.max(1, Math.min(500, limit))) });
 
-  return { scan, repos, findings, repoDetail, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, secrets: secrets.list, secretsPlan: secrets.plan, secretsApply: secrets.apply, secretsVerify: secrets.verify, secretsSkip: secrets.skip, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
+  return { scan, repos, findings, localOnly, repoDetail, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, secrets: secrets.list, secretsPlan: secrets.plan, secretsApply: secrets.apply, secretsVerify: secrets.verify, secretsSkip: secrets.skip, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
 }
 
 module.exports = { createEngine, dataDir, ACTION_CATALOG };

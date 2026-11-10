@@ -112,3 +112,56 @@ test('the report step pushes each branch, quoted', () => {
   assert.ok(!step.cmds.some((c) => c.includes("'main'")));
   assert.equal(step.phase, 1);
 });
+
+// ---- Task 3: workspace advice, CLI and MCP
+const fs = require('node:fs');
+const os = require('node:os');
+const { localOnlyAdvice } = require('../src/workspace');
+const { TOOLS } = require('../src/mcp');
+const { main } = require('../src/cli');
+const { isolatedEnv } = require('./helpers/env');
+const lo = (o) => ({ branches: [], truncated: false, neverPushed: false, stashes: 0, uncommitted: 0, untracked: 0, noRemote: false, upstreamGone: false, detachedOnly: 0, any: true, ...o });
+
+test('ws-local-only names each repo with its summary', () => {
+  const [a] = localOnlyAdvice([
+    { name: 'noti-fi', localOnly: lo({ branches: [{ name: 'a', ahead: 1 }, { name: 'b', ahead: 1 }], stashes: 1 }) },
+    { name: 'clean', localOnly: lo({ any: false }) },
+  ]);
+  assert.equal(a.id, 'ws-local-only');
+  assert.equal(a.severity, 'info');
+  assert.equal(a.title, '1 repo holds work that exists only on this machine');
+  assert.match(a.detail, /noti-fi: 2 branches, 1 stash/);
+  assert.doesNotMatch(a.detail, /clean/);
+});
+
+test('ws-local-only is absent when no repo has local work', () => {
+  assert.deepEqual(localOnlyAdvice([{ name: 'x', localOnly: lo({ any: false }) }, { name: 'y' }]), []);
+});
+
+test('gutcheck_local_only is a read-only MCP tool that returns the engine result', async () => {
+  const t = TOOLS.find((x) => x.name === 'gutcheck_local_only');
+  assert.ok(t, 'tool registered');
+  assert.equal(t.annotations.readOnlyHint, true);
+  const r = await t.run({ localOnly: async () => ({ ok: true, repos: [{ repo: 'x', any: true }] }) }, {});
+  assert.deepEqual(r.repos, [{ repo: 'x', any: true }]);
+});
+
+test('cli: gutcheck local-only lists repos with local work, plain and --json', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gutcheck-lows-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gutcheck-lodata-'));
+  try {
+    const d = path.join(root, 'alpha');
+    fs.mkdirSync(d);
+    sh(d, 'init', '-q', '-b', 'main'); sh(d, 'config', 'user.email', 't@t'); sh(d, 'config', 'user.name', 't');
+    sh(d, 'commit', '-q', '--allow-empty', '-m', 'init');
+    fs.writeFileSync(path.join(d, 'new.txt'), 'x');
+    const env = isolatedEnv({ GUTCHECK_DATA_DIR: dataDir });
+    const run = async (argv) => { const o = []; const code = await main(argv, { out: (s) => o.push(s), err: () => {}, env }); return { code, out: o.join('\n') }; };
+    const plain = await run(['local-only', '--root', root]);
+    assert.equal(plain.code, 0);
+    assert.match(plain.out, /alpha: no remote, 1 branch, 1 untracked/);
+    const json = JSON.parse((await run(['local-only', '--root', root, '--json'])).out);
+    assert.equal(json.repos[0].repo, 'alpha');
+    assert.equal(json.repos[0].untracked, 1);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(dataDir, { recursive: true, force: true }); }
+});
