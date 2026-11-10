@@ -11,23 +11,26 @@ const UNRELEASED_MIN_COMMITS = 5;
 const UNRELEASED_MIN_DAYS = 90;
 const read = (f) => { try { return fs.readFileSync(f, 'utf8').slice(0, 512 * 1024); } catch { return null; } };
 
+// The `version = "..."` inside the first of the named TOML tables; null when absent (a workspace-inherited
+// `version.workspace = true` or a `dynamic` version has no such line).
+function tomlVersion(text, names) {
+  if (!text) return null;
+  let inside = false;
+  for (const l of text.split('\n')) {
+    const h = /^\s*\[([^\]]+)\]\s*$/.exec(l);
+    if (h) { inside = names.includes(h[1].trim()); continue; }
+    const m = inside && /^\s*version\s*=\s*["']([^"']+)["']/.exec(l);
+    if (m) return m[1];
+  }
+  return null;
+}
+
 // The version a root manifest declares: package.json, Cargo.toml [package] or pyproject [project]/[tool.poetry].
 function manifestVersion(dir) {
   try { const p = JSON.parse(read(path.join(dir, 'package.json')) || 'null'); if (p && typeof p.version === 'string') return { file: 'package.json', version: p.version }; } catch {}
-  const section = (text, names) => {
-    if (!text) return null;
-    let inside = false;
-    for (const l of text.split('\n')) {
-      const h = /^\s*\[([^\]]+)\]\s*$/.exec(l);
-      if (h) { inside = names.includes(h[1].trim()); continue; }
-      const m = inside && /^\s*version\s*=\s*["']([^"']+)["']/.exec(l);
-      if (m) return m[1];
-    }
-    return null;
-  };
-  const cargo = section(read(path.join(dir, 'Cargo.toml')), ['package']);
+  const cargo = tomlVersion(read(path.join(dir, 'Cargo.toml')), ['package']);
   if (cargo) return { file: 'Cargo.toml', version: cargo };
-  const py = section(read(path.join(dir, 'pyproject.toml')), ['project', 'tool.poetry']);
+  const py = tomlVersion(read(path.join(dir, 'pyproject.toml')), ['project', 'tool.poetry']);
   if (py) return { file: 'pyproject.toml', version: py };
   return null;
 }
@@ -84,4 +87,4 @@ function checkRelease(s) {
   return out;
 }
 
-module.exports = { collectRelease, checkRelease, manifestVersion, VERSION_TAG };
+module.exports = { collectRelease, checkRelease, manifestVersion, tomlVersion, VERSION_TAG };

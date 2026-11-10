@@ -6,6 +6,8 @@ const { HEAVY_DIRS, NODE_LOCKFILES, installCommand, cmpVersion } = require('./ut
 const { evaluate, score } = require('./checks');
 const { auditDepAutomation } = require('./dep-automation');
 const { collectRelease } = require('./release');
+const { collectRuntimes } = require('./runtime-eol');
+const { collectDrift } = require('./manifest-drift');
 const { applyPolicy, repoPolicy } = require('./policy');
 const { collectHygiene } = require('./hygiene');
 const gh = require('./github');
@@ -223,8 +225,9 @@ async function collectLocal(dir, opts) {
   try { hasWorkflows = fs.readdirSync(wfDir).length > 0; } catch {} // missing, or not a folder
   const [g, deps] = await Promise.all([collectGit(dir), collectDeps(dir, files.names, opts.deep)]);
   const [hygiene, agents, release] = await Promise.all([collectHygiene(dir, { names: files.names, rawOrigin, deep: opts.deep, branch: g.branch }), scanAgents(dir), collectRelease(dir)]);
+  const drift = await collectDrift(dir);
   delete files.names;
-  return { dir, ref, originUrl, files, hasWorkflows, git: g, deps, hygiene, agents, release, depAutomation: auditDepAutomation(dir), repoPolicy: repoPolicy(dir) };
+  return { dir, ref, originUrl, files, hasWorkflows, git: g, deps, hygiene, agents, release, drift, runtimes: collectRuntimes(dir), depAutomation: auditDepAutomation(dir), repoPolicy: repoPolicy(dir) };
 }
 
 const EMPTY_GH = () => ({ remote: null, prs: [], ci: { failed: [], error: null }, protection: null, alerts: [] });
@@ -254,7 +257,7 @@ async function finish(local, ghRes, opts) {
   const g = local.git;
   const base = (remote.remote && remote.remote.defaultBranch) || (g.branches.some((b) => b.name === 'main') ? 'main' : g.branches.some((b) => b.name === 'master') ? 'master' : null);
   g.mergedBranches = (await mergedInto(dir, base, g)).filter((b) => !(g.worktreeBranches || []).includes(b));
-  const snapshot = { path: dir, name: path.basename(dir), originUrl: local.originUrl, git: g, files: local.files, deps: local.deps, hasWorkflows: local.hasWorkflows, hygiene: local.hygiene, agents: local.agents, release: local.release, depAutomation: local.depAutomation, repoPolicy: local.repoPolicy, scannedAt: new Date().toISOString(), ...remote };
+  const snapshot = { path: dir, name: path.basename(dir), originUrl: local.originUrl, git: g, files: local.files, deps: local.deps, hasWorkflows: local.hasWorkflows, hygiene: local.hygiene, agents: local.agents, release: local.release, drift: local.drift, runtimes: local.runtimes, depAutomation: local.depAutomation, repoPolicy: local.repoPolicy, scannedAt: new Date().toISOString(), ...remote };
   // opts.policy: () => { ignores, baseline } from the data folder (the user's ignores and baseline).
   return applyPolicy({ ...snapshot, ...evaluate(snapshot) }, typeof opts.policy === 'function' ? opts.policy() : null, score);
 }
