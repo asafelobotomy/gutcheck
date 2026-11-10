@@ -71,7 +71,7 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
     const out = [];
     for (const it of items) {
       const repo = it && known.get(it.dir);
-      const p = await actions.plan(repo, it && it.action, { readOnly });
+      const p = await actions.plan(repo, it && it.action, { readOnly, workspaceRoot: settings().root, repoPaths: [...known.values()].map((x) => x.path), rescueDir: settings().rescueDir });
       if (!p.ok) { out.push({ ...p, repoName: repo && repo.name }); continue; }
       const token = crypto.randomBytes(16).toString('hex');
       plans.set(token, { plan: p, expires: Date.now() + PLAN_TTL });

@@ -48,6 +48,7 @@ const ACTION_CATALOG = {
   'add-file': { about: 'Add a standard file on the default branch', params: { template: '"license", "readme", "gitignore", "security", "contributing", "conduct", "pr-template", "dependabot" or "ci-node"', commit: 'true to commit it' } },
   'npm-install': { about: 'Install dependencies with the project\'s package manager', params: {} },
   'clean-clutter': { about: 'Move detected clutter to the trash (caches are deleted)', params: { paths: 'array of clutter paths from gutcheck_clutter' } },
+  'rescue-bundle': { about: 'Save a copy of everything in this repo that exists only on this machine (bundle, patches, untracked files), outside the workspace; the repo is not changed', params: { dest: 'optional: base folder (default ~/GutCheck-rescue)' } },
   'tests-run': { about: 'Run the tests with coverage, or mutation testing (runs the project\'s own code; dangerous, needs the repo name)', params: { kind: '"coverage" or "mutation"', stack: 'optional: "rust", "python", "node" or "go" (from gutcheck_tests runnable)', root: 'optional: the stack\'s folder, e.g. "wizard"' } },
   'gitignore-append': { about: 'Append known-safe rules to .gitignore', params: { entries: 'array of rules from a clutter finding' } },
   'permissions-prune': { about: 'Remove permission rules from .claude/settings.local.json (shown redacted, backed up outside the repo)', params: { hashes: 'array of rule hashes from an AI agents finding' } },
