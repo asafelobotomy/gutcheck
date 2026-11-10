@@ -72,7 +72,7 @@ const USES = {
   'ref-update': { hooks: ['reference-transaction'] },
 };
 
-const CODE_KEYS = '^(core\\.hookspath|hook\\..+\\.(command|event)|filter\\..+\\.(clean|smudge|process)|merge\\..+\\.driver|lfs\\.(extension\\..+\\.(clean|smudge)|customtransfer\\..+\\.path|standalonetransferagent)|commit\\.gpgsign|include\\.path|includeif\\..+\\.path)$';
+const CODE_KEYS = '^(core\\.hookspath|hook\\..+\\.(command|event|enabled)|filter\\..+\\.(clean|smudge|process)|merge\\..+\\.driver|lfs\\.(extension\\..+\\.(clean|smudge)|customtransfer\\..+\\.path|standalonetransferagent)|commit\\.gpgsign|include\\.path|includeif\\..+\\.path)$';
 
 const expand = (v) => (v.startsWith('~/') ? path.join(os.homedir(), v.slice(2)) : v);
 const inside = (dir, f) => { const rel = path.relative(dir, f); return !rel.startsWith('..') && !path.isAbsolute(rel); };
@@ -152,14 +152,23 @@ async function repoCode(ctx, dir, kinds, target) {
   const tree = treeStep ? [h.tree, includedFromTree(dir, untrusted)].filter(Boolean) : [];
   if (treeStep && h.rel) found.push(...(await hooksInTarget(ctx, dir, h.rel, target, hooks)));
   // Config-based hooks (git 2.54+): hook.<name>.command on hook.<name>.event.
-  const events = new Map();
+  // The repo's own config decides a hook when it sets its command or any of its events (the other
+  // half may be the user's: a repo can give the user's command an event). The command is never
+  // shown. An empty value resets: a last empty command, or enabled=false, means it does not run.
+  const named = new Map(); // friendly name -> { events, command, enabled, via }
+  const hook = (n) => named.get(n) || (named.set(n, { events: [], command: false, enabled: true, via: null }), named.get(n));
   for (const e of all) {
-    const m = /^hook\.(.+)\.event$/.exec(e.key);
-    if (m) events.set(m[1], e.value ? [...(events.get(m[1]) || []), e.value] : []);
+    const m = /^hook\.(.+)\.(command|event|enabled)$/.exec(e.key);
+    if (!m || e.origin === 'command line:') continue;
+    const h = hook(m[1]);
+    if (m[2] === 'event') h.events = e.value ? [...h.events, e.value] : [];
+    else if (m[2] === 'command') h.command = !!e.value;
+    else h.enabled = !/^(false|no|off|0)$/i.test(e.value || 'true');
+    if (m[2] !== 'enabled' && untrusted.includes(e) && !h.via) h.via = m[2];
   }
-  for (const e of untrusted) {
-    const m = /^hook\.(.+)\.command$/.exec(e.key);
-    if (m && e.value) for (const ev of (events.get(m[1]) || []).filter((x) => hooks.includes(x))) found.push(`${ev} hook (hook.${m[1].slice(0, 60)}.command in its git config)`);
+  for (const [n, h] of named) {
+    if (!h.via || !h.command || !h.enabled) continue;
+    for (const ev of h.events.filter((x) => hooks.includes(x))) found.push(`${ev} hook (hook.${label(n).slice(0, 60)}.${h.via} in its git config)`);
   }
   const drivers = new Set();
   const filters = uses.some((u) => u.filters);
