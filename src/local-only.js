@@ -3,7 +3,7 @@
 // exec.git, and refs are passed in full (refs/heads/<name>) so no branch name reads as an option.
 
 const { git } = require('./exec');
-const { plural } = require('./util');
+const { plural, printable, list } = require('./util');
 
 const MAX_BRANCHES = 50;
 const lines = (s) => String(s || '').split('\n').filter(Boolean);
@@ -50,4 +50,21 @@ function summarizeLocalOnly(lo) {
   ].filter(Boolean).join(', ');
 }
 
-module.exports = { collectLocalOnly, summarizeLocalOnly, MAX_BRANCHES };
+// Commits on branches other than the current one (git-ahead covers that) that exist on no remote.
+// Only with a remote: without one, no-remote already says nothing is backed up.
+function checkLocalOnly(s) {
+  const lo = s.localOnly;
+  if (!lo || !s.originUrl) return [];
+  const cur = s.git && s.git.branch;
+  const others = lo.branches.filter((b) => b.name !== cur);
+  if (!others.length) return [];
+  const n = others.length;
+  return [{
+    id: 'git-unpushed-branches', category: 'Branches', severity: 'warn',
+    title: `${plural(n, 'other branch', 'other branches')} ${n === 1 ? 'has' : 'have'} commits on no remote`,
+    detail: `${list(others.map((b) => `${printable(b.name)} (${b.ahead})`), 8)}${lo.truncated ? ' (only the first 50 branches were checked)' : ''}. These commits exist only on this machine.`,
+    fix: { type: 'rescue-bundle', label: 'Save a rescue copy' },
+  }];
+}
+
+module.exports = { collectLocalOnly, summarizeLocalOnly, checkLocalOnly, MAX_BRANCHES };

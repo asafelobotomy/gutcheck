@@ -77,3 +77,38 @@ test('the scan counts untracked apart from uncommitted and stores localOnly', as
   assert.equal(r.localOnly.untracked, 1);
   assert.equal(r.localOnly.any, true);
 });
+
+// ---- Task 2: the git-unpushed-branches check and its report step
+const { checkLocalOnly } = require('../src/local-only');
+const { hygieneFix } = require('../src/report-fixes');
+const snap = (lo, o = {}) => ({ originUrl: 'https://github.com/o/r', git: { branch: 'main' }, localOnly: { stashes: 0, uncommitted: 0, untracked: 0, noRemote: false, upstreamGone: false, detachedOnly: 0, truncated: false, neverPushed: false, any: true, ...lo }, ...o });
+
+test('git-unpushed-branches lists other branches with counts', () => {
+  const [f] = checkLocalOnly(snap({ branches: [{ name: 'main', ahead: 1 }, { name: 'feature', ahead: 2 }] }));
+  assert.equal(f.id, 'git-unpushed-branches');
+  assert.equal(f.category, 'Branches');
+  assert.equal(f.severity, 'warn');
+  assert.equal(f.title, '1 other branch has commits on no remote');
+  assert.match(f.detail, /feature \(2\)/);
+  assert.deepEqual(f.fix, { type: 'rescue-bundle', label: 'Save a rescue copy' });
+});
+
+test('no git-unpushed-branches without a remote (no-remote already warns)', () => {
+  assert.deepEqual(checkLocalOnly(snap({ branches: [{ name: 'feature', ahead: 2 }] }, { originUrl: '' })), []);
+});
+
+test('no git-unpushed-branches when only the current branch is ahead (git-ahead covers it)', () => {
+  assert.deepEqual(checkLocalOnly(snap({ branches: [{ name: 'main', ahead: 3 }] })), []);
+});
+
+test('a branch name with a control character is shown escaped', () => {
+  const [f] = checkLocalOnly(snap({ branches: [{ name: 'evil\u001b[31m', ahead: 1 }] }));
+  assert.ok(!f.detail.includes('\u001b'));
+});
+
+test('the report step pushes each branch, quoted', () => {
+  const step = hygieneFix('git-unpushed-branches', snap({ branches: [{ name: 'main', ahead: 1 }, { name: 'feature', ahead: 2 }] }));
+  assert.ok(step.cmds.includes("git push -u origin 'feature'"));
+  assert.ok(!step.cmds.some((c) => c.includes("'main'")));
+  assert.equal(step.phase, 1);
+});

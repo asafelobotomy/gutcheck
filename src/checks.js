@@ -4,6 +4,7 @@
 
 const { daysAgo, DAYS_PER_YEAR } = require('./util');
 const { checkWorkflowAudits } = require('./checks-workflows');
+const { checkLocalOnly } = require('./local-only');
 const { checkWorkflows, checkGitHygiene, checkProject, checkSecurityFeatures } = require('./checks-hygiene');
 const { checkAgents } = require('./agents');
 const { checkDepAutomation } = require('./dep-automation');
@@ -177,7 +178,7 @@ function score(findings) {
 
 function evaluate(snapshot) {
   return score([...checkCI(snapshot), ...checkPRs(snapshot), ...checkBranches(snapshot), ...checkFiles(snapshot), ...checkDeps(snapshot), ...checkDepAutomation(snapshot), ...checkRepoSettings(snapshot),
-    ...checkWorkflows(snapshot), ...checkWorkflowAudits(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkRelease(snapshot), ...checkRuntimeEol(snapshot), ...checkDrift(snapshot), ...checkSecurityFeatures(snapshot), ...checkRepoRules(snapshot), ...checkAgents(snapshot), ...checkGitState(snapshot)]);
+    ...checkWorkflows(snapshot), ...checkWorkflowAudits(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkRelease(snapshot), ...checkRuntimeEol(snapshot), ...checkDrift(snapshot), ...checkSecurityFeatures(snapshot), ...checkRepoRules(snapshot), ...checkAgents(snapshot), ...checkGitState(snapshot), ...checkLocalOnly(snapshot)]);
 }
 
 module.exports = { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches, evaluate, score, checkPRs, checkFiles, checkDeps, checkRepoSettings };
