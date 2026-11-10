@@ -18,13 +18,20 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const KEYS = '^((filter|diff)\\..+\\.(clean|smudge|process|textconv|command|required)|extensions\\.partialclone|remote\\..+\\.promisor|lfs\\.extension\\..+\\.(clean|smudge)|lfs\\.customtransfer\\..+\\.path|lfs\\.standalonetransferagent|lfs\\.storage|include\\.path|includeif\\..+\\.path)$';
+const KEYS = '^((filter|diff)\\..+\\.(clean|smudge|process|textconv|command|required)|extensions\\.partialclone|remote\\..+\\.promisor|lfs\\.extension\\..+\\.(clean|smudge)|lfs\\.customtransfer\\..+\\.path|lfs\\.standalonetransferagent|lfs\\.storage|hook\\..+\\.(command|event)|include\\.path|includeif\\..+\\.path)$';
 const DRIVER_RE = /^(filter|diff)\.(.+)\.(clean|smudge|process|textconv|command|required)$/;
 // git-lfs, run as a trusted global filter, reads the repo's config too and runs the programs these
 // name (an extension's clean/smudge, a custom transfer agent), and lfs.storage would make its
 // clean filter write objects outside the repo (blank: back to .git/lfs/objects). Blanked like drivers; git-lfs then
 // refuses the file, so the git call fails rather than run them. A tracked .lfsconfig cannot set them.
 const LFS_RE = /^lfs\.(extension\..+\.(clean|smudge)|customtransfer\..+\.path|standalonetransferagent|storage)$/;
+// Config hooks (git 2.54): hook.<name>.command runs on each hook.<name>.event, even with
+// core.hooksPath=/dev/null. <name> is any text (it may hold dots; git splits at the first and last
+// dot). Every name the repo's own config sets a command or event for is switched off with
+// hook.<name>.enabled=false, and its command and events are blanked as well. The user's own config
+// hooks (global, system, command line) are kept, like the user's own file hooks. Before git 2.54
+// there are no such keys, so nothing is added.
+const HOOK_RE = /^hook\.(.+)\.(command|event)$/;
 // A scan makes dozens of git calls per repo within a few seconds; 15 s covers one repo's scan.
 // The repo's config files, HEAD (for includeIf onbranch:) and every included file are watched
 // too, and scans and actions drop a repo's entry before they start (forget).
@@ -102,6 +109,7 @@ function untrustedOf(all, trusted) {
 function overridesFrom(all, trusted, gitVersion) {
   const out = [];
   const required = new Set();
+  const hooks = new Set();
   for (const e of untrustedOf(all, trusted)) {
     if (e.key === 'extensions.partialclone' || (/^remote\..+\.promisor$/.test(e.key) && !/^(false|no|off|0)$/i.test(e.value || ''))) {
       if (cmpVer(gitVersion, LAZY_FETCH_GIT) < 0) throw new Error(`this repo is a partial clone, and git ${gitVersion.join('.')} cannot stop it fetching (git 2.44 or newer can)`);
@@ -111,6 +119,14 @@ function overridesFrom(all, trusted, gitVersion) {
     if (LFS_RE.test(e.key)) {
       if (e.key.includes('=')) throw new Error(`cannot switch off the git-lfs setting "${e.key.slice(0, 80)}" in this repo's config`);
       out.push('-c', `${e.key}=`);
+      continue;
+    }
+    const h = HOOK_RE.exec(e.key);
+    if (h) {
+      if (hooks.has(h[1])) continue;
+      if (/[=\n]/.test(h[1])) throw new Error(`cannot switch off the git hook "${h[1].slice(0, 80)}" set in this repo's config`);
+      hooks.add(h[1]);
+      out.push('-c', `hook.${h[1]}.enabled=false`, '-c', `hook.${h[1]}.command=`, '-c', `hook.${h[1]}.event=`);
       continue;
     }
     const m = DRIVER_RE.exec(e.key);
