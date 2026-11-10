@@ -7,6 +7,7 @@ const { checkWorkflows, checkGitHygiene, checkProject, checkSecurityFeatures } =
 const { checkAgents } = require('./agents');
 const { checkDepAutomation } = require('./dep-automation');
 const { checkRelease } = require('./release');
+const { checkGitState } = require('./checks-gitstate');
 
 const { STALE_BRANCH_DAYS } = require('./renderer/metrics'); // one value for findings and the dashboard
 
@@ -76,7 +77,14 @@ function checkBranches(s) {
   const stale = staleBranches(g);
   if (stale.length)
     out.push({ id: 'git-stale', category: 'Branches', severity: 'info', title: `${stale.length} stale branch${stale.length > 1 ? 'es' : ''} (${STALE_BRANCH_DAYS}+ days)`, detail: stale.map((b) => b.name).join(', ') });
-  if (g.detached) out.push({ id: 'git-detached', category: 'Branches', severity: 'warn', title: 'Detached HEAD', detail: 'Commits here may be lost.' });
+  // A rebase, bisect or cherry-pick detaches HEAD by design (the git-op finding covers it). Otherwise it
+  // only matters when HEAD holds commits that no branch, tag or remote does (git-state.js).
+  const gs = s.gitState;
+  if (g.detached && !(gs && gs.ops.length)) {
+    const n = gs && gs.detached ? gs.detached.unreferenced : null;
+    if (n === 0) out.push({ id: 'git-detached', category: 'Branches', severity: 'info', title: 'Detached HEAD', detail: 'Every commit here is also on a branch, tag or remote, so nothing is at risk. Switch to a branch before you commit.' });
+    else out.push({ id: 'git-detached', category: 'Branches', severity: 'warn', title: n ? `Detached HEAD holding ${n} commit${n > 1 ? 's' : ''} no branch has` : 'Detached HEAD', detail: 'Commits made here are lost once you switch away, apart from the reflog.' });
+  }
   return out;
 }
 
@@ -165,7 +173,7 @@ function score(findings) {
 
 function evaluate(snapshot) {
   return score([...checkCI(snapshot), ...checkPRs(snapshot), ...checkBranches(snapshot), ...checkFiles(snapshot), ...checkDeps(snapshot), ...checkDepAutomation(snapshot), ...checkRepoSettings(snapshot),
-    ...checkWorkflows(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkRelease(snapshot), ...checkSecurityFeatures(snapshot), ...checkAgents(snapshot)]);
+    ...checkWorkflows(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkRelease(snapshot), ...checkSecurityFeatures(snapshot), ...checkAgents(snapshot), ...checkGitState(snapshot)]);
 }
 
 module.exports = { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches, evaluate, score, checkPRs, checkFiles, checkDeps, checkRepoSettings };

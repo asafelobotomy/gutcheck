@@ -8,7 +8,6 @@ const MiB = 1024;           // storage figures are in KiB
 const GiB = 1024 * MiB;
 const REPO_WARN_KIB = GiB;  // GitHub: repositories ideally under 1 GB...
 const REPO_ERR_KIB = 5 * GiB; // ...and strongly recommended under 5 GB
-const LOOSE_MAX = 6700;     // git's gc.auto default: above this, git itself would repack
 const STASH_WARN = 10;
 const README_MIN_BYTES = 300;
 
@@ -49,7 +48,6 @@ function checkGitHygiene(s) {
   const where = h.history ? ' ' + historyVerdict(h.history) : ' Run a Deep scan to see whether the space is current files or old history.';
   if (st.packKiB >= REPO_ERR_KIB) add('repo-size', 'error', `Repository is ${(st.packKiB / GiB).toFixed(1)} GB`, 'GitHub strongly recommends staying under 5 GB.' + where);
   else if (st.packKiB >= REPO_WARN_KIB) add('repo-size', 'warn', `Repository is ${(st.packKiB / GiB).toFixed(1)} GB`, 'GitHub recommends keeping repositories under 1 GB.' + where);
-  if (st.loose > LOOSE_MAX) add('git-loose', 'info', `${st.loose.toLocaleString()} loose git objects`, 'More than git\'s own auto-gc threshold. Packing them saves space and speeds git up.');
   if (st.garbage) add('git-garbage', 'warn', `${plural(st.garbage, 'stray file')} in the object store`, 'Run git count-objects -vH to see them; usually left by an interrupted git command.');
   if (h.historyBlobs && h.historyBlobs.length) {
     const big = h.historyBlobs[0].size;
@@ -100,4 +98,4 @@ function checkSecurityFeatures(s) {
   return out;
 }
 
-module.exports = { checkWorkflows, checkGitHygiene, checkProject, checkSecurityFeatures, REPO_WARN_KIB, LOOSE_MAX };
+module.exports = { checkWorkflows, checkGitHygiene, checkProject, checkSecurityFeatures, REPO_WARN_KIB };

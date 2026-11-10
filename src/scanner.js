@@ -8,6 +8,7 @@ const { auditDepAutomation } = require('./dep-automation');
 const { collectRelease } = require('./release');
 const { applyPolicy, repoPolicy } = require('./policy');
 const { collectHygiene } = require('./hygiene');
+const { collectGitState } = require('./git-state');
 const gh = require('./github');
 const { scanAgents } = require('./agents');
 const { lockVersions, superseded } = require('./dependabot-prs');
@@ -224,7 +225,8 @@ async function collectLocal(dir, opts) {
   const [g, deps] = await Promise.all([collectGit(dir), collectDeps(dir, files.names, opts.deep)]);
   const [hygiene, agents, release] = await Promise.all([collectHygiene(dir, { names: files.names, rawOrigin, deep: opts.deep, branch: g.branch }), scanAgents(dir), collectRelease(dir)]);
   delete files.names;
-  return { dir, ref, originUrl, files, hasWorkflows, git: g, deps, hygiene, agents, release, depAutomation: auditDepAutomation(dir), repoPolicy: repoPolicy(dir) };
+  const gitState = await collectGitState(dir, { detached: g.detached, storage: hygiene.storage });
+  return { dir, ref, originUrl, files, hasWorkflows, git: g, gitState, deps, hygiene, agents, release, depAutomation: auditDepAutomation(dir), repoPolicy: repoPolicy(dir) };
 }
 
 const EMPTY_GH = () => ({ remote: null, prs: [], ci: { failed: [], error: null }, protection: null, alerts: [] });
@@ -254,7 +256,7 @@ async function finish(local, ghRes, opts) {
   const g = local.git;
   const base = (remote.remote && remote.remote.defaultBranch) || (g.branches.some((b) => b.name === 'main') ? 'main' : g.branches.some((b) => b.name === 'master') ? 'master' : null);
   g.mergedBranches = (await mergedInto(dir, base, g)).filter((b) => !(g.worktreeBranches || []).includes(b));
-  const snapshot = { path: dir, name: path.basename(dir), originUrl: local.originUrl, git: g, files: local.files, deps: local.deps, hasWorkflows: local.hasWorkflows, hygiene: local.hygiene, agents: local.agents, release: local.release, depAutomation: local.depAutomation, repoPolicy: local.repoPolicy, scannedAt: new Date().toISOString(), ...remote };
+  const snapshot = { path: dir, name: path.basename(dir), originUrl: local.originUrl, git: g, gitState: local.gitState, files: local.files, deps: local.deps, hasWorkflows: local.hasWorkflows, hygiene: local.hygiene, agents: local.agents, release: local.release, depAutomation: local.depAutomation, repoPolicy: local.repoPolicy, scannedAt: new Date().toISOString(), ...remote };
   // opts.policy: () => { ignores, baseline } from the data folder (the user's ignores and baseline).
   return applyPolicy({ ...snapshot, ...evaluate(snapshot) }, typeof opts.policy === 'function' ? opts.policy() : null, score);
 }
