@@ -7,6 +7,7 @@ const { checkWorkflows, checkGitHygiene, checkProject, checkSecurityFeatures } =
 const { checkAgents } = require('./agents');
 const { checkDepAutomation } = require('./dep-automation');
 const { checkRelease } = require('./release');
+const { checkRepoRules } = require('./repo-rules');
 
 const { STALE_BRANCH_DAYS } = require('./renderer/metrics'); // one value for findings and the dashboard
 
@@ -165,7 +166,7 @@ function score(findings) {
 
 function evaluate(snapshot) {
   return score([...checkCI(snapshot), ...checkPRs(snapshot), ...checkBranches(snapshot), ...checkFiles(snapshot), ...checkDeps(snapshot), ...checkDepAutomation(snapshot), ...checkRepoSettings(snapshot),
-    ...checkWorkflows(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkRelease(snapshot), ...checkSecurityFeatures(snapshot), ...checkAgents(snapshot)]);
+    ...checkWorkflows(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkRelease(snapshot), ...checkSecurityFeatures(snapshot), ...checkRepoRules(snapshot), ...checkAgents(snapshot)]);
 }
 
 module.exports = { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches, evaluate, score, checkPRs, checkFiles, checkDeps, checkRepoSettings };

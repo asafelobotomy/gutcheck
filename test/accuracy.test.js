@@ -32,6 +32,13 @@ const base = (o = {}) => ({
   ci: { failed: [], error: null }, prs: [], alerts: [], hasWorkflows: true, protection: false, ...o, remote: { owner: 'o', name: 'r', url: 'https://github.com/o/r', isPublic: true, description: 'x', defaultBranch: 'main', pushedAt: new Date().toISOString(), openIssues: 0, viewerPermission: 'ADMIN', ...(o.remote || {}) },
 });
 
+test('repo rules: unreadable settings, unpinned workflows and archived repos raise no false alarms', () => {
+  const { checkRepoRules } = require('../src/repo-rules');
+  const s = base({ release: { latest: 'v1.0.0', vTag: 'v1.0.0', vTags: 1 }, tagRulesets: null, actionsSettings: { enabled: true, shaPinningRequired: false, defaultPermissions: 'read', canApprovePrs: false }, hygiene: { workflows: { files: 1, unpinned: [{ uses: 'a/b@v1' }], noPermissions: [] } } });
+  assert.deepEqual(checkRepoRules(s), [], 'tag rulesets that could not be read are not "none"; unpinned actions never get the pin-it hint');
+  assert.deepEqual(checkRepoRules({ ...s, tagRulesets: [], remote: { ...s.remote, archived: true } }), []);
+});
+
 test('a private repo on a plan without branch protection is not told to protect its branch', () => {
   const ids = (s) => evaluate(s).findings.map((f) => f.id);
   assert.ok(ids(base({ remote: { isPublic: false } })).includes('no-protection'));

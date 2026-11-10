@@ -43,7 +43,10 @@ async function collectRelease(dir) {
   const t = await git(['tag', '--list'], { cwd: dir });
   const tags = t.stdout.split('\n').map((x) => x.trim()).filter((x) => VERSION_TAG.test(x));
   const manifest = manifestVersion(dir);
-  if (!tags.length) return { latest: null, manifest };
+  const vAll = t.stdout.split('\n').map((x) => x.trim()).filter((x) => /^v\S*$/.test(x)); // any v* tag: what a tag ruleset covers
+  const vTag = vAll[0] || null;
+  const vTags = vAll.length;
+  if (!tags.length) return { latest: null, manifest, vTag, vTags };
   const latest = tags.sort((a, b) => cmpVersion(a.replace(/^v/, ''), b.replace(/^v/, ''))).pop();
   const [since, date] = await Promise.all([
     git(['rev-list', '--count', `refs/tags/${latest}..HEAD`], { cwd: dir }),
@@ -53,7 +56,7 @@ async function collectRelease(dir) {
   const ver = latest.replace(/^v/, '');
   const esc = ver.replace(/\./g, '\\.');
   return {
-    latest, version: ver,
+    latest, version: ver, vTag, vTags,
     commitsSince: since.ok ? Number(since.stdout.trim()) || 0 : null,
     taggedAt: date.ok ? date.stdout.trim() : null,
     manifest,

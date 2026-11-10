@@ -287,4 +287,58 @@ async function fetchAlerts(ref) {
   });
 }
 
-module.exports = { fetchRepos, fetchFailedRuns, fetchSecurity, fetchAlerts, protectionAvailable, refreshRate, getRate, rulesetCovers, refMatches };
+// Active tag rulesets (repo and inherited) as [{ name, include, exclude, types }], or null when they cannot be
+// read (403/404, no plan, rate limit): unknown, never "none". The list may omit rules, so each is read by id.
+const tagCache = new Map();
+async function fetchTagRulesets(ref, opts = {}) {
+  const key = `${ref.owner}/${ref.name}`;
+  const hit = tagCache.get(key);
+  if (!opts.force && hit && Date.now() - hit.at < TTL_MS) return hit.val;
+  if (rate.core && rate.core.remaining < MIN_CORE) return null;
+  const slug = `repos/${key}`;
+  const list = await json('gh', ['api', `${slug}/rulesets?targets=tag&includes_parents=true&per_page=100`], { timeout: COMMAND_TIMEOUT_MS });
+  noteCall('core');
+  let val = null;
+  if (list.ok && Array.isArray(list.data)) {
+    val = [];
+    for (const r of list.data.filter((x) => x.enforcement === 'active' && x.target === 'tag').slice(0, 10)) {
+      let d = r;
+      if (!Array.isArray(r.rules) || !r.conditions) {
+        const x = await json('gh', ['api', `${slug}/rulesets/${Number(r.id)}`], { timeout: COMMAND_TIMEOUT_MS });
+        noteCall('core');
+        if (!x.ok) { val = null; break; }
+        d = x.data;
+      }
+      const c = (d.conditions && d.conditions.ref_name) || {};
+      val.push({ name: String(d.name || ''), include: c.include || [], exclude: c.exclude || [], types: (d.rules || []).map((x) => x.type) });
+    }
+  }
+  tagCache.set(key, { at: Date.now(), val });
+  return val;
+}
+
+// Repo-level GitHub Actions settings. Either call failing (403/404, org policy) leaves its fields null.
+const actCache = new Map();
+async function fetchActionsSettings(ref, opts = {}) {
+  const key = `${ref.owner}/${ref.name}`;
+  const hit = actCache.get(key);
+  if (!opts.force && hit && Date.now() - hit.at < TTL_MS) return hit.val;
+  if (rate.core && rate.core.remaining < MIN_CORE) return null;
+  const [perm, wf] = await Promise.all([
+    json('gh', ['api', `repos/${key}/actions/permissions`], { timeout: COMMAND_TIMEOUT_MS }),
+    json('gh', ['api', `repos/${key}/actions/permissions/workflow`], { timeout: COMMAND_TIMEOUT_MS }),
+  ]);
+  noteCall('core', 2);
+  const p = perm.ok && perm.data ? perm.data : {};
+  const w = wf.ok && wf.data ? wf.data : {};
+  const val = perm.ok || wf.ok ? {
+    enabled: typeof p.enabled === 'boolean' ? p.enabled : null,
+    shaPinningRequired: typeof p.sha_pinning_required === 'boolean' ? p.sha_pinning_required : null,
+    defaultPermissions: w.default_workflow_permissions || null,
+    canApprovePrs: typeof w.can_approve_pull_request_reviews === 'boolean' ? w.can_approve_pull_request_reviews : null,
+  } : null;
+  actCache.set(key, { at: Date.now(), val });
+  return val;
+}
+
+module.exports = { fetchTagRulesets, fetchActionsSettings, fetchRepos, fetchFailedRuns, fetchSecurity, fetchAlerts, protectionAvailable, refreshRate, getRate, rulesetCovers, refMatches };

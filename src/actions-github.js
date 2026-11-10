@@ -1,6 +1,7 @@
 // GitHub-side actions: pull requests, CI re-runs, branch protection, security features and repository
 // settings. Built with actions.js's own step builders and plan errors, so plans read the same.
 const { PROTECTION } = require('./protection');
+const { tagProtection, releaseTag, RULESET_NAME } = require('./repo-rules');
 
 module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh }) => ({
   'pr-merge': {
@@ -89,6 +90,53 @@ module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText,
       const b = defaultBranch(r) || fail('Unknown default branch.');
       if (r.remote.viewerPermission && r.remote.viewerPermission !== 'ADMIN') fail('Admin permission is required.');
       return { risk: 'danger', title: `Remove ALL branch protection from ${b}`, steps: [gh(['api', '-X', 'DELETE', `repos/${slug}/branches/${b}/protection`], r.path)] };
+    },
+  },
+
+  // Additive: a new tag ruleset never replaces anything, and repository admins can still bypass it.
+  'protect-tags': {
+    plan(r) {
+      const slug = needRemote(r);
+      if (r.remote.archived) fail('Repository is archived.');
+      if (r.remote.viewerPermission !== 'ADMIN') fail('Admin permission is required to create a ruleset.');
+      const tag = releaseTag(r) || fail('This repository has no release tags.');
+      if (!Array.isArray(r.tagRulesets)) fail('GutCheck could not read this repository\'s tag rulesets (plan or permissions), so it cannot tell what is missing.');
+      if (tagProtection(r.tagRulesets, tag).state === 'covered') fail('Release tags are already protected by a ruleset.');
+      // actor_id 5 is the built-in repository Admin role in a ruleset's bypass list.
+      const body = { name: RULESET_NAME, target: 'tag', enforcement: 'active', bypass_actors: [{ actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'always' }], conditions: { ref_name: { include: ['refs/tags/v*'], exclude: [] } }, rules: [{ type: 'deletion' }, { type: 'non_fast_forward' }, { type: 'update', parameters: { update_allows_fetch_and_merge: false } }] };
+      return {
+        risk: 'caution',
+        title: 'Protect release tags (v*): block deleting, moving and force-pushing them',
+        steps: [gh(['api', '-X', 'POST', `repos/${slug}/rulesets`, '-H', 'Accept: application/vnd.github+json', '--input', '-'], r.path, JSON.stringify(body))],
+        warnings: ['Repository admins can still bypass the rules, so you can recover from a mistake.', 'Tags that are moved on purpose, such as a floating v1 or v2 tag for an action, can then only be moved by an admin; new v* tags can still be created.', 'Private repositories on a free plan cannot use rulesets; GitHub will report an error.'],
+        undo: `Delete the ruleset "${RULESET_NAME}" under ${slug} > Settings > Rules > Rulesets`,
+        body: JSON.stringify(body, null, 2),
+      };
+    },
+  },
+
+  'actions-settings': {
+    plan(r, p) {
+      const slug = needRemote(r);
+      if (r.remote.archived) fail('Repository is archived.');
+      if (r.remote.viewerPermission !== 'ADMIN') fail('Admin permission is required to change Actions settings.');
+      const a = r.actionsSettings || {};
+      let body; let title; let warnings; let undo;
+      if (p.setting === 'read-token') {
+        if (a.defaultPermissions === 'read') fail('The default token is already read-only.');
+        body = { default_workflow_permissions: 'read' };
+        title = 'Make the default GITHUB_TOKEN read-only';
+        warnings = ['Workflows that relied on the write default (pushing commits, creating releases, commenting on PRs) will fail with 403 unless they declare permissions:. GutCheck only offers this when every workflow declares permissions:.'];
+        undo = `gh api -X PUT repos/${slug}/actions/permissions/workflow -f default_workflow_permissions=write`;
+      } else if (p.setting === 'no-approve') {
+        if (a.canApprovePrs === false) fail('Actions already cannot approve pull requests.');
+        body = { can_approve_pull_request_reviews: false };
+        title = 'Stop GitHub Actions approving pull requests';
+        warnings = ['A workflow that approves PRs itself (an auto-approve bot) will stop working.'];
+        undo = `gh api -X PUT repos/${slug}/actions/permissions/workflow -F can_approve_pull_request_reviews=true`;
+      } else fail('Unknown Actions setting.');
+      warnings.push('An organization policy can block this change; GitHub then answers 409.');
+      return { risk: 'caution', title, steps: [gh(['api', '-X', 'PUT', `repos/${slug}/actions/permissions/workflow`, '-H', 'Accept: application/vnd.github+json', '--input', '-'], r.path, JSON.stringify(body))], warnings, undo, body: JSON.stringify(body, null, 2) };
     },
   },
 
