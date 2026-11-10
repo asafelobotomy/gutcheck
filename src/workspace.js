@@ -7,6 +7,7 @@ const path = require('node:path');
 const { run } = require('./exec');
 const { agentAdvice } = require('./agents');
 const { workspaceIdentity } = require('./checks-gitstate');
+const { cacheAdvice } = require('./cache-sizes');
 const { DAY, COMMAND_TIMEOUT_MS, plural, list, sq } = require('./util');
 
 const INACTIVE_DAYS = 90;
@@ -66,9 +67,10 @@ async function depFolderAdvice(repos, now = Date.now()) {
   }];
 }
 
-async function devAdvice(repos) {
-  const [cfg, deps, agents] = await Promise.all([gitConfigAdvice(), depFolderAdvice(repos), agentAdvice(repos).catch(() => [])]);
-  return [...cfg, ...workspaceIdentity(repos), ...deps, ...agents].map((a) => ({ category: 'Workspace', ...a }));
+// opts: { home, thresholdKiB } are injectable for tests.
+async function devAdvice(repos, opts = {}) {
+  const [cfg, deps, caches, agents] = await Promise.all([gitConfigAdvice(), depFolderAdvice(repos), cacheAdvice(opts).catch(() => []), agentAdvice(repos, opts.home ? { home: opts.home } : {}).catch(() => [])]);
+  return [...cfg, ...workspaceIdentity(repos), ...deps, ...caches, ...agents].map((a) => ({ category: 'Workspace', ...a }));
 }
 
 module.exports = { devAdvice, gitConfigAdvice, depFolderAdvice, INACTIVE_DAYS };

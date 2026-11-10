@@ -20,7 +20,7 @@ const SECURITY_IDS = new Set([
 ]);
 // wf-*: every Actions security finding (workflows.js via checks-hygiene.js); secret-*: secret files
 // (secret-status.js) and secret scanning; ws-secret-*: the workspace's secret files.
-const SECURITY_PREFIXES = ['wf-', 'secret-', 'ws-secret-'];
+const SECURITY_PREFIXES = ['wf-', 'secret-', 'ws-secret-', 'agent-trust-']; // agent-trust-*: committed agent config that runs code or sends data (agent-trust.js)
 const SECURITY_CATEGORIES = new Set(['Actions security', 'Secrets', 'Security features']);
 
 const isSecurity = (f) => SECURITY_IDS.has(f.id) || SECURITY_PREFIXES.some((p) => String(f.id).startsWith(p)) || SECURITY_CATEGORIES.has(f.category);
