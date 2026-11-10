@@ -302,6 +302,8 @@ const ACTIONS = {
 Object.assign(ACTIONS, require('./actions-github')({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh: (ctx, args, cwd) => ctx.run('gh', args, { cwd }) }));
 
 // AI agent actions live in actions-agent.js; their plan errors read like this file's.
+Object.assign(ACTIONS, require('./actions-gitstate')({ fail, nothing, git, readGit }));
+
 const AGENT = require('./actions-agent');
 for (const t of ['permissions-prune', 'split-instructions', 'lsp-setup']) ACTIONS[t] = AGENT[t];
 

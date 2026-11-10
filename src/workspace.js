@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { run } = require('./exec');
 const { agentAdvice } = require('./agents');
+const { workspaceIdentity } = require('./checks-gitstate');
 const { DAY, COMMAND_TIMEOUT_MS, plural, list, sq } = require('./util');
 
 const INACTIVE_DAYS = 90;
@@ -67,7 +68,7 @@ async function depFolderAdvice(repos, now = Date.now()) {
 
 async function devAdvice(repos) {
   const [cfg, deps, agents] = await Promise.all([gitConfigAdvice(), depFolderAdvice(repos), agentAdvice(repos).catch(() => [])]);
-  return [...cfg, ...deps, ...agents].map((a) => ({ category: 'Workspace', ...a }));
+  return [...cfg, ...workspaceIdentity(repos), ...deps, ...agents].map((a) => ({ category: 'Workspace', ...a }));
 }
 
 module.exports = { devAdvice, gitConfigAdvice, depFolderAdvice, INACTIVE_DAYS };

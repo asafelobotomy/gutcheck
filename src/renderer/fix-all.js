@@ -46,6 +46,9 @@
       case 'split-instructions': return { ...base, pick: 0, choices: [{ label: `Split ${fix.file}: keep the core, move the largest sections to docs/agents/ (every line kept)`, action: fix }, leave()] };
       case 'lsp-setup': return { ...base, pick: 1, choices: [{ label: 'Set it up (installs software)', action: fix }, leave('Skip')] };
       case 'add-file': return { ...base, pick: OWNER_FILES[fix.template] ?? 0, choices: [{ label: `${fix.label || 'Add the file'} and commit it${fix.template === 'license' ? ' (check the licence is the one you want)' : ''}`, action: { ...fix, commit: true } }, leave('Skip')] };
+      // Both stay on "leave it": an abort discards conflict resolutions, a register writes the user's global config.
+      case 'git-op-abort': return { ...base, pick: 1, choices: [{ label: `${fix.label.replace('…', '')} (discards any conflict resolution done so far)`, action: fix }, leave('Leave it for me to finish')] };
+      case 'maintenance-register': return { ...base, pick: 1, choices: [{ label: 'Register it (adds it to maintenance.repo in your global git config)', action: fix }, leave('Skip')] };
       case 'tests-run': return { ...base, pick: 1, choices: [{ label: 'Run it (executes the project\'s code)', action: fix }, leave('Skip')] };
       default: return { ...base, pick: 0, choices: [{ label: fix.label || 'Do it', action: fix }, leave()] };
     }

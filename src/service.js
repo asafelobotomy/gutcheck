@@ -123,7 +123,7 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
 
   // activeAt: newest of the last push and the newest local branch commit.
   const activeAt = (r) => [(r.remote && r.remote.pushedAt), ...((r.git && r.git.branches) || []).map((b) => b.date)].filter(Boolean).sort().pop() || null;
-  const wsRepos = () => [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name, originUrl: r.originUrl, activeAt: activeAt(r) }));
+  const wsRepos = () => [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name, originUrl: r.originUrl, activeAt: activeAt(r), identity: r.gitState && r.gitState.identity }));
   const wsAdvice = async (root) => {
     if (!root || !fs.existsSync(root)) return null;
     try { return [...(await workspaceAdvice(root, wsRepos())), ...(await devAdvice(wsRepos()))]; } catch { return null; }

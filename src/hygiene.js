@@ -78,7 +78,7 @@ async function collectHygiene(dir, { names, rawOrigin, deep, branch }) {
     noCommits: !head.ok,
     tags: lines(tags.stdout).length,
     // KiB, from `git count-objects -v`: packed size, loose objects, and stray files git cannot use.
-    storage: { packKiB: (co['size-pack'] || 0) + (co.size || 0), loose: co.count || 0, garbage: co.garbage || 0 },
+    storage: { packKiB: (co['size-pack'] || 0) + (co.size || 0), loose: co.count || 0, garbage: co.garbage || 0, packs: co.packs || 0, prunePackable: co['prune-packable'] || 0 },
     submodulesUninit: 0,
     historyBlobs: null,
     project: collectProject(dir, names),

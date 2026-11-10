@@ -70,6 +70,8 @@ const USES = {
   merge: { hooks: ['pre-merge-commit', 'prepare-commit-msg', 'commit-msg', 'post-merge', 'reference-transaction', 'post-index-change'], filters: true, mergeDrivers: true, tree: true },
   commit: { hooks: ['pre-commit', 'prepare-commit-msg', 'commit-msg', 'post-commit', 'reference-transaction', 'post-index-change'], filters: true, tree: true },
   'ref-update': { hooks: ['reference-transaction'] },
+  // rebase/am/merge/cherry-pick/revert --abort and bisect reset: reset the index and work tree.
+  abort: { hooks: ['post-checkout', 'reference-transaction', 'post-index-change'], filters: true, tree: true },
 };
 
 const CODE_KEYS = '^(core\\.hookspath|hook\\..+\\.(command|event|enabled)|filter\\..+\\.(clean|smudge|process)|merge\\..+\\.driver|lfs\\.(extension\\..+\\.(clean|smudge)|customtransfer\\..+\\.path|standalonetransferagent)|commit\\.gpgsign|include\\.path|includeif\\..+\\.path)$';

@@ -366,3 +366,35 @@ test('eol: a Node version newer than the bundled table is unknown, not flagged',
     assert.deepEqual(eolIds(d), []);
   } finally { rm(d); }
 });
+
+test('git state: a rebase detaches HEAD by design, so only the unfinished-rebase finding appears', async () => {
+  const d = repo();
+  try {
+    put(d, 'a.txt', 'base\n'); sh(d, 'add', '-A'); sh(d, 'commit', '-q', '-m', 'base');
+    sh(d, 'switch', '-q', '-c', 'side'); put(d, 'a.txt', 'side\n'); sh(d, 'commit', '-qam', 'side');
+    sh(d, 'switch', '-q', 'main'); put(d, 'a.txt', 'main\n'); sh(d, 'commit', '-qam', 'main');
+    sh(d, 'switch', '-q', 'side');
+    try { sh(d, 'rebase', 'main'); } catch {}
+    const ids = (await scanRepo(d, {})).findings.map((f) => f.id);
+    assert.ok(ids.includes('git-op'));
+    assert.ok(!ids.includes('git-detached'));
+  } finally { rm(d); }
+});
+
+test('git state: a detached HEAD on a commit a branch already holds is info, not a warning', async () => {
+  const d = repo();
+  try {
+    put(d, 'a.txt', '1\n'); sh(d, 'add', '-A'); sh(d, 'commit', '-q', '-m', 'one');
+    sh(d, 'switch', '-q', '--detach');
+    const f = (await scanRepo(d, {})).findings.find((x) => x.id === 'git-detached');
+    assert.equal(f.severity, 'info');
+  } finally { rm(d); }
+});
+
+test('git state: a repo under the maintenance thresholds gets no maintenance finding', async () => {
+  const d = repo();
+  try {
+    put(d, 'a.txt', '1\n'); sh(d, 'add', '-A'); sh(d, 'commit', '-q', '-m', 'one');
+    assert.ok(!(await scanRepo(d, {})).findings.some((f) => f.id === 'git-maintenance'), 'unregistered alone is not a threshold');
+  } finally { rm(d); }
+});
