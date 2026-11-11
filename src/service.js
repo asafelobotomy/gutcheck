@@ -9,7 +9,6 @@ const github = require('./github');
 const { scanRepo } = require('./scanner');
 const { scanClutter, workspaceAdvice } = require('./clutter');
 const { repoDir } = require('./remote-scan');
-const { REMOTE_BLOCKED } = require('./renderer/fix-all');
 const { devAdvice } = require('./workspace');
 const { buildReport } = require('./report');
 const Metrics = require('./renderer/metrics');
@@ -74,7 +73,6 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
     const out = [];
     for (const it of items) {
       const repo = it && known.get(it.dir);
-      if (repo && repo.source === 'remote') { out.push({ ok: false, error: REMOTE_BLOCKED, repoName: repo.name }); continue; }
       const p = await actions.plan(repo, it && it.action, { readOnly, workspaceRoot: settings().root, repoPaths: [...known.values()].map((x) => x.path), rescueDir: settings().rescueDir });
       if (!p.ok) { out.push({ ...p, repoName: repo && repo.name }); continue; }
       const token = crypto.randomBytes(16).toString('hex');

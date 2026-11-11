@@ -56,12 +56,16 @@
     }
   }
 
-  // Repos that are on GitHub but not cloned here (part 1 of remote repos): findings only, no fixes.
-  const REMOTE_BLOCKED = 'Fixes for uncloned repos come in a later version; clone the repo to fix it now.';
+  // Repos that are on GitHub but not cloned here: only fixes made through the GitHub API run on them
+  // (gh names the repo, so no folder is needed). Fixes that change files or local git need a clone.
+  const API_ACTIONS = new Set(['pr-merge', 'pr-close', 'pr-ready', 'run-rerun', 'protect-branch', 'protect-tags', 'actions-settings', 'security-enable', 'repo-edit']);
+  const REMOTE_FILE_FIX = 'This fix changes files or local git, and the repo is not cloned in this workspace. Clone it to fix this; fixes as pull requests come in a later version.';
+  const REMOTE_NOTE = 'Not cloned in this workspace: GitHub fixes (pull requests, CI, protection, security and repository settings) run here; fixes that change files need a clone for now.';
+  const REMOTE_SKIP = 'changes files; the repo is not cloned here';
 
-  // r: a scan result. -> { actions (automatic), decisions, skipped: [{ id, title, reason }], blocked? }
+  // r: a scan result. -> { actions (automatic), decisions, skipped: [{ id, title, reason }] }
   function plan(r) {
-    if (r && r.source === 'remote') return { actions: [], decisions: [], skipped: [], blocked: REMOTE_BLOCKED };
+    const remote = !!r && r.source === 'remote';
     const actions = [];
     const decisions = [];
     const skipped = [];
@@ -71,6 +75,7 @@
       if (!f.fix) continue;
       const { label, ...fix } = f.fix;
       if (NOT_HERE[fix.type]) { skipped.push({ id: f.id, title: f.title, reason: NOT_HERE[fix.type] }); continue; }
+      if (remote && !API_ACTIONS.has(fix.type)) { skipped.push({ id: f.id, title: f.title, reason: REMOTE_SKIP }); continue; }
       const auto = AUTO.has(fix.type) && !(fix.type === 'repo-edit' && fix.deleteBranchOnMerge !== true) && !(fix.type === 'add-file' && fix.template in OWNER_FILES);
       if (!auto) { decisions.push(decision(f, f.fix)); continue; }
       const action = fix.type === 'add-file' ? { ...fix, commit: true } : fix; // each added file is its own commit
@@ -97,7 +102,7 @@
     return { actions: sorted, note };
   }
 
-  const api = { plan, order, decision, automatic, STEP, AUTO, REMOTE_BLOCKED };
+  const api = { plan, order, decision, automatic, STEP, AUTO, API_ACTIONS, REMOTE_FILE_FIX, REMOTE_NOTE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FixAll = api;
 })(typeof window !== 'undefined' ? window : globalThis);

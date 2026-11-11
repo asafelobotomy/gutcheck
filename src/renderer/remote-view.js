@@ -1,7 +1,7 @@
 // Repos on GitHub that are not cloned in the workspace (source "remote"): their chip in the list,
 // the All / Local / Remote filter, how the detail view describes them, the scan progress label for
-// the remote stage, and Settings > GitHub repos not cloned here. Findings only: Fix all and the fix
-// buttons are off for them (fix-all.js says why).
+// the remote stage, and Settings > GitHub repos not cloned here. Only GitHub API fixes run on them
+// (FixAll.API_ACTIONS); buttons for local git and file fixes are left out.
 
 const RemoteView = (() => {
   const isRemote = (r) => !!r && r.source === 'remote';
@@ -19,7 +19,11 @@ const RemoteView = (() => {
 
   const chip = (r) => (isRemote(r) ? h('span', { class: 'pill remote' }, r.partial ? 'Remote · GitHub checks only' : 'Remote') : null);
   const where = (r) => (isRemote(r) ? `Not cloned in this workspace${r.partial ? '  ·  GitHub checks only' : ''}` : r.path);
-  const note = (r) => (isRemote(r) ? h('p', { class: 'remote-note' }, FixAll.REMOTE_BLOCKED) : null);
+  const note = (r) => (isRemote(r) ? h('p', { class: 'remote-note' }, FixAll.REMOTE_NOTE) : null);
+  // Whether this fix can run on this repo: every fix on a local repo, API fixes on a remote one.
+  const canFix = (r, fix) => !!fix && (!isRemote(r) || FixAll.API_ACTIONS.has(fix.type));
+  // A panel of local git or file buttons (branches, missing files): none for a remote repo.
+  const localPanel = (r, panel) => (isRemote(r) ? [] : panel(r));
   const progress = (res, done, total, stage) => (stage === 'remote' ? `Checking remote repos: ${done}/${total} (${res.name})` : `Scanned ${done}/${total}`);
 
   async function openSettings() {
@@ -50,5 +54,5 @@ const RemoteView = (() => {
   }
 
   $('source').addEventListener('change', () => renderList());
-  return { isRemote, visible, chip, where, note, progress, openSettings };
+  return { isRemote, visible, chip, where, note, canFix, localPanel, progress, openSettings };
 })();

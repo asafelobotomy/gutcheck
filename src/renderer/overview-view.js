@@ -14,7 +14,7 @@ function renderOverview() {
     state.repos.size ? h('div', { class: 'toolbar' }, copyButton(null, 'the whole workspace')) : null,
     list.length ? h('p', { class: 'sub' }, 'Recommendations grouped across all repositories, most severe first. "Fix all" previews every command before anything runs.') : h('p', { class: 'empty' }, state.repos.size ? 'Nothing to recommend.' : 'Choose a workspace folder and press Scan.'),
     ...list.map((g) => {
-      const bulk = g.fixes.every((f) => f && BULKABLE.has(f.action.type)) && g.fixes.length > 1;
+      const bulk = g.fixes.every((f) => f && BULKABLE.has(f.action.type) && RemoteView.canFix(f.repo, f.action)) && g.fixes.length > 1;
       return h('div', { class: 'rec' }, h('span', { class: 'n ' + sevClass(g.sev) }, g.repos.length),
         h('div', { class: 'grow' }, h('div', {}, `${g.title}  `, h('span', { class: 'pill' }, g.cat)), h('div', { class: 'repos' }, g.repos.join(', '))),
         bulk ? btn(`Fix all ${g.fixes.length}…`, () => runActions(g.fixes, { ask: false, hold: FixAll.automatic })) : null);

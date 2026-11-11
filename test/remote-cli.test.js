@@ -86,18 +86,27 @@ test('gutcheck remote --clear-cache empties the cache folder without scanning', 
   assert.ok(!fs.existsSync(path.join(s.data, 'remote-cache', 'octo__x')));
 });
 
-test('repo accepts owner/name for a remote repo; fix refuses it', async () => {
+const FILE_FIX = /This fix changes files or local git, and the repo is not cloned in this workspace/;
+
+test('repo accepts owner/name for a remote repo; fix plans API fixes and refuses file fixes', async () => {
   const s = setup();
   const r = await s.run(['repo', 'octo/app', '--json']);
   assert.equal(r.code, 0, r.err);
   const j = JSON.parse(r.out);
   assert.equal(j.source, 'remote');
   const f = await s.run(['fix', 'octo/app', 'repo-edit', 'description=x']);
-  assert.notEqual(f.code, 0);
-  assert.match(f.err + f.out, /Fixes for uncloned repos come in a later version/);
+  assert.equal(f.code, 0, f.err);
+  assert.match(f.out, /\$ gh repo edit octo\/app --description x/);
+  assert.match(f.out, /Nothing was run/);
+  const file = await s.run(['fix', 'octo/app', 'add-file', 'template=license']);
+  assert.notEqual(file.code, 0);
+  assert.match(file.err, FILE_FIX);
+  const all = await s.run(['fix', 'octo/app', 'all']);
+  assert.equal(all.code, 0, all.err);
+  assert.ok(!/write |git /.test(all.out), 'Fix all plans no file or git step on a remote repo');
 });
 
-test('MCP: overview rows carry source; tests and local-only leave remote repos out; plan refuses', async () => {
+test('MCP: overview rows carry source; tests and local-only leave remote repos out; plan takes API fixes only', async () => {
   const s = setup();
   const e = createEngine({ env: s.env, via: 'mcp', allowActions: true, remoteDeps: s.remoteDeps });
   const tool = (n) => TOOLS.find((t) => t.name === n);
@@ -110,8 +119,13 @@ test('MCP: overview rows carry source; tests and local-only leave remote repos o
   assert.ok(!t.repos.some((x) => x.path.startsWith('remote:')));
   const lo = await tool('gutcheck_local_only').run(e, {});
   assert.ok(!lo.repos.some((x) => x.repo === 'octo/app'));
-  const p = await tool('gutcheck_plan').run(e, { items: [{ repo: 'octo/app', action: { type: 'repo-edit', description: 'x' } }] });
-  assert.match(JSON.stringify(p), /Fixes for uncloned repos come in a later version/);
+  const p = await tool('gutcheck_plan').run(e, { items: [{ repo: 'octo/app', action: { type: 'repo-edit', description: 'x' } }, { repo: 'octo/app', action: { type: 'add-file', template: 'license' } }] });
+  assert.ok(p.ok, p.error);
+  const [api, file] = p.plans;
+  assert.ok(api.ok && api.token, JSON.stringify(api));
+  assert.deepEqual(api.commands, ['gh repo edit octo/app --description x']);
+  assert.equal(file.ok, false);
+  assert.match(file.error, FILE_FIX);
 });
 
 test('--help lists the remote command and flags', async () => {

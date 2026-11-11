@@ -2,6 +2,7 @@
 // effects); apply() runs a plan. The UI shows the plan, the user confirms, and main applies the
 // stored plan, so what is previewed is exactly what runs. Deliberately NOT offered: deleting repos, changing visibility, force-push, history rewriting.
 
+const os = require('node:os');
 const path = require('node:path');
 const { apply, defaultCtx } = require('./apply');
 const { MAX_PLAN_ITEMS, sq } = require('./util');
@@ -12,6 +13,7 @@ const { IGNORE_OK } = require('./clutter');
 const { looksSecret } = require('./secret-patterns');
 const { planTestRun } = require('./tests/runs');
 const { validBranch, validRemote, inspect } = require('./git-safety');
+const { API_ACTIONS, REMOTE_FILE_FIX } = require('./renderer/fix-all');
 
 class PlanError extends Error {}
 const fail = (msg) => { throw new PlanError(msg); };
@@ -309,13 +311,23 @@ Object.assign(ACTIONS, require('./actions-rescue')({ fail, nothing }));
 const AGENT = require('./actions-agent');
 for (const t of ['permissions-prune', 'split-instructions', 'lsp-setup']) ACTIONS[t] = AGENT[t];
 
+// A repo that is not cloned here has no folder ("remote:owner/name" is a key): its plan may hold only
+// gh steps, which name the repo themselves, and they run in the temp folder instead.
+function onlyApi(out) {
+  if (!out.steps.every((s) => s.cmd === 'gh' && (s.kind === 'cmd' || s.kind === 'check') && !s.safeGit)) fail('Only GitHub API steps can run on a repo that is not cloned here.');
+  for (const s of out.steps) s.cwd = os.tmpdir();
+}
+
 async function plan(repo, action, ctx = {}) {
   ctx = defaultCtx(ctx);
   try {
     if (!repo) fail('Unknown repo.');
     if (!action || typeof action.type !== 'string' || !Object.prototype.hasOwnProperty.call(ACTIONS, action.type)) fail('Unknown action.');
     if (ctx.readOnly) fail('Read-only mode is on. Turn it off in the header to make changes.');
+    const remote = repo.source === 'remote';
+    if (remote && !API_ACTIONS.has(action.type)) fail(REMOTE_FILE_FIX);
     const out = await ACTIONS[action.type].plan(repo, action, ctx);
+    if (remote) onlyApi(out);
     // The repo's own network programs and non-network remotes refuse the plan; its hooks and
     // drivers make it caution (B9, B10).
     const code = await inspect(ctx, repo.path, out, fail);

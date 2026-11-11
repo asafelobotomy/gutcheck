@@ -173,7 +173,7 @@ function findingEl(r, f) {
   return h('div', { class: 'finding ' + f.severity },
     h('div', { class: 't' }, h('b', {}, f.title), h('span', {}, f.detail || '')),
     f.url ? btn('Open ↗', () => window.api.openUrl(f.url)) : null,
-    RemoteView.isRemote(r) ? null : f.fix && f.fix.type === 'permissions-prune' ? btn('Review rules…', () => reviewRules(r, f.fix.hashes)) : f.fix ? btn(f.fix.label, () => runActions([{ repo: r, action: f.fix }])) : null,
+    !RemoteView.canFix(r, f.fix) ? null : f.fix.type === 'permissions-prune' ? btn('Review rules…', () => reviewRules(r, f.fix.hashes)) : f.fix ? btn(f.fix.label, () => runActions([{ repo: r, action: f.fix }])) : null,
     ignoreButton(r, f));
 }
 
@@ -227,12 +227,12 @@ function settingsPanel(r) {
     h('div', { class: 'muted' }, `Default branch protection: ${prot} · Dependabot alerts: ${r.remote.alertsEnabled === false ? 'off' : r.remote.alertsEnabled ? 'on' : 'unknown'} · Your permission: ${r.remote.viewerPermission || 'unknown'}`),
     h('div', { class: 'toolbar' },
       btn('Protect default branch…', act('protect-branch', { preset: 'minimal' })),
-      r.protection === true ? btn('Remove protection', act('unprotect-branch', {}), 'dng') : null,
+      r.protection === true && !RemoteView.isRemote(r) ? btn('Remove protection', act('unprotect-branch', {}), 'dng') : null,
       btn('Enable Dependabot alerts', act('security-enable', { feature: 'alerts' })),
       btn('Enable security updates', act('security-enable', { feature: 'security-fixes' })),
       btn('Enable secret scanning', act('security-enable', { feature: 'secret-scanning' })),
       btn('Edit description / merge options…', act('repo-edit', {})),
-      r.remote.archived ? null : btn('Archive repo', act('repo-archive', {}), 'dng'))];
+      r.remote.archived || RemoteView.isRemote(r) ? null : btn('Archive repo', act('repo-archive', {}), 'dng'))];
 }
 
 const FILE_TEMPLATES = [
@@ -269,7 +269,7 @@ function renderRepo() {
     toolbar, RemoteView.note(r),
     r.findings.length ? null : h('p', { class: 'ok-msg' }, 'No issues found. Nice.'),
     ...cats.flatMap((c) => [h('h3', {}, c), ...r.findings.filter((f) => f.category === c).map((f) => findingEl(r, f))]),
-    ...ignoredPanel(r), ...prsPanel(r), ...branchesPanel(r), ...settingsPanel(r), ...filesPanel(r));
+    ...ignoredPanel(r), ...prsPanel(r), ...RemoteView.localPanel(r, branchesPanel), ...settingsPanel(r), ...RemoteView.localPanel(r, filesPanel));
 }
 
 async function copyForLlm(b, dir, label) {

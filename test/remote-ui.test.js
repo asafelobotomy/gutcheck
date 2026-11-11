@@ -39,7 +39,7 @@ test('the All / Local / Remote filter shows only that kind, and is hidden with n
   assert.equal(plain.$('#source').hidden, true);
 });
 
-test('a remote repo\'s detail: not cloned here, no folder buttons, no Fix all, a link to GitHub', async () => {
+test('a remote repo\'s detail: not cloned here, no folder or file buttons, API fixes and Fix all, a link to GitHub', async () => {
   const t = await boot({ repos });
   await scan(t);
   click(t.$$('#repos li').find((x) => x.querySelector('.rname').textContent === 'octo/app'));
@@ -49,11 +49,13 @@ test('a remote repo\'s detail: not cloned here, no folder buttons, no Fix all, a
   const buttons = [...d.querySelectorAll('.toolbar button')].map((b) => b.textContent);
   assert.ok(!buttons.includes('Open folder'));
   assert.ok(!buttons.includes('Fetch & prune'));
-  assert.ok(!buttons.some((b) => /Fix all/.test(b)));
+  assert.ok(buttons.some((b) => /Fix all/.test(b)), 'Fix all offers the API fixes');
   assert.ok(buttons.includes('Open on GitHub ↗'));
   assert.ok(buttons.includes('Rescan'));
-  assert.match(d.textContent, /Fixes for uncloned repos come in a later version/);
-  assert.ok(![...d.querySelectorAll('.finding button')].some((b) => b.textContent === 'Set description…'), 'no fix buttons on findings');
+  assert.match(d.textContent, /GitHub fixes \(pull requests, CI, protection, security and repository settings\) run here/);
+  assert.ok([...d.querySelectorAll('.finding button')].some((b) => b.textContent === 'Set description…'), 'API fix button on its finding');
+  const all = [...d.querySelectorAll('button')].map((b) => b.textContent);
+  for (const local of ['New branch…', 'Pull', 'Push', 'Save a rescue copy…', '+ LICENSE', 'Archive repo', 'Remove protection']) assert.ok(!all.includes(local), `no ${local}`);
 });
 
 test('Settings > Remote repos loads, saves and clears the cache', async () => {

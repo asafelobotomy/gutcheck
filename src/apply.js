@@ -62,7 +62,8 @@ async function apply(p, ctx = {}) {
   try {
     return await applySteps(p, ctx);
   } finally {
-    for (const d of new Set([p.repoPath, ...(p.steps || []).map((s) => s.cwd || s.root)].filter(Boolean))) exec.forgetGitDrivers(d);
+    // A remote repo's key ("remote:owner/name") is not a folder and has no drivers to forget.
+    for (const d of new Set([p.repoPath, ...(p.steps || []).map((s) => s.cwd || s.root)].filter((d) => d && !String(d).startsWith('remote:')))) exec.forgetGitDrivers(d);
   }
 }
 
