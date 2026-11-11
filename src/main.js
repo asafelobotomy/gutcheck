@@ -14,6 +14,7 @@ const { createAgentConnect } = require('./agent-connect');
 const { createPolicyStore, driftReport, inactiveIgnores } = require('./policy');
 const sched = require('./schedule');
 const { createWorkspaceScanner } = require('./workspace-scan');
+const { createRemoteCache } = require('./remote-cache');
 const { dataDir } = require('./paths');
 const { createSecretsCtl } = require('./secrets-ctl');
 const { registerIpc: registerSecretsIpc } = require('./secrets-glue');
@@ -145,8 +146,9 @@ const trendStore = {
 const rescan = async (dir) => (await ws.refresh(dir)) || known.get(dir); // same depth as the scan it came from
 // Secret files and their password-manager backup: the only code that runs a vault CLI (secrets-ctl.js).
 const secretsCtl = createSecretsCtl({ dataDir: app.getPath('userData'), settings: { load: loadSettings, update: updateSettings }, audit: (e) => audit({ ...e, via: 'app' }) });
-const service = createService({ known, settings: loadSettings, audit, trash: (f) => shell.trashItem(f), clipboard, rescan, trendStore, updateSettings, secretsCtl });
-ws = createWorkspaceScanner({ known, service, policy: policyNow, seen: seen(), onBegin: (total) => send('scan:begin', { total }), onRepo: (res, done, total) => send('scan:repo', { res, done, total }) });
+const service = createService({ known, settings: loadSettings, audit, trash: (f) => shell.trashItem(f), clipboard, rescan, trendStore, updateSettings, secretsCtl, remoteStatus: () => ws && ws.remoteStatus() });
+const remoteCache = createRemoteCache({ root: path.join(app.getPath('userData'), 'remote-cache') });
+ws = createWorkspaceScanner({ known, service, policy: policyNow, seen: seen(), remote: { settings: () => loadSettings().remote, cache: remoteCache }, onBegin: (total) => send('scan:begin', { total }), onRepo: (res, done, total, stage) => send('scan:repo', { res, done, total, stage }) });
 
 handle('action:plan', (_e, { items } = {}) => service.planActions(items));
 // confirm: { token: the repo name the user typed } for each dangerous plan; the service checks it.

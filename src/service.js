@@ -26,8 +26,9 @@ const publicPlan = (token, p) => ({ ok: true, token, type: p.type, repoPath: p.r
 // deps: { known: Map(path -> scan result), settings: () => obj, audit: (entry) => void,
 //         trash: (path) => Promise, clipboard: { writeText }, rescan?: (dir) => Promise<result>,
 //         trendStore?: { read(): array, write(array) }, updateSettings?: (patch) => settings,
-//         secretsCtl?: createSecretsCtl() (the secrets scan and backup; left out, there is no secrets section) }
-function createService({ known, settings, audit, trash, clipboard = { writeText() {} }, rescan = (d) => scanRepo(d, { deep: false }), trendStore = null, updateSettings = () => ({}), secretsCtl = null }) {
+//         secretsCtl?: createSecretsCtl() (the secrets scan and backup; left out, there is no secrets section),
+//         remoteStatus?: () => the last scan's remote stage status (remote-stage.js) or null }
+function createService({ known, settings, audit, trash, clipboard = { writeText() {} }, rescan = (d) => scanRepo(d, { deep: false }), trendStore = null, updateSettings = () => ({}), secretsCtl = null, remoteStatus = () => null }) {
   const plans = new Map(); // token -> { plan, expires } (only these stored plans can ever run)
   const busy = new Set(); // repo paths with an action in flight
   let clutterScanning = false;
@@ -126,7 +127,9 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
   const wsRepos = () => [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name, originUrl: r.originUrl, activeAt: activeAt(r), identity: r.gitState && r.gitState.identity, localOnly: r.localOnly }));
   const wsAdvice = async (root) => {
     if (!root || !fs.existsSync(root)) return null;
-    try { return [...(await workspaceAdvice(root, wsRepos())), ...(await devAdvice(wsRepos()))]; } catch { return null; }
+    const rs = remoteStatus();
+    const remoteAdvice = rs && rs.error ? [{ id: 'uncloned-unavailable', severity: 'info', title: 'Remote repos not checked', detail: rs.error }] : [];
+    try { return [...remoteAdvice, ...(await workspaceAdvice(root, wsRepos())), ...(await devAdvice(wsRepos()))]; } catch { return remoteAdvice.length ? remoteAdvice : null; }
   };
 
   // Read-only. `dirs` (optional) limits the scan to those repos, otherwise every known repo.

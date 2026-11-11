@@ -9,13 +9,18 @@ const os = require('node:os');
 const { discover, scanRepo, scanAll } = require('./scanner');
 const github = require('./github');
 const { expandHome } = require('./util');
+const { normalizeRemoteSettings } = require('./remote-settings');
+const { runRemoteStage, refreshRemote } = require('./remote-stage');
 
-// deps: { known, service, policy: () => policy data, seen?: seen store, onBegin?(total), onRepo?(res, done, total) }
-function createWorkspaceScanner({ known, service, policy, seen = null, onBegin = () => {}, onRepo = () => {} }) {
+// deps: { known, service, policy: () => policy data, seen?: seen store, onBegin?(total), onRepo?(res, done, total, stage),
+//         remote?: { settings: () => raw settings.remote, cache: remote-cache.js, list?, fetch? } (repos not cloned here) }
+function createWorkspaceScanner({ known, service, policy, seen = null, onBegin = () => {}, onRepo = () => {}, remote = null }) {
   let running = null; // { key, promise }
   let gen = 0; // bumped by every workspace scan
   let last = { root: null, deep: false }; // the scan `known` came from
   let lastFresh = null; // new findings from the last scan that recorded them (null: nothing compared)
+  let remoteStatus = null; // what the last scan's remote stage did (null: no remote stage configured)
+  let remoteListing = new Map(); // remote:owner/name -> listing, for refresh()
 
   // A folder as typed ("~/Projects", " /w ") to an absolute existing directory, or an error.
   function resolveRoot(want) {
@@ -25,11 +30,17 @@ function createWorkspaceScanner({ known, service, policy, seen = null, onBegin =
     return { error: `Folder does not exist: ${abs}` };
   }
 
-  // opts: { root, deep, recordSeen (compare with and update seen.json), onProgress(done, total, name) }
-  async function scan({ root: want, deep = false, recordSeen = false, onProgress } = {}) {
+  const remoteSettings = (override) => {
+    const s = normalizeRemoteSettings(remote && remote.settings());
+    return typeof override === 'boolean' ? { ...s, enabled: override } : s;
+  };
+
+  // opts: { root, deep, recordSeen (compare with and update seen.json), onProgress(done, total, name),
+  //         remote (true/false: include repos not cloned here for this scan, whatever the setting says) }
+  async function scan({ root: want, deep = false, recordSeen = false, onProgress, remote: remoteOverride } = {}) {
     const r = resolveRoot(want);
     if (r.error) return { ok: false, error: r.error };
-    const key = `${r.root}|${!!deep}|${!!recordSeen}`;
+    const key = `${r.root}|${!!deep}|${!!recordSeen}|${remoteOverride}`;
     while (running) {
       if (running.key === key) return running.promise; // the same scan is already under way: share it
       try { await running.promise; } catch {}
@@ -41,11 +52,31 @@ function createWorkspaceScanner({ known, service, policy, seen = null, onBegin =
       service.forgetPlans(); // plans reviewed for the previous workspace can no longer run
       last = { root: r.root, deep: !!deep };
       onBegin(dirs.length);
-      const results = await scanAll(dirs, { deep: !!deep, policy }, (res, done, total) => {
+      const local = await scanAll(dirs, { deep: !!deep, policy }, (res, done, total) => {
         known.set(res.path, res);
-        onRepo(res, done, total);
+        onRepo(res, done, total, 'local');
         if (onProgress) onProgress(done, total, res.name);
       });
+      let results = local;
+      remoteListing = new Map();
+      if (remote) {
+        const myGen = gen;
+        let total = dirs.length;
+        let done = dirs.length;
+        const st = await runRemoteStage({
+          localResults: local, settings: remoteSettings(remoteOverride), cache: remote.cache, policy, deep: !!deep, list: remote.list, fetch: remote.fetch,
+          onBegin: (n) => { total = dirs.length + n; },
+          onRepo: (res) => {
+            if (myGen !== gen) return;
+            known.set(res.path, res);
+            onRepo(res, ++done, total, 'remote');
+            if (onProgress) onProgress(done, total, res.name);
+          },
+        });
+        remoteStatus = st.status;
+        remoteListing = st.listing;
+        results = [...local, ...st.results];
+      }
       service.recordScan(r.root, results);
       let fresh = null;
       if (recordSeen && seen) { const rec = seen.record(r.root, results, { deep: !!deep }); fresh = rec.compared ? rec.fresh : null; lastFresh = fresh; }
@@ -62,7 +93,11 @@ function createWorkspaceScanner({ known, service, policy, seen = null, onBegin =
   async function refresh(dir) {
     if (!known.has(dir)) return null;
     const g = gen;
-    const res = await scanRepo(dir, { deep: last.deep, policy });
+    const l = remoteListing.get(dir);
+    if (String(dir).startsWith('remote:') && !l) return null;
+    const res = l
+      ? await refreshRemote(l, { settings: remoteSettings(), cache: remote.cache, policy, deep: last.deep, fetch: remote.fetch })
+      : await scanRepo(dir, { deep: last.deep, policy });
     if (g !== gen || !known.has(dir)) return null; // the workspace was rescanned meanwhile
     known.set(dir, res);
     return res;
@@ -76,6 +111,7 @@ function createWorkspaceScanner({ known, service, policy, seen = null, onBegin =
     deep: () => last.deep,
     generation: () => gen,
     lastFresh: () => lastFresh,
+    remoteStatus: () => remoteStatus,
   };
 }
 

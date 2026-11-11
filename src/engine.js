@@ -10,6 +10,7 @@ const { createSettingsStore } = require('./settings');
 const { appendAudit, readAudit } = require('./audit');
 const { expandHome } = require('./util');
 const { createWorkspaceScanner } = require('./workspace-scan');
+const { createRemoteCache } = require('./remote-cache');
 const { createPolicyStore, driftReport, repoKey, inactiveIgnores } = require('./policy');
 const { ignoreView, agentIgnoreRefusal, wildcardOk, MIN_PREFIX } = require('./ignore-rules');
 const { createSeenStore } = require('./schedule');
@@ -89,9 +90,11 @@ function createEngine(opts = {}) {
     updateSettings: (p) => store.update(p && p.quality ? { quality: p.quality } : {}), // headless callers may only change quality settings
     // The secrets controller links nothing from here (the app does); it reads the vault setting, backs up and verifies.
     secretsCtl: createSecretsCtl({ dataDir: dir, settings: store, env, home: env.HOME || os.homedir(), audit: (e) => appendAudit(auditFile, { ...e, via: opts.via || 'cli' }) }),
+    remoteStatus: () => ws && ws.remoteStatus(),
   });
 
-  ws = createWorkspaceScanner({ known, service, policy: policy.load, seen });
+  const remoteCache = createRemoteCache({ root: path.join(dir, 'remote-cache') });
+  ws = createWorkspaceScanner({ known, service, policy: policy.load, seen, remote: { settings: () => store.load().remote, cache: remoteCache, ...(opts.remoteDeps || {}) } });
   const root = () => ws.root();
   const via = opts.via || 'cli';
   // Secret files: a read for everyone; backup, verify and skip for the CLI only (MCP is refused).
