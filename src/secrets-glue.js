@@ -49,7 +49,7 @@ function mcpView(res) {
 
 // deps: { ctl (createSecretsCtl), known (path -> scan result), settings: () => { root } }
 function createSecretsService({ ctl, known, settings }) {
-  const repos = (dirs) => [...known.values()].filter((r) => !r.error && (!dirs || dirs.includes(r.path))).map((r) => ({ path: r.path, name: r.name }));
+  const repos = (dirs) => [...known.values()].filter((r) => !r.error && r.source !== 'remote' && (!dirs || dirs.includes(r.path))).map((r) => ({ path: r.path, name: r.name }));
   const ws = () => ({ repos: repos(), root: settings().root || null });
   const ready = () => known.size > 0 || !!settings().root;
   const need = (fn) => (...a) => (ready() ? fn(...a) : { ok: false, error: SCAN_FIRST });

@@ -5,6 +5,7 @@
 // is untrusted, so it is flattened to one line, length-capped, and the report tells the assistant
 // to treat it as data. Env file contents never reach this module.
 
+const { REMOTE_BLOCKED } = require('./renderer/fix-all');
 const { PROTECTION } = require('./protection');
 const { hygieneFix, secretFix, REFS } = require('./report-fixes');
 const { agentFix } = require('./agents');
@@ -289,8 +290,19 @@ function qualitySection(q) {
   return L.length > 1 ? L.join('\n') + '\n' : '';
 }
 
+// A repo on GitHub that is not cloned here: what was found, and no commands (there is no folder).
+function remoteSection(r, level, q) {
+  const h = '#'.repeat(level);
+  const rm = r.remote || {};
+  const L = [`- Not cloned in this workspace. GitHub: ${t(rm.url || '', LEN.path)}`, `- Health: ${r.grade} (${r.score}/100)${r.partial ? ', GitHub checks only' : ''}, scanned ${t(r.scannedAt)}`];
+  L.push(`- Open PRs: ${(r.prs || []).length}; failing CI runs: ${((r.ci && r.ci.failed) || []).length}`);
+  const found = (r.findings || []).map((f) => `- ${f.severity}: ${t(f.title, LEN.text)}`).join('\n');
+  return `${h} ${t(r.name)}\n\n${L.join('\n')}\n${prTable(r)}${qualitySection(q)}\n${h}# Findings\n\n${found || 'No issues found.'}\n\n${REMOTE_BLOCKED}\n`;
+}
+
 function repoSection(r, c, level = 2, q = null, tt = null, sec = null) {
   const h = '#'.repeat(level);
+  if (!r.error && r.source === 'remote') return remoteSection(r, level, q);
   if (r.error) return `${h} ${t(r.name)}\n\nGutCheck could not scan this repo: ${t(r.error, LEN.text)}\n`;
   const steps = stepsFor(r, c, q, tt, sec);
   const body = steps.length ? `\n${h}# Action plan (do in this order)\n\n${renderSteps(steps, level)}` : '\nNo issues found. Nothing to do.\n';

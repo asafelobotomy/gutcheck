@@ -227,7 +227,7 @@ function createEngine(opts = {}) {
     for (const it of items.slice(0, 200)) {
       // { agentFix }: a machine-level fix from gutcheck_agent_usage or the workspace advice.
       if (it && it.agentFix && typeof it.agentFix === 'object') {
-        const p = agentsCtl().planFix(it.agentFix, [...known.values()].filter((r) => !r.error));
+        const p = agentsCtl().planFix(it.agentFix, [...known.values()].filter((r) => !r.error && r.source !== 'remote'));
         errors.push(p.ok ? { ok: true, token: 'a:' + p.token, repo: 'Agent setup', title: p.title, risk: p.risk || 'caution', commands: p.display, note: p.note } : { ok: false, repoName: 'Agent setup', error: p.error });
         continue;
       }
@@ -344,7 +344,7 @@ function createEngine(opts = {}) {
     const bin = require('./agent-connect').claudeBin();
     const ro = live && !!store.load().readOnly; // Read-only mode turns the live check off, as in the app
     live = live && !ro;
-    const r = await scanUsage({ repos: [...known.values()].filter((x) => !x.error).map((x) => ({ path: x.path, name: x.name })), live: live && !!bin, bin, runner: require('./exec').run });
+    const r = await scanUsage({ repos: [...known.values()].filter((x) => !x.error && x.source !== 'remote').map((x) => ({ path: x.path, name: x.name })), live: live && !!bin, bin, runner: require('./exec').run });
     if (live && bin) appendAudit(auditFile, { ok: true, repo: 'Agent setup', title: `Started ${(r.servers || []).length} MCP servers to check them (claude mcp list)`, via: opts.via || 'cli' });
     return { ok: true, ...r, note: ro ? 'Read-only mode is on in the GutCheck app, so servers were not started.' : live && !bin ? 'Claude Code was not found, so servers were not checked.' : undefined };
   }

@@ -56,8 +56,12 @@
     }
   }
 
-  // r: a scan result. -> { actions (automatic), decisions, skipped: [{ id, title, reason }] }
+  // Repos that are on GitHub but not cloned here (part 1 of remote repos): findings only, no fixes.
+  const REMOTE_BLOCKED = 'Fixes for uncloned repos come in a later version; clone the repo to fix it now.';
+
+  // r: a scan result. -> { actions (automatic), decisions, skipped: [{ id, title, reason }], blocked? }
   function plan(r) {
+    if (r && r.source === 'remote') return { actions: [], decisions: [], skipped: [], blocked: REMOTE_BLOCKED };
     const actions = [];
     const decisions = [];
     const skipped = [];
@@ -93,7 +97,7 @@
     return { actions: sorted, note };
   }
 
-  const api = { plan, order, decision, automatic, STEP, AUTO };
+  const api = { plan, order, decision, automatic, STEP, AUTO, REMOTE_BLOCKED };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FixAll = api;
 })(typeof window !== 'undefined' ? window : globalThis);

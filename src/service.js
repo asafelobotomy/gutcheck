@@ -8,6 +8,8 @@ const actions = require('./actions');
 const github = require('./github');
 const { scanRepo } = require('./scanner');
 const { scanClutter, workspaceAdvice } = require('./clutter');
+const { repoDir } = require('./remote-scan');
+const { REMOTE_BLOCKED } = require('./renderer/fix-all');
 const { devAdvice } = require('./workspace');
 const { buildReport } = require('./report');
 const Metrics = require('./renderer/metrics');
@@ -72,6 +74,7 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
     const out = [];
     for (const it of items) {
       const repo = it && known.get(it.dir);
+      if (repo && repo.source === 'remote') { out.push({ ok: false, error: REMOTE_BLOCKED, repoName: repo.name }); continue; }
       const p = await actions.plan(repo, it && it.action, { readOnly, workspaceRoot: settings().root, repoPaths: [...known.values()].map((x) => x.path), rescueDir: settings().rescueDir });
       if (!p.ok) { out.push({ ...p, repoName: repo && repo.name }); continue; }
       const token = crypto.randomBytes(16).toString('hex');
@@ -124,7 +127,7 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
 
   // activeAt: newest of the last push and the newest local branch commit.
   const activeAt = (r) => [(r.remote && r.remote.pushedAt), ...((r.git && r.git.branches) || []).map((b) => b.date)].filter(Boolean).sort().pop() || null;
-  const wsRepos = () => [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name, originUrl: r.originUrl, activeAt: activeAt(r), identity: r.gitState && r.gitState.identity, localOnly: r.localOnly }));
+  const wsRepos = () => [...known.values()].filter((r) => !r.error && r.source !== 'remote').map((r) => ({ path: r.path, name: r.name, originUrl: r.originUrl, activeAt: activeAt(r), identity: r.gitState && r.gitState.identity, localOnly: r.localOnly }));
   const wsAdvice = async (root) => {
     if (!root || !fs.existsSync(root)) return null;
     const rs = remoteStatus();
@@ -132,19 +135,23 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
     try { return [...remoteAdvice, ...(await workspaceAdvice(root, wsRepos())), ...(await devAdvice(wsRepos()))]; } catch { return remoteAdvice.length ? remoteAdvice : null; }
   };
 
+  // Repos whose files can be read: local ones, and remote ones with a cache clone (repoDir).
+  const readable = (dirs) => (Array.isArray(dirs) && dirs.length ? dirs : [...known.keys()]).filter((d) => known.has(d) && !known.get(d).error && !!repoDir(known.get(d)));
+  const nameOf = (d) => (known.get(d) && known.get(d).source === 'remote' ? known.get(d).name : path.basename(d));
+
   // Read-only. `dirs` (optional) limits the scan to those repos, otherwise every known repo.
   async function clutterScan(dirs) {
     if (clutterScanning) return { ok: false, error: 'A clutter scan is already running' };
-    const targets = (Array.isArray(dirs) && dirs.length ? dirs : [...known.keys()]).filter((d) => known.has(d) && !known.get(d).error);
+    const targets = readable(dirs);
     if (!targets.length) return { ok: false, error: 'Scan a workspace first.' };
     clutterScanning = true;
     try {
       const repos = [];
       for (const d of targets) {
         try {
-          repos.push({ path: d, name: path.basename(d), ...(await scanClutter(d)) });
+          repos.push({ path: d, name: nameOf(d), ...(await scanClutter(repoDir(known.get(d)))) });
         } catch (e) {
-          repos.push({ path: d, name: path.basename(d), items: [], advice: [], count: 0, totalSize: 0, error: String(e.message || e) });
+          repos.push({ path: d, name: nameOf(d), items: [], advice: [], count: 0, totalSize: 0, error: String(e.message || e) });
         }
       }
       const full = !(Array.isArray(dirs) && dirs.length);
@@ -166,14 +173,14 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
   // Read-only code-quality scan (file length, magic numbers, secrets, markers...). `dirs` limits it to those repos.
   async function qualityScan(dirs) {
     if (qualityScanning) return { ok: false, error: 'A code-quality scan is already running' };
-    const targets = (Array.isArray(dirs) && dirs.length ? dirs : [...known.keys()]).filter((d) => known.has(d) && !known.get(d).error);
+    const targets = readable(dirs);
     if (!targets.length) return { ok: false, error: 'Scan a workspace first.' };
     qualityScanning = true;
     try {
       const cfg = qualitySettings();
       const repos = [];
       for (const d of targets) {
-        try { repos.push({ path: d, name: path.basename(d), ...(await scanQuality(d, cfg)) }); } catch (e) { repos.push({ path: d, name: path.basename(d), error: String(e.message || e), advice: [], files: 0, lines: 0, loc: { max: cfg.maxLines, overCount: 0, over: [], largest: [] }, magic: { total: 0, files: [], repeated: [], reuse: [], constants: { files: [], definitions: 0 } }, markers: { total: 0, items: [] }, secretCount: 0, debugCount: 0, languages: [] }); }
+        try { repos.push({ path: d, name: nameOf(d), ...(await scanQuality(repoDir(known.get(d)), cfg)) }); } catch (e) { repos.push({ path: d, name: nameOf(d), error: String(e.message || e), advice: [], files: 0, lines: 0, loc: { max: cfg.maxLines, overCount: 0, over: [], largest: [] }, magic: { total: 0, files: [], repeated: [], reuse: [], constants: { files: [], definitions: 0 } }, markers: { total: 0, items: [] }, secretCount: 0, debugCount: 0, languages: [] }); }
       }
       if (!(Array.isArray(dirs) && dirs.length)) {
         const sum = (f) => repos.reduce((n, r) => n + f(r), 0);
@@ -188,7 +195,7 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
   // Read-only test review (static review + existing results). `dirs` limits it to those repos.
   async function testsScan(dirs) {
     if (testsScanning) return { ok: false, error: 'A test review is already running' };
-    const targets = (Array.isArray(dirs) && dirs.length ? dirs : [...known.keys()]).filter((d) => known.has(d) && !known.get(d).error);
+    const targets = readable(dirs).filter((d) => known.get(d).source !== 'remote');
     if (!targets.length) return { ok: false, error: 'Scan a workspace first.' };
     testsScanning = true;
     try {
@@ -209,17 +216,20 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
     const clutter = new Map();
     for (const r of repos) {
       if (r.error) continue;
-      try { clutter.set(r.path, await scanClutter(r.path)); } catch {}
+      if (!repoDir(r)) continue;
+      try { clutter.set(r.path, await scanClutter(repoDir(r))); } catch {}
     }
     const quality = new Map();
     const qcfg = qualitySettings();
     for (const r of repos) {
       if (r.error) continue;
-      try { quality.set(r.path, await scanQuality(r.path, qcfg)); } catch {}
+      if (!repoDir(r)) continue;
+      try { quality.set(r.path, await scanQuality(repoDir(r), qcfg)); } catch {}
     }
     const tests = new Map();
     for (const r of repos) {
       if (r.error) continue;
+      if (r.source === 'remote') continue;
       try { tests.set(r.path, await scanTests(r.path)); } catch {}
     }
     const root = settings().root;

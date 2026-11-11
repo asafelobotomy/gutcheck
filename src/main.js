@@ -216,15 +216,18 @@ handle('agents:plan', (_e, { id, allowActions, remove } = {}) => {
 handle('agents:cleanup', (_e, { days } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.planCleanup(Number(days))));
 // Permission rules of a scanned repo: shapes and hashes only. One value is returned on request, for the
 // app's own review dialog; it is never logged, saved, or sent anywhere else.
+// Repos with a folder here: not errors, and not repos that are only on GitHub (their key is not a path).
+const isLocal = (r) => !!r && !r.error && r.source !== 'remote';
+const localKnown = (dir) => isLocal(known.get(dir));
 const localRules = (dir) => { try { const c = JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'settings.local.json'), 'utf8')); return c && c.permissions && Array.isArray(c.permissions.allow) ? c.permissions.allow.filter((x) => typeof x === 'string') : []; } catch { return []; } };
-handle('agents:rules', (_e, { dir } = {}) => (known.has(dir) ? { ok: true, rules: localRules(dir).map(require('./agent-context').classifyRule) } : { ok: false, error: 'Unknown repo' }));
+handle('agents:rules', (_e, { dir } = {}) => (localKnown(dir) ? { ok: true, rules: localRules(dir).map(require('./agent-context').classifyRule) } : { ok: false, error: 'Unknown repo' }));
 handle('agents:reveal-rule', (_e, { dir, hash } = {}) => {
-  if (!known.has(dir)) return { ok: false, error: 'Unknown repo' };
+  if (!localKnown(dir)) return { ok: false, error: 'Unknown repo' };
   const v = localRules(dir).find((x) => require('./agent-context').hashRule(x) === hash);
   return v == null ? { ok: false, error: 'That rule is no longer in the file.' } : { ok: true, value: v };
 });
-handle('agents:fix', (_e, { fix } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.planFix(fix && typeof fix === 'object' ? fix : {}, [...known.values()].filter((r) => !r.error))));
-handle('agents:usage', (_e, { live } = {}) => agents.usageScan({ live: live === true && !loadSettings().readOnly, repos: [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name })) }));
+handle('agents:fix', (_e, { fix } = {}) => (loadSettings().readOnly ? { ok: false, error: 'Read-only mode is on.' } : agents.planFix(fix && typeof fix === 'object' ? fix : {}, [...known.values()].filter(isLocal))));
+handle('agents:usage', (_e, { live } = {}) => agents.usageScan({ live: live === true && !loadSettings().readOnly, repos: [...known.values()].filter(isLocal).map((r) => ({ path: r.path, name: r.name })) }));
 handle('agents:apply', async (_e, { token } = {}) => {
   if (loadSettings().readOnly) return { ok: false, error: 'Read-only mode is on.' };
   const t = String(token || '');
@@ -242,7 +245,7 @@ handle('agents:copy', (_e, { id, allowActions } = {}) => {
 });
 
 handle('open:url', (_e, url) => openExternal(url));
-handle('open:folder', (_e, dir) => { if (known.has(dir)) shell.openPath(dir); });
+handle('open:folder', (_e, dir) => { if (localKnown(dir)) shell.openPath(dir); });
 
 // One running copy: a second launch only wakes the first one (singleInstance quits this process).
 if (trayCtl.singleInstance()) {
