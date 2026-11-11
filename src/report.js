@@ -16,7 +16,7 @@ const { gitStateFix } = require('./report-gitstate');
 const { rulesFix } = require('./report-rules');
 const { ignoredLines } = require('./ignore-rules');
 const { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches } = require('./checks');
-const { daysAgo, sq, plural } = require('./util');
+const { daysAgo, sq, plural, BROKEN_RUN_STREAK } = require('./util');
 const { flatProse, INVISIBLE_RE, unsafeName } = require('./text-safe');
 
 // Longest text kept from each untrusted field (names, paths, details), so one field cannot swamp the report.
@@ -86,7 +86,7 @@ function fixFor(f, r) {
   if (id === 'git-no-upstream') return { phase: 1, rank: 4, why: 'Branch is not tracking a remote.', cmds: [`git push -u origin ${here(g.branch)}`] };
 
   if (id.startsWith('ci-failed-') && run && run.workflowName === 'Dependabot Updates') return { phase: 2, rank: 3, why: 'Dependabot could not make one update.', cmds: [`gh run view ${num}${R} --log-failed   # why the update failed`], note: 'This run cannot be re-run. Usually the dependency has a version conflict: update it by hand (and fix what breaks), or leave it for Dependabot\'s next scheduled attempt. Do not re-run it.' };
-  if (id.startsWith('ci-failed-')) return { phase: 2, rank: 0, why: run ? `Workflow "${t(run.workflowName)}" failed on ${t(run.headBranch)}.` : 'A CI run failed.', cmds: [`gh run view ${num}${R} --log-failed`, '# fix the cause in the code, commit, push; or if it was a flaky failure:', `gh run rerun ${num} --failed${R}`], note: run && run.url ? `Run URL: ${t(run.url, LEN.path)}` : undefined };
+  if (id.startsWith('ci-failed-')) return { phase: 2, rank: 0, why: run ? `Workflow "${t(run.workflowName)}" failed on ${t(run.headBranch)}.` : 'A CI run failed.', cmds: run && run.streak >= BROKEN_RUN_STREAK ? [`gh run view ${num}${R} --log-failed`, `# failed ${run.streak} runs in a row: fix the cause in the code, commit, push (a re-run would fail again)`] : [`gh run view ${num}${R} --log-failed`, '# fix the cause in the code, commit, push; or if it was a flaky failure:', `gh run rerun ${num} --failed${R}`], note: run && run.url ? `Run URL: ${t(run.url, LEN.path)}` : undefined };
   if (id.startsWith('pr-conflict-')) {
     // Dependabot rebases its own PRs when asked; merging by hand would only be overwritten.
     const pr = (r.prs || []).find((p) => String(p.number) === num);

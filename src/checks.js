@@ -2,7 +2,7 @@
 // Finding: { id, category, severity: 'error'|'warn'|'info', title, detail, fix? }
 // `fix` is an optional action descriptor the UI can offer as a button.
 
-const { daysAgo, DAYS_PER_YEAR } = require('./util');
+const { daysAgo, DAYS_PER_YEAR, BROKEN_RUN_STREAK } = require('./util');
 const { checkWorkflowAudits } = require('./checks-workflows');
 const { checkLocalOnly } = require('./local-only');
 const { checkWorkflows, checkGitHygiene, checkProject, checkSecurityFeatures } = require('./checks-hygiene');
@@ -29,6 +29,7 @@ function checkCI(s) {
     return out;
   }
   for (const r of s.ci.failed) {
+    const broken = (r.streak || 1) >= BROKEN_RUN_STREAK;
     out.push({
       id: 'ci-failed-' + r.databaseId,
       category: 'CI',
@@ -36,10 +37,10 @@ function checkCI(s) {
       // version): a warning about that update, not a broken build.
       severity: r.workflowName === 'Dependabot Updates' ? 'warn' : 'error',
       title: `Failed: ${r.workflowName} on ${r.headBranch}`,
-      detail: `${r.displayTitle} (${daysAgo(r.createdAt)}d ago)${r.newerPending ? '. A newer run is queued or running: check it before fixing anything' : ''}${r.workflowName === 'Dependabot Updates' ? '. Dependabot could not make this update; its log says why (often a version conflict). It retries on its schedule.' : ''}`,
+      detail: `${r.displayTitle} (${daysAgo(r.createdAt)}d ago)${r.newerPending ? '. A newer run is queued or running: check it before fixing anything' : ''}${broken ? `. It has failed ${r.streak} runs in a row, so re-running will not fix it: read the log` : ''}${r.workflowName === 'Dependabot Updates' ? '. Dependabot could not make this update; its log says why (often a version conflict). It retries on its schedule.' : ''}`,
       url: r.url,
       // Dependabot's own runs are dynamic: GitHub cannot re-run them (gh run rerun fails). They retry on schedule.
-      fix: r.workflowName === 'Dependabot Updates' ? undefined : { type: 'run-rerun', label: 'Re-run failed jobs', runId: r.databaseId, failedOnly: true },
+      fix: r.workflowName === 'Dependabot Updates' || broken ? undefined : { type: 'run-rerun', label: 'Re-run failed jobs', runId: r.databaseId, failedOnly: true },
     });
   }
   return out;
@@ -176,9 +177,14 @@ function score(findings) {
   return { findings: sorted, score: n, grade: n >= 90 ? 'A' : n >= 75 ? 'B' : n >= 55 ? 'C' : 'D' };
 }
 
+// Findings about the GitHub repository itself (CI, PRs, settings, security features, alerts), not
+// about this checkout: a linked worktree leaves them to its main checkout (scanner.js).
+const GITHUB_DEP_IDS = new Set(['dependabot', 'alerts-off']);
+const onGitHub = (fs) => fs.map((f) => ({ ...f, scope: 'github' }));
 function evaluate(snapshot) {
-  return score([...checkCI(snapshot), ...checkPRs(snapshot), ...checkBranches(snapshot), ...checkFiles(snapshot), ...checkDeps(snapshot), ...checkDepAutomation(snapshot), ...checkRepoSettings(snapshot),
-    ...checkWorkflows(snapshot), ...checkWorkflowAudits(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkRelease(snapshot), ...checkRuntimeEol(snapshot), ...checkDrift(snapshot), ...checkSecurityFeatures(snapshot), ...checkRepoRules(snapshot), ...checkAgents(snapshot), ...checkGitState(snapshot), ...checkLocalOnly(snapshot)]);
+  const deps = checkDeps(snapshot).map((f) => (GITHUB_DEP_IDS.has(f.id) ? { ...f, scope: 'github' } : f));
+  return score([...onGitHub(checkCI(snapshot)), ...onGitHub(checkPRs(snapshot)), ...checkBranches(snapshot), ...checkFiles(snapshot), ...deps, ...checkDepAutomation(snapshot), ...onGitHub(checkRepoSettings(snapshot)),
+    ...checkWorkflows(snapshot), ...checkWorkflowAudits(snapshot), ...checkGitHygiene(snapshot), ...checkProject(snapshot), ...checkRelease(snapshot), ...checkRuntimeEol(snapshot), ...checkDrift(snapshot), ...onGitHub(checkSecurityFeatures(snapshot)), ...onGitHub(checkRepoRules(snapshot)), ...checkAgents(snapshot), ...checkGitState(snapshot), ...checkLocalOnly(snapshot)]);
 }
 
 module.exports = { STALE_PR_DAYS, STALE_BRANCH_DAYS, staleBranches, evaluate, score, checkPRs, checkFiles, checkDeps, checkRepoSettings };

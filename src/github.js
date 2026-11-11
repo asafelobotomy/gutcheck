@@ -224,11 +224,20 @@ async function fetchFailedRunsUncached(ref, defaultBranch, cwd) {
   const seen = new Set();
   const failed = [];
   const pending = new Set(); // workflows with a newer run still queued or running (runs come newest first)
+  const ended = new Set(); // workflows whose run of failures has ended (a pass, or an older run that passed)
+  const bad = (x) => x.conclusion === 'failure' || x.conclusion === 'timed_out';
   for (const run_ of r.data) {
-    if (run_.status !== 'completed') { if (!seen.has(run_.workflowName)) pending.add(run_.workflowName); continue; }
-    if (seen.has(run_.workflowName)) continue;
-    seen.add(run_.workflowName);
-    if (run_.conclusion === 'failure' || run_.conclusion === 'timed_out') failed.push({ ...run_, newerPending: pending.has(run_.workflowName) });
+    const w = run_.workflowName;
+    if (run_.status !== 'completed') { if (!seen.has(w)) pending.add(w); continue; }
+    if (!seen.has(w)) {
+      seen.add(w);
+      if (bad(run_)) failed.push({ ...run_, newerPending: pending.has(w), streak: 1 });
+      else ended.add(w);
+      continue;
+    }
+    // streak: how many runs in a row failed, newest first (a lower bound: only 20 runs are read).
+    const f = !ended.has(w) && failed.find((x) => x.workflowName === w);
+    if (f && bad(run_)) f.streak++; else ended.add(w);
   }
   return { failed, error: null };
 }

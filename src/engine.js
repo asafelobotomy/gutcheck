@@ -5,7 +5,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createService } = require('./service');
+const { createService, AGENT_PLAN_TTL } = require('./service');
 const { createSettingsStore } = require('./settings');
 const { appendAudit, readAudit } = require('./audit');
 const { expandHome } = require('./util');
@@ -60,6 +60,16 @@ const ACTION_CATALOG = {
 // opts: { allowActions: bool, env } . Without allowActions every plan is refused, whatever the app's switch says.
 const READ_ONLY = 'Read-only mode is on in the GutCheck app. The user can turn it off in the app header.';
 
+// A step's output for agents. A successful GitHub API call answers with the whole object it changed
+// (several KB of repository JSON): noise in an agent's context, so it is left out.
+// Failures keep their full output.
+const brief = (x) => {
+  const out = (x.out || '').trim();
+  if (!out) return undefined;
+  if (x.ok && /^gh api\b/.test(x.text || '')) return '(GitHub API response not shown)';
+  return out;
+};
+
 function createEngine(opts = {}) {
   const env = opts.env || process.env;
   const dir = dataDir(env);
@@ -85,6 +95,7 @@ function createEngine(opts = {}) {
   let agc = null;
   const agentsCtl = () => (agc = agc || require('./agent-connect').createAgentConnect({ env, launch: { dataDir: dir }, audit: (e) => appendAudit(auditFile, { ...e, via: opts.via || 'cli' }) }));
   const service = createService({
+    planTtl: opts.via === 'mcp' ? AGENT_PLAN_TTL : undefined,
     known, settings, audit: (e) => appendAudit(auditFile, { ...e, via: opts.via || 'cli' }),
     rescan: async (d) => (await ws.refresh(d)) || known.get(d), trendStore,
     updateSettings: (p) => store.update(p && p.quality ? { quality: p.quality } : {}), // headless callers may only change quality settings
@@ -295,7 +306,7 @@ function createEngine(opts = {}) {
       if (typeof t === 'string' && t.startsWith('s:')) res.push({ title: 'Back up secret files', ...(await secrets.apply(t)), repoName: 'Secrets' });
       else if (typeof t === 'string' && t.startsWith('a:')) { const r = store.load().readOnly ? { ok: false, error: 'Read-only mode is on in the GutCheck app.' } : await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm, failed, startedAt })));
     }
-    return { ok: res.every((r) => r.ok), results: res.map((r) => ({ ok: r.ok, ...(r.skipped ? { skipped: true } : {}), repo: r.repoName, title: r.title, error: r.error, steps: (r.results || []).map((x) => ({ cmd: x.text, ok: x.ok, output: x.out || undefined })) })) };
+    return { ok: res.every((r) => r.ok), results: res.map((r) => ({ ok: r.ok, ...(r.skipped ? { skipped: true } : {}), repo: r.repoName, title: r.title, error: r.error, steps: (r.results || []).map((x) => ({ cmd: x.text, ok: x.ok, output: brief(x) })) })) };
   }
 
   // Findings that were not there at the previous scan of this workspace (stored ids only).
@@ -363,4 +374,4 @@ function createEngine(opts = {}) {
   return { scan, repos, findings, localOnly, repoDetail, remote, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, secrets: secrets.list, secretsPlan: secrets.plan, secretsApply: secrets.apply, secretsVerify: secrets.verify, secretsSkip: secrets.skip, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
 }
 
-module.exports = { createEngine, dataDir, ACTION_CATALOG };
+module.exports = { createEngine, dataDir, ACTION_CATALOG, brief };

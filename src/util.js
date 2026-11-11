@@ -45,4 +45,7 @@ function cmpVersion(a, b) {
   return 0;
 }
 
-module.exports = { expandHome, NODE_LOCKFILES, installCommand, DAYS_PER_YEAR, MAX_PLAN_ITEMS, COMMAND_TIMEOUT_MS, cmpVersion, DAY, daysAgo, sq, plural, printable, list, HEAVY_DIRS };
+// A workflow that failed this many runs in a row is broken, not flaky: a re-run would fail again.
+const BROKEN_RUN_STREAK = 3;
+
+module.exports = { BROKEN_RUN_STREAK, expandHome, NODE_LOCKFILES, installCommand, DAYS_PER_YEAR, MAX_PLAN_ITEMS, COMMAND_TIMEOUT_MS, cmpVersion, DAY, daysAgo, sq, plural, printable, list, HEAVY_DIRS };

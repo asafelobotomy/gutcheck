@@ -10,6 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { run } = require('./exec');
+const { staleCopies } = require('./app-version');
 
 const NAME = 'gutcheck';
 const PLAN_TTL = 5 * 60 * 1000;
@@ -162,6 +163,12 @@ function createAgentConnect(opts = {}) {
       { kind: 'mkdir', dir: cmd.unpack.dir },
       { kind: 'cmd', argv: [cmd.unpack.appimage, '--appimage-extract'], cwd: cmd.unpack.dir, label: `unpack GutCheck once into ${cmd.unpack.dir} (agents cannot mount AppImages: NoNewPrivs blocks FUSE)` },
     ] : [];
+    // Older unpacked copies (about 275 MB each) that no other agent still runs go to the trash.
+    if (!remove && cmd.unpack) {
+      const inUse = list().filter((o) => o.id !== c.id).map((o) => { try { const e = registered(o, home, env); return e && e.command; } catch { return null; } });
+      const launch = opts.launch || {};
+      for (const old of staleCopies(launch.dataDir, launch.version, inUse)) unpack.push({ kind: 'trash', path: old.path, mtime: old.mtime, label: `move the old unpacked copy ${old.path.replace(home, '~')} to the trash (no agent uses it)` });
+    }
     let p;
     if (c.kind === 'cli') {
       const bin = findBin(c, env, appData);
@@ -170,7 +177,7 @@ function createAgentConnect(opts = {}) {
       const argv = withBin(remove ? c.remove() : c.add(cmd));
       // Re-adding replaces the old entry: remove first (a missing entry is fine).
       const steps = remove ? [{ kind: 'cmd', argv }] : [...unpack, { kind: 'cmd', argv: withBin(c.remove()), optional: true }, { kind: 'cmd', argv }];
-      p = { title: `${remove ? 'Disconnect GutCheck from' : 'Connect GutCheck to'} ${c.name}`, steps, display: steps.filter((s) => s.kind === 'cmd').map((s) => s.label || show(s.argv) + (s.optional ? '   # only if already added' : '')) };
+      p = { title: `${remove ? 'Disconnect GutCheck from' : 'Connect GutCheck to'} ${c.name}`, steps, display: steps.filter((s) => s.kind === 'cmd' || s.kind === 'trash').map((s) => s.label || show(s.argv) + (s.optional ? '   # only if already added' : '')) };
     } else {
       const r = readJson(c.file);
       if (r.error) return { ok: false, error: r.error, snippet: snippet(c, cmd) };

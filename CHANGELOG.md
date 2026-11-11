@@ -46,6 +46,12 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 - A committed `<name>.env` file that holds only plain settings, such as a release tag and commit a script sources, is no longer reported as a committed secret. It still is when any key name looks like a credential (token, secret, password, key, auth, DSN and similar) or a value is a URL with a user and password; only key names and that URL shape are checked, and nothing from the file reaches the finding. A dotfile `.env` is always reported.
 - A linked worktree (`git worktree add`) in the workspace is no longer reported as a second clone of its repo.
+- A linked worktree whose main checkout is in the same workspace no longer repeats that repository's GitHub findings (CI, pull requests, repo settings, security features, Dependabot alerts) or loses points for them: they are listed once, under the main checkout.
+- Clutter no longer looks inside a LevelDB database (a folder with `CURRENT` and `MANIFEST-*`) or a Chromium user-data folder (`Local State` beside `Default`). Their numbered `.log` files are the database's write-ahead log, not logs, and removing them loses data.
+- A CI workflow that failed 3 or more runs in a row no longer offers **Re-run failed jobs**: the finding says how many runs failed and Copy for LLM asks for a fix in the code, since a re-run would fail again.
+- Plans made through MCP last 30 minutes instead of 5, so an agent has time to ask you before applying (the app and CLI keep 5). Each step is still checked again before it runs. An expired plan says how long plans last.
+- `gutcheck_apply` no longer returns the GitHub API's response body for a successful `gh api` step (several KB of repository JSON per step); failed steps keep their output.
+- The MCP server agents run (the unpacked copy under `mcp-app/<version>/`) now tells them when the installed GutCheck is newer: the app records its version when it starts, and the server adds a note to its instructions and to `gutcheck_overview` asking you to press **Update** in Settings > AI agents. Connecting or updating an agent also moves older unpacked copies that no other agent uses (about 275 MB each) to the trash, shown in the preview.
 
 ## [0.27.1] - 2026-11-08
 

@@ -100,11 +100,12 @@ async function dirSize(p, budget = { n: 20000 }) {
 // A committed "<name>.env" can be plain config (a version pin a script sources). It counts as
 // config only when no key name or value looks like a credential; only key names are matched, and
 // values only for "://user:pass@". Nothing read here is returned. A dotfile .env is never config.
+const MAX_ENV_BYTES = 64 * 1024; // a settings file; anything bigger is not one to wave through
 const CRED_KEY_RE = /secret|token|passw|passwd|pwd|pass$|api_?key|private|credential|auth|(^|_)key$|dsn|session|cookie|salt|signing|webhook|database_url|conn(ection)?_?str/i;
 async function envIsConfigOnly(file) {
   if (path.basename(file).startsWith('.')) return false;
   let text;
-  try { const st = await fsp.lstat(file); if (!st.isFile() || st.size > 64 * 1024) return false; text = await fsp.readFile(file, 'utf8'); } catch { return false; }
+  try { const st = await fsp.lstat(file); if (!st.isFile() || st.size > MAX_ENV_BYTES) return false; text = await fsp.readFile(file, 'utf8'); } catch { return false; }
   for (const line of text.split('\n')) {
     const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);
     if (m && (CRED_KEY_RE.test(m[1]) || /:\/\/[^/\s:@]+:[^/\s@]+@/.test(m[2]))) return false;
@@ -124,4 +125,13 @@ async function gitCommonDir(dir) {
   try { return path.resolve(gd, (await fsp.readFile(path.join(gd, 'commondir'), 'utf8')).trim()); } catch { return gd; }
 }
 
-module.exports = { CACHE_DIRS, FILE_RULES, VENV_NAMES, buildOutput, bigDirSize, dirSize, STALE_LOG_DAYS, STALE_BACKUP_DAYS, SCRATCH_DIR_RE, envIsConfigOnly, gitCommonDir };
+// Folders an app owns as a whole: a LevelDB database (its numbered .log files are the write-ahead
+// log, and LOG/LOG.old its own) or a Chromium user-data folder. Removing files inside loses data or
+// breaks the app, so clutter never looks inside them.
+const isAppDataDir = (ents) => {
+  const names = new Set(ents.map((e) => e.name));
+  if (names.has('CURRENT') && [...names].some((n) => /^MANIFEST-\d+$/.test(n))) return true;
+  return names.has('Local State') && (names.has('Default') || [...names].some((n) => /^Profile \d+$/.test(n)));
+};
+
+module.exports = { CACHE_DIRS, FILE_RULES, VENV_NAMES, buildOutput, bigDirSize, dirSize, STALE_LOG_DAYS, STALE_BACKUP_DAYS, SCRATCH_DIR_RE, envIsConfigOnly, gitCommonDir, isAppDataDir };

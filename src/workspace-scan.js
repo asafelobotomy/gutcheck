@@ -12,6 +12,20 @@ const { expandHome } = require('./util');
 const { normalizeRemoteSettings } = require('./remote-settings');
 const { runRemoteStage, refreshRemote } = require('./remote-stage');
 const { repoKey } = require('./policy');
+const path = require('node:path');
+const { gitCommonDir } = require('./clutter-rules');
+
+// Linked worktrees whose main checkout is in the same scan: Map(worktree dir -> main checkout dir).
+async function worktreeLinks(dirs) {
+  const set = new Set(dirs);
+  const links = new Map();
+  for (const d of dirs) {
+    const common = await gitCommonDir(d);
+    const main = path.basename(common) === '.git' ? path.dirname(common) : null;
+    if (main && main !== d && set.has(main)) links.set(d, main);
+  }
+  return links;
+}
 
 // deps: { known, service, policy: () => policy data, seen?: seen store, onBegin?(total), onRepo?(res, done, total, stage),
 //         remote?: { settings: () => raw settings.remote, cache: remote-cache.js, list?, fetch? } (repos not cloned here) }
@@ -22,6 +36,7 @@ function createWorkspaceScanner({ known, service, policy, seen = null, onBegin =
   let lastFresh = null; // new findings from the last scan that recorded them (null: nothing compared)
   let remoteStatus = null; // what the last scan's remote stage did (null: no remote stage configured)
   let remoteListing = new Map(); // remote:owner/name -> listing, for refresh()
+  let worktrees = new Map(); // linked worktree dir -> its main checkout, when both are scanned
 
   // A folder as typed ("~/Projects", " /w ") to an absolute existing directory, or an error.
   function resolveRoot(want) {
@@ -48,12 +63,13 @@ function createWorkspaceScanner({ known, service, policy, seen = null, onBegin =
     }
     const promise = (async () => {
       const dirs = discover(r.root);
+      worktrees = await worktreeLinks(dirs);
       gen++;
       known.clear();
       service.forgetPlans(); // plans reviewed for the previous workspace can no longer run
       last = { root: r.root, deep: !!deep };
       onBegin(dirs.length);
-      const local = await scanAll(dirs, { deep: !!deep, policy }, (res, done, total) => {
+      const local = await scanAll(dirs, { deep: !!deep, policy, worktreeOf: worktrees }, (res, done, total) => {
         known.set(res.path, res);
         onRepo(res, done, total, 'local');
         if (onProgress) onProgress(done, total, res.name);
@@ -103,7 +119,7 @@ function createWorkspaceScanner({ known, service, policy, seen = null, onBegin =
     if (String(dir).startsWith('remote:') && !l) return null;
     const res = l
       ? await refreshRemote(l, { settings: remoteSettings(), cache: remote.cache, policy, fetch: remote.fetch })
-      : await scanRepo(dir, { deep: last.deep, policy });
+      : await scanRepo(dir, { deep: last.deep, policy, worktreeOf: worktrees });
     if (g !== gen || !known.has(dir)) return null; // the workspace was rescanned meanwhile
     known.set(dir, res);
     return res;
@@ -112,7 +128,7 @@ function createWorkspaceScanner({ known, service, policy, seen = null, onBegin =
   async function rescan(dir, { deep = false } = {}) {
     if (!known.has(dir)) return { ok: false, error: 'Unknown repo' };
     const g = gen;
-    const res = remoteListing.has(dir) ? await refresh(dir) : await scanRepo(dir, { deep: !!deep, policy });
+    const res = remoteListing.has(dir) ? await refresh(dir) : await scanRepo(dir, { deep: !!deep, policy, worktreeOf: worktrees });
     if (!res || g !== gen || !known.has(dir)) return { ok: false, error: 'The workspace was rescanned meanwhile' };
     known.set(dir, res);
     return { ok: true, res };

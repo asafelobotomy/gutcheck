@@ -7,6 +7,7 @@
 const readline = require('node:readline');
 const { createEngine } = require('./engine');
 const { version } = require('../package.json');
+const { outdatedNotice } = require('./app-version');
 
 const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const MAX_TEXT = 100000; // characters per tool result, so one call cannot flood the agent's context
@@ -55,7 +56,7 @@ const TOOLS = [
     description: 'Every action gutcheck_plan accepts, with its parameters and allowed values.',
     inputSchema: { type: 'object', properties: {} }, annotations: { ...RO, openWorldHint: false }, run: (e) => e.actions() },
   { name: 'gutcheck_plan', title: 'Plan changes',
-    description: 'Turn fixes into exact, previewable commands. Changes nothing. Each item is { repo, finding: "<finding id>", params? } to use a finding\'s own fix, { repo, action: { type, ...params } } (see gutcheck_actions), { agentFix: <fix> } for a machine-level fix from gutcheck_agent_usage or the workspace advice (turn off a plugin, remove or sign in to an MCP server, remove a skill, clean stale config files), or { repo, all: true, answers? } for every automatic fix in run order (sync, commit, dependencies, files, cleanup, push, GitHub settings, test runs). With all, choices only the user can make (commit message, merging or closing PRs, installs, test runs) come back in "decisions": ask the user, then plan again with answers: { "<finding id>": { choice: n, values: { message: "..." } } }. Returns a single-use token per plan, valid 5 minutes. With all, plans that would run the repo\'s own hooks or filter drivers come back in "held" without a token: show the user their warnings and ask them to run those in the GutCheck app or CLI. Show the user the commands and risk before applying. Needs the server started with --allow-actions.',
+    description: 'Turn fixes into exact, previewable commands. Changes nothing. Each item is { repo, finding: "<finding id>", params? } to use a finding\'s own fix, { repo, action: { type, ...params } } (see gutcheck_actions), { agentFix: <fix> } for a machine-level fix from gutcheck_agent_usage or the workspace advice (turn off a plugin, remove or sign in to an MCP server, remove a skill, clean stale config files), or { repo, all: true, answers? } for every automatic fix in run order (sync, commit, dependencies, files, cleanup, push, GitHub settings, test runs). With all, choices only the user can make (commit message, merging or closing PRs, installs, test runs) come back in "decisions": ask the user, then plan again with answers: { "<finding id>": { choice: n, values: { message: "..." } } }. Returns a single-use token per plan, valid 30 minutes (time to ask the user). With all, plans that would run the repo\'s own hooks or filter drivers come back in "held" without a token: show the user their warnings and ask them to run those in the GutCheck app or CLI. Show the user the commands and risk before applying. Needs the server started with --allow-actions.',
     inputSchema: { type: 'object', required: ['items'], properties: { items: { type: 'array', minItems: 1, maxItems: 200, items: { type: 'object', properties: { ...repoArg, agentFix: { type: 'object', additionalProperties: true, description: 'A machine-level fix from gutcheck_agent_usage' }, all: { type: 'boolean', description: 'Every fix for this repo, in run order' }, answers: { type: 'object', additionalProperties: true, description: 'With all: the user\'s choices, by finding id' }, finding: str('A finding id that has a fix'), params: { type: 'object', additionalProperties: true, description: 'Extra parameters for the finding\'s fix, e.g. { "message": "..." } for commit-all' }, action: { type: 'object', required: ['type'], properties: { type: str('Action type from gutcheck_actions') }, additionalProperties: true } } } } } },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true }, run: (e, a) => e.plan(a) },
   { name: 'gutcheck_apply', title: 'Apply planned changes',
@@ -92,6 +93,8 @@ const text = (v) => { const t = typeof v === 'string' ? v : JSON.stringify(v, nu
 // The protocol logic, separated from stdio so tests can drive it with plain objects.
 function createServer({ engine, send, log = () => {} }) {
   let initialized = false;
+  // Agents run an unpacked copy that the app's Update replaces; say so when the installed app is newer.
+  const notice = engine.dataDir ? outdatedNotice(engine.dataDir, version) : null;
   const tools = new Map(TOOLS.map((t) => [t.name, t]));
   const reply = (id, result) => send({ jsonrpc: '2.0', id, result });
   const error = (id, code, message) => send({ jsonrpc: '2.0', id, error: { code, message } });
@@ -106,6 +109,7 @@ function createServer({ engine, send, log = () => {} }) {
     try { out = await tool.run(engine, { ...args, onProgress: progress }, progress); } catch (e) { log(`tool ${tool.name} failed: ${e && e.stack}`); out = { ok: false, error: `Internal error: ${e && e.message}` }; }
     const failed = out && out.ok === false;
     const body = out && typeof out.text === 'string' ? out.text : out; // the report is Markdown
+    if (notice && tool.name === 'gutcheck_overview' && body && typeof body === 'object') body.notice = notice;
     // A refusal is just its message; a partial failure (some plans did not run) keeps the full result.
     if (failed && out.error) return reply(id, { content: [{ type: 'text', text: out.error }], isError: true });
     return reply(id, { content: [{ type: 'text', text: text(body) }], ...(typeof body === 'string' ? {} : { structuredContent: body }), isError: failed });
@@ -121,7 +125,7 @@ function createServer({ engine, send, log = () => {} }) {
     if (method === 'initialize') {
       const want = params && params.protocolVersion;
       initialized = true;
-      return reply(id, { protocolVersion: PROTOCOLS.includes(want) ? want : PROTOCOLS[0], capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'gutcheck', title: 'GutCheck', version }, instructions: INSTRUCTIONS + (engine.allowActions ? '' : '\nThis server was started read-only: gutcheck_plan and gutcheck_apply will refuse.') });
+      return reply(id, { protocolVersion: PROTOCOLS.includes(want) ? want : PROTOCOLS[0], capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'gutcheck', title: 'GutCheck', version }, instructions: INSTRUCTIONS + (engine.allowActions ? '' : '\nThis server was started read-only: gutcheck_plan and gutcheck_apply will refuse.') + (notice ? '\n' + notice : '') });
     }
     if (!isRequest) return; // notifications (initialized, cancelled...) need no answer
     if (method === 'ping') return reply(id, {});

@@ -21,7 +21,7 @@ const MAX_HASH_BYTES = 5 * 1024 * 1024;
 // Never descend into these: huge, owned by a tool, or not part of the source tree.
 const NO_DESCEND = new Set([...HEAVY_DIRS, '.git', '.venv', 'venv', '.next', '.nuxt', '.svelte-kit', '.cxx', '.gradle']);
 
-const { CACHE_DIRS, FILE_RULES, VENV_NAMES, buildOutput, bigDirSize, dirSize, STALE_LOG_DAYS, STALE_BACKUP_DAYS, SCRATCH_DIR_RE, envIsConfigOnly, gitCommonDir } = require('./clutter-rules');
+const { CACHE_DIRS, FILE_RULES, VENV_NAMES, buildOutput, bigDirSize, dirSize, STALE_LOG_DAYS, STALE_BACKUP_DAYS, SCRATCH_DIR_RE, envIsConfigOnly, gitCommonDir, isAppDataDir } = require('./clutter-rules');
 
 const { scratchAdvice } = require('./clutter-scratch');
 
@@ -154,7 +154,7 @@ async function scanClutter(dir) {
     // Nested repos, git worktrees and virtualenvs are separate things: leave them alone.
     // A .git FILE is a linked worktree or a submodule checkout (it points back at a git dir): not a stray repo.
     if (depth > 0 && ents.some((e) => e.name === '.git')) { if (nested.length < 20 && ents.some((e) => e.name === '.git' && e.isDirectory())) nested.push(rel); return; }
-    if (depth > 0 && ents.some((e) => e.name === 'pyvenv.cfg')) return;
+    if (depth > 0 && (ents.some((e) => e.name === 'pyvenv.cfg') || isAppDataDir(ents))) return;
     if (depth === 0) {
       for (const e of ents) {
         root.names.add(e.name);

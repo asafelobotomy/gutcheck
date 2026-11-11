@@ -19,6 +19,9 @@ const { createSecretsService } = require('./secrets-glue');
 const { DAYS_PER_YEAR } = require('./util');
 
 const PLAN_TTL = 5 * 60 * 1000;
+// An agent must ask its user before applying, and people take longer than 5 minutes to answer.
+// Apply still re-checks each plan (hooks, clutter unchanged), so a longer wait cannot run a stale step.
+const AGENT_PLAN_TTL = 30 * 60 * 1000;
 const TREND_MAX = DAYS_PER_YEAR; // about a year of daily snapshots kept on disk
 const TREND_MERGE_MS = 10 * 60 * 1000; // scans closer together than this replace each other
 
@@ -29,7 +32,7 @@ const publicPlan = (token, p) => ({ ok: true, token, type: p.type, repoPath: p.r
 //         trendStore?: { read(): array, write(array) }, updateSettings?: (patch) => settings,
 //         secretsCtl?: createSecretsCtl() (the secrets scan and backup; left out, there is no secrets section),
 //         remoteStatus?: () => the last scan's remote stage status (remote-stage.js) or null }
-function createService({ known, settings, audit, trash, clipboard = { writeText() {} }, rescan = (d) => scanRepo(d, { deep: false }), trendStore = null, updateSettings = () => ({}), secretsCtl = null, remoteStatus = () => null }) {
+function createService({ known, settings, audit, trash, clipboard = { writeText() {} }, rescan = (d) => scanRepo(d, { deep: false }), trendStore = null, updateSettings = () => ({}), secretsCtl = null, remoteStatus = () => null, planTtl = PLAN_TTL }) {
   const plans = new Map(); // token -> { plan, expires } (only these stored plans can ever run)
   const busy = new Set(); // repo paths with an action in flight
   let clutterScanning = false;
@@ -76,7 +79,7 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
       const p = await actions.plan(repo, it && it.action, { readOnly, workspaceRoot: settings().root, repoPaths: [...known.values()].map((x) => x.path), rescueDir: settings().rescueDir });
       if (!p.ok) { out.push({ ...p, repoName: repo && repo.name }); continue; }
       const token = crypto.randomBytes(16).toString('hex');
-      plans.set(token, { plan: p, expires: Date.now() + PLAN_TTL });
+      plans.set(token, { plan: p, expires: Date.now() + planTtl });
       out.push(publicPlan(token, p));
     }
     for (const [t, v] of plans) if (v.expires < Date.now()) plans.delete(t);
@@ -99,7 +102,7 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
     for (const token of tokens) {
       const entry = plans.get(token);
       plans.delete(token); // single use
-      if (!entry || entry.expires < started) { out.push({ ok: false, error: 'Plan expired. Please review it again.' }); continue; }
+      if (!entry || entry.expires < started) { out.push({ ok: false, error: `Plan expired (plans last ${Math.round(planTtl / 60000)} minutes). Plan it again and review it.` }); continue; }
       const p = entry.plan;
       if (failed.has(p.repoPath)) { out.push({ ok: false, skipped: true, repoName: p.repoName, title: p.title, error: 'Skipped: an earlier change to this repo failed, so the rest did not run.' }); continue; }
       if (p.confirmName && !(opts.confirm && opts.confirm[token] === p.confirmName)) { note({ ok: false, repoName: p.repoName, title: p.title, error: `This is a dangerous action: confirm it by passing the repo name "${p.confirmName}" for this token.` }, p); continue; }
@@ -251,4 +254,4 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
   return { planActions, applyActions, forgetPlans, hasPlans, clutterScan, qualityScan, testsScan, secretsScan, secrets, qualitySettings, setQualitySettings, reportText, copyReport, wsAdvice, recordScan, trend };
 }
 
-module.exports = { createService };
+module.exports = { createService, AGENT_PLAN_TTL };

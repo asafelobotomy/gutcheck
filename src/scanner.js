@@ -278,8 +278,11 @@ async function finish(local, ghRes, opts) {
   // opts.policy: () => { ignores, baseline } from the data folder (the user's ignores and baseline).
   // opts.omit(id): findings that do not apply to this result; opts.extra: findings the caller adds
   // (both from remote-scan.js, for repos that are not cloned in the workspace).
-  const ev = score([...evaluate(snapshot).findings.filter((f) => !(opts.omit && opts.omit(f.id))), ...(opts.extra || [])]);
-  return applyPolicy({ ...snapshot, ...ev }, typeof opts.policy === 'function' ? opts.policy() : null, score);
+  // opts.worktreeOf: Map(dir -> main checkout) for linked worktrees whose main checkout is scanned too;
+  // the GitHub repo's own findings are reported there once, not again for every worktree.
+  const mainDir = opts.worktreeOf && opts.worktreeOf.get(dir);
+  const ev = score([...evaluate(snapshot).findings.filter((f) => !(opts.omit && opts.omit(f.id)) && !(mainDir && f.scope === 'github')), ...(opts.extra || [])]);
+  return applyPolicy({ ...snapshot, ...(mainDir ? { worktreeOf: mainDir } : {}), ...ev }, typeof opts.policy === 'function' ? opts.policy() : null, score);
 }
 
 const failed = (dir, e) => ({ path: dir, name: path.basename(dir), error: String(e && e.message ? e.message : e), findings: [], score: 0, grade: '?' });

@@ -10,6 +10,7 @@ const { createTrayController } = require('./tray');
 const { setAutostart, isAutostart, HIDDEN_FLAG } = require('./autostart');
 const { createSettingsStore } = require('./settings');
 const { createAgentConnect } = require('./agent-connect');
+const { recordAppVersion } = require('./app-version');
 const { createPolicyStore, driftReport, inactiveIgnores } = require('./policy');
 const sched = require('./schedule');
 const { createWorkspaceScanner } = require('./workspace-scan');
@@ -260,6 +261,8 @@ if (trayCtl.singleInstance()) {
     session.defaultSession.setPermissionCheckHandler(() => false);
     // A moved or updated AppImage: point the login entry at the copy that is running now.
     try { if (app.isPackaged && isAutostart(app, { dir: autostartDir() })) setAutostart(app, true, { dir: autostartDir() }); } catch {}
+    // Lets the MCP copy agents run tell that it is older than this app (app-version.js).
+    if (app.isPackaged) recordAppVersion(app.getPath('userData'), app.getVersion());
     trayCtl.create();
     createWindow();
     setInterval(() => { scheduledScan().catch(() => {}); }, sched.CHECK_EVERY_MS).unref();
