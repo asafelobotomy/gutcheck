@@ -7,7 +7,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { run, SAFE_GIT_ENV } = require('./exec');
-const { collectLocal, finish } = require('./scanner');
+const scanner = require('./scanner');
 const { defaultUrlFor } = require('./remote-cache');
 
 const WORKING_COPY_IDS = Object.freeze([
@@ -31,11 +31,11 @@ const repoDir = (r) => (r && r.source === 'remote' ? r.cacheDir || null : r && r
 
 // An empty repo used as the file tree of a repo with no clone. ".empty" has no "__", so cache
 // clean-up never treats it as a clone.
-async function ensureEmptyRepo(root) {
+async function ensureEmptyRepo(root, runGit = run) {
   const dir = path.join(root, '.empty');
   if (fs.existsSync(path.join(dir, '.git'))) return dir;
   fs.mkdirSync(dir, { recursive: true });
-  const r = await run('git', ['-c', 'core.hooksPath=/dev/null', 'init', '-q', '--template=', '-b', 'main'], { cwd: dir, env: { ...SAFE_GIT_ENV } });
+  const r = await runGit('git', ['-c', 'core.hooksPath=/dev/null', 'init', '-q', '--template='], { cwd: dir, env: { ...SAFE_GIT_ENV } });
   if (!r.ok) throw new Error('git init failed');
   return dir;
 }
@@ -55,26 +55,28 @@ function blankWorkingCopy(local) {
 
 const ids = (res) => new Set((res.findings || []).map((f) => f.id));
 
-// listing: { owner, name, ... } from remote-list.js; opts: { cacheDir, emptyDir, ghRes, policy, deep, reason }
-async function scanRemote(listing, { cacheDir = null, emptyDir = null, ghRes = null, policy, deep = false, reason = null } = {}) {
+// listing: { owner, name, ... } from remote-list.js; opts: { cacheDir, emptyDir, ghRes, policy, reason }.
+// Never a deep scan: that runs npm in the folder, and a cache copy's .npmrc is the repo's to choose.
+async function scanRemote(listing, { cacheDir = null, emptyDir = null, ghRes = null, policy, reason = null } = {}) {
   const ref = { owner: listing.owner, name: listing.name };
   const origin = { ref, originUrl: defaultUrlFor(ref) };
   const dir = cacheDir || emptyDir;
   if (!dir) throw new Error('No folder to scan');
-  const local = blankWorkingCopy(await collectLocal(dir, { deep: !!(deep && cacheDir), origin }));
+  const local = blankWorkingCopy(await scanner.collectLocal(dir, { deep: false, origin }));
   let omit = isWorkingCopy;
   const extra = [];
   if (!cacheDir) {
     // What an empty repo with no GitHub data reports is about missing files, not about GitHub: drop it.
-    const fileOnly = ids(await finish({ ...structuredClone(local), ref: null }, null, {}));
+    const fileOnly = ids(await scanner.finish({ ...structuredClone(local), ref: null }, null, {}));
     omit = (id) => isWorkingCopy(id) || fileOnly.has(id) || FILE_GATED_IDS.includes(id);
     const [kind, ...rest] = String(reason || 'clone-failed').split(':');
     const make = REASONS[kind] || REASONS['clone-failed'];
     const detail = kind === 'too-large' ? `It is ${Math.round((listing.diskKB || 0) / 1024)} MB on GitHub, over the size limit in Settings.` : rest.join(':').trim();
     extra.push({ category: 'Repo', severity: 'info', ...make(detail) });
   }
-  const res = await finish(local, ghRes, { policy, omit, extra });
-  return { ...res, source: 'remote', path: `remote:${ref.owner}/${ref.name}`, name: `${ref.owner}/${ref.name}`, cacheDir: cacheDir || null, partial: !cacheDir };
+  const res = await scanner.finish(local, ghRes, { policy, omit, extra });
+  // ref: the ignore and "new since last scan" key stays owner/name even when GitHub is unreachable.
+  return { ...res, ref, source: 'remote', path: `remote:${ref.owner}/${ref.name}`, name: `${ref.owner}/${ref.name}`, cacheDir: cacheDir || null, partial: !cacheDir };
 }
 
 module.exports = { scanRemote, repoDir, ensureEmptyRepo, blankWorkingCopy, WORKING_COPY_IDS, FILE_GATED_IDS, isWorkingCopy };

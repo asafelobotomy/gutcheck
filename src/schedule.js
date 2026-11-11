@@ -44,7 +44,8 @@ function createSeenStore(file, io = fs) {
   const load = (root, { deep = false } = {}) => read().sets[`${root}|${deep ? 'deep' : 'normal'}`] || null;
   // A repo whose scan failed, or whose GitHub data could not be fetched, keeps its previous keys, so
   // its findings do not all come back as new once it scans again.
-  function record(root, results, { deep = false } = {}) {
+  // carry(repoKey): keep the previous findings of those repos (a scan that could not see them).
+  function record(root, results, { deep = false, carry = null } = {}) {
     const all = read();
     const id = `${root}|${deep ? 'deep' : 'normal'}`;
     const prev = all.sets[id];
@@ -55,6 +56,7 @@ function createSeenStore(file, io = fs) {
       const kept = new Set(results.filter(failedRepo).flatMap((r) => [repoKey(r), r.remote && r.remote.owner ? `${r.remote.owner}/${r.remote.name}` : null].filter(Boolean).map((k) => k + '|')));
       for (const k of prev.keys) if (kept.has(k.slice(0, k.lastIndexOf('|') + 1))) keys.push(k);
     }
+    if (prev && carry) for (const k of prev.keys) if (carry(k.slice(0, k.lastIndexOf('|'))) && !keys.includes(k)) keys.push(k);
     all.sets[id] = { ts: Date.now(), keys };
     const ids = Object.keys(all.sets).sort((a, b) => all.sets[b].ts - all.sets[a].ts).slice(0, MAX_SETS);
     try { io.writeFileSync(file + '.tmp', JSON.stringify({ sets: Object.fromEntries(ids.map((k) => [k, all.sets[k]])) })); io.renameSync(file + '.tmp', file); } catch {}

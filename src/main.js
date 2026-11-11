@@ -2,7 +2,6 @@ const { app, BrowserWindow, ipcMain, dialog, shell, session, clipboard, Tray, Me
 const fs = require('node:fs');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
-const { scanRepo } = require('./scanner');
 const github = require('./github');
 const { createService } = require('./service');
 const { appendAudit, readAudit } = require('./audit');
@@ -128,12 +127,8 @@ async function scheduledScan() {
 }
 
 handle('scan:one', async (_e, { dir, deep } = {}) => {
-  if (!known.has(dir)) return { ok: false, error: 'Unknown repo' };
-  const g = ws.generation();
-  const res = await scanRepo(dir, { deep: !!deep, policy: policyNow });
-  if (g !== ws.generation() || !known.has(dir)) return { ok: false, error: 'The workspace was rescanned meanwhile' };
-  known.set(dir, res);
-  return { ok: true, res, rate: github.getRate() };
+  const out = await ws.rescan(dir, { deep: !!deep }); // a remote repo refreshes its copy instead of opening a folder
+  return out.ok ? { ...out, rate: github.getRate() } : out;
 });
 
 // ---- Actions, clutter and report logic lives in service.js (testable without Electron) ----

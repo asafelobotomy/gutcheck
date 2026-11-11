@@ -11,6 +11,7 @@ const github = require('./github');
 const { expandHome } = require('./util');
 const { normalizeRemoteSettings } = require('./remote-settings');
 const { runRemoteStage, refreshRemote } = require('./remote-stage');
+const { repoKey } = require('./policy');
 
 // deps: { known, service, policy: () => policy data, seen?: seen store, onBegin?(total), onRepo?(res, done, total, stage),
 //         remote?: { settings: () => raw settings.remote, cache: remote-cache.js, list?, fetch? } (repos not cloned here) }
@@ -63,8 +64,9 @@ function createWorkspaceScanner({ known, service, policy, seen = null, onBegin =
         const myGen = gen;
         let total = dirs.length;
         let done = dirs.length;
+        // A failure of the stage itself (network, disk) is reported, never a failed workspace scan.
         const st = await runRemoteStage({
-          localResults: local, settings: remoteSettings(remoteOverride), cache: remote.cache, policy, deep: !!deep, list: remote.list, fetch: remote.fetch,
+          localResults: local, settings: remoteSettings(remoteOverride), cache: remote.cache, policy, list: remote.list, fetch: remote.fetch,
           onBegin: (n) => { total = dirs.length + n; },
           onRepo: (res) => {
             if (myGen !== gen) return;
@@ -72,14 +74,18 @@ function createWorkspaceScanner({ known, service, policy, seen = null, onBegin =
             onRepo(res, ++done, total, 'remote');
             if (onProgress) onProgress(done, total, res.name);
           },
-        });
+        }).catch((e) => ({ results: [], listing: new Map(), status: { ran: true, error: String((e && e.message) || e).split('\n')[0].slice(0, 300), included: 0, excluded: [], cloned: 0, cacheBytes: 0 } }));
         remoteStatus = st.status;
         remoteListing = st.listing;
         results = [...local, ...st.results];
       }
       service.recordScan(r.root, results);
       let fresh = null;
-      if (recordSeen && seen) { const rec = seen.record(r.root, results, { deep: !!deep }); fresh = rec.compared ? rec.fresh : null; lastFresh = fresh; }
+      // When this scan could not see the remote repos, keep their findings for the next comparison.
+      const localKeys = new Set(local.map(repoKey));
+      const blind = !!remote && (remoteOverride === false || !!(remoteStatus && remoteStatus.error));
+      const carry = blind ? (k) => !localKeys.has(k) : null;
+      if (recordSeen && seen) { const rec = seen.record(r.root, results, { deep: !!deep, carry }); fresh = rec.compared ? rec.fresh : null; lastFresh = fresh; }
       return { ok: true, root: r.root, count: results.length, rate: github.getRate(), fresh };
     })();
     running = { key, promise };
@@ -96,16 +102,25 @@ function createWorkspaceScanner({ known, service, policy, seen = null, onBegin =
     const l = remoteListing.get(dir);
     if (String(dir).startsWith('remote:') && !l) return null;
     const res = l
-      ? await refreshRemote(l, { settings: remoteSettings(), cache: remote.cache, policy, deep: last.deep, fetch: remote.fetch })
+      ? await refreshRemote(l, { settings: remoteSettings(), cache: remote.cache, policy, fetch: remote.fetch })
       : await scanRepo(dir, { deep: last.deep, policy });
     if (g !== gen || !known.has(dir)) return null; // the workspace was rescanned meanwhile
     known.set(dir, res);
     return res;
   }
+  // Rescan one repo with a chosen depth (the app's Rescan button): a remote repo refreshes its copy.
+  async function rescan(dir, { deep = false } = {}) {
+    if (!known.has(dir)) return { ok: false, error: 'Unknown repo' };
+    const g = gen;
+    const res = remoteListing.has(dir) ? await refresh(dir) : await scanRepo(dir, { deep: !!deep, policy });
+    if (!res || g !== gen || !known.has(dir)) return { ok: false, error: 'The workspace was rescanned meanwhile' };
+    known.set(dir, res);
+    return { ok: true, res };
+  }
   async function refreshAll() { for (const d of [...known.keys()]) await refresh(d); }
 
   return {
-    resolveRoot, scan, settled, refresh, refreshAll,
+    resolveRoot, scan, settled, refresh, rescan, refreshAll,
     busy: () => !!running,
     root: () => last.root,
     deep: () => last.deep,

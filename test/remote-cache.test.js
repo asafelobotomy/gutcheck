@@ -60,9 +60,10 @@ test('clone runs with the fixed safety config and arguments, then a same-pushedA
   assert.ok(fs.existsSync(path.join(r.dir, 'README.md')));
   const clone = t.calls.find((c) => c.args.includes('clone'));
   const at = clone.args.indexOf('clone');
-  assert.deepEqual(clone.args.slice(0, at), CLONE_CONFIG);
+  assert.deepEqual(clone.args.slice(0, CLONE_CONFIG.length), CLONE_CONFIG);
+  assert.ok(clone.args.slice(0, at).includes('filter.lfs.smudge='));
   assert.deepEqual(CLONE_CONFIG, ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'protocol.ext.allow=never', '-c', 'protocol.fd.allow=never', '-c', 'protocol.file.allow=never', '-c', 'filter.lfs.smudge=', '-c', 'filter.lfs.process=', '-c', 'filter.lfs.required=false']);
-  assert.deepEqual(clone.args.slice(at, at + 9), ['clone', '--depth', '1', '--single-branch', '--no-tags', '--branch', 'main', '--no-recurse-submodules', '--']);
+  assert.deepEqual(clone.args.slice(at, at + 11), ['clone', '--depth', '1', '--single-branch', '--no-tags', '--branch', 'main', '--no-recurse-submodules', '--origin', 'origin', '--']);
   assert.equal(clone.env.GIT_LFS_SKIP_SMUDGE, '1');
   assert.equal(clone.env.GIT_TERMINAL_PROMPT, '0');
   const meta = JSON.parse(fs.readFileSync(path.join(root, 'octo__app.json'), 'utf8'));
