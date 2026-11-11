@@ -16,7 +16,7 @@ const SECURITY_IDS = new Set([
   'push-protection-off', 'code-scanning-off', 'security-updates-off', 'private-reporting-off', 'dependabot-no-actions', // checks-hygiene.js
   'automerge-ungated',                                    // dep-automation.js
   'baseline-drift',                                       // policy.js: the user's own baseline
-  'git-dirty', 'git-ahead', 'nested-repo',                // uncommitted or unpushed work (checks.js, clutter.js)
+  'git-dirty', 'git-ahead', 'git-unpushed-branches', 'nested-repo',                // uncommitted or unpushed work (checks.js, clutter.js)
 ]);
 // wf-*: every Actions security finding (workflows.js via checks-hygiene.js); secret-*: secret files
 // (secret-status.js) and secret scanning; ws-secret-*: the workspace's secret files.

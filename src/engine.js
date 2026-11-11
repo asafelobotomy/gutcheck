@@ -48,6 +48,7 @@ const ACTION_CATALOG = {
   'add-file': { about: 'Add a standard file on the default branch', params: { template: '"license", "readme", "gitignore", "security", "contributing", "conduct", "pr-template", "dependabot" or "ci-node"', commit: 'true to commit it' } },
   'npm-install': { about: 'Install dependencies with the project\'s package manager', params: {} },
   'clean-clutter': { about: 'Move detected clutter to the trash (caches are deleted)', params: { paths: 'array of clutter paths from gutcheck_clutter' } },
+  'rescue-bundle': { about: 'Save a copy of everything in this repo that exists only on this machine (bundle, patches, untracked files), outside the workspace; the repo is not changed', params: { dest: 'optional: base folder (default ~/GutCheck-rescue)' } },
   'tests-run': { about: 'Run the tests with coverage, or mutation testing (runs the project\'s own code; dangerous, needs the repo name)', params: { kind: '"coverage" or "mutation"', stack: 'optional: "rust", "python", "node" or "go" (from gutcheck_tests runnable)', root: 'optional: the stack\'s folder, e.g. "wizard"' } },
   'gitignore-append': { about: 'Append known-safe rules to .gitignore', params: { entries: 'array of rules from a clutter finding' } },
   'permissions-prune': { about: 'Remove permission rules from .claude/settings.local.json (shown redacted, backed up outside the repo)', params: { hashes: 'array of rule hashes from an AI agents finding' } },
@@ -152,6 +153,13 @@ function createEngine(opts = {}) {
     if (category) out = out.filter((f) => f.category.toLowerCase() === String(category).toLowerCase());
     out.sort((a, b) => order[a.severity] - order[b.severity]);
     return { ok: true, total: out.length, findings: out.slice(0, Math.max(1, Math.min(1000, limit))), categories: [...new Set(pool.flatMap((r) => r.findings.map((f) => f.category)))].sort() };
+  }
+
+  // Repos holding work that exists only on this machine (scan data; read-only).
+  async function localOnly({ onProgress } = {}) {
+    const s = await ensure({ onProgress });
+    if (!s.ok) return s;
+    return { ok: true, repos: [...known.values()].filter((r) => !r.error && r.localOnly && r.localOnly.any).map((r) => ({ repo: r.name, ...r.localOnly })) };
   }
 
   async function repoDetail({ repo, onProgress } = {}) {
@@ -340,7 +348,7 @@ function createEngine(opts = {}) {
 
   const history = ({ limit = 50 } = {}) => ({ ok: true, entries: readAudit(auditFile, Math.max(1, Math.min(500, limit))) });
 
-  return { scan, repos, findings, repoDetail, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, secrets: secrets.list, secretsPlan: secrets.plan, secretsApply: secrets.apply, secretsVerify: secrets.verify, secretsSkip: secrets.skip, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
+  return { scan, repos, findings, localOnly, repoDetail, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, secrets: secrets.list, secretsPlan: secrets.plan, secretsApply: secrets.apply, secretsVerify: secrets.verify, secretsSkip: secrets.skip, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
 }
 
 module.exports = { createEngine, dataDir, ACTION_CATALOG };

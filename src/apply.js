@@ -12,7 +12,7 @@ const defaultCtx = (over = {}) => {
   const ctx = { run, fs, readOnly: false, clutter: scanClutter, ...over };
   // Read-only git for plans and checks: exec.git's guards (repo drivers blanked, no lazy fetch).
   // A runner injected by tests gets the fixed options only, since it runs no real git.
-  ctx.safeGit = ctx.safeGit || (ctx.run === run ? (args, cwd) => exec.git(args, { cwd }) : (args, cwd) => ctx.run('git', [...READONLY_GIT, ...args], { cwd, env: SAFE_GIT_ENV }));
+  ctx.safeGit = ctx.safeGit || (ctx.run === run ? (args, cwd, o = {}) => exec.git(args, { cwd, timeout: o.timeout, maxBuffer: o.maxBuffer }) : (args, cwd, o = {}) => ctx.run('git', [...READONLY_GIT, ...args], { cwd, env: SAFE_GIT_ENV, timeout: o.timeout, maxBuffer: o.maxBuffer }));
   // A repo's config entries for some keys, and those its own config decided (git-safety.js). An
   // injected runner has no real repo behind it, so it sees none.
   ctx.gitConfig = ctx.gitConfig || (ctx.run === run ? exec.configEntries : async () => ({ all: [], untrusted: [] }));
@@ -23,6 +23,25 @@ const defaultCtx = (over = {}) => {
   });
   return ctx;
 };
+
+// Copy a planned list of files out of a repo (the rescue copy). Every file is checked before any is
+// copied: still a regular file inside the repo, with the size and mtime the preview showed. Nothing
+// is overwritten (COPYFILE_EXCL); new folders are private (0700).
+function copyFiles(io, s) {
+  const rootReal = io.realpathSync(s.root);
+  const srcs = s.files.map((f) => {
+    const src = path.join(s.root, f.rel);
+    const parent = io.realpathSync(path.dirname(src));
+    if (parent !== rootReal && !parent.startsWith(rootReal + path.sep)) throw new Error('Path is outside the repository.');
+    const st = io.lstatSync(src);
+    if (!st.isFile() || st.size !== f.size || st.mtimeMs !== f.mtimeMs) throw new Error('Files changed since the preview. Rescan and review it again.');
+    return { src, dst: path.join(s.dest, f.rel) };
+  });
+  for (const { src, dst } of srcs) {
+    io.mkdirSync(path.dirname(dst), { recursive: true, mode: 0o700 });
+    io.copyFileSync(src, dst, io.constants.COPYFILE_EXCL);
+  }
+}
 
 // Files we write or append to must really live inside the repo: no symlinked file or folder may
 // redirect the write elsewhere (a scanned repo is not necessarily trusted).
@@ -125,9 +144,26 @@ async function applySteps(p, ctx) {
         results.push({ text: s.display, ok: false, out: String(e.message) });
         return { ok: false, results };
       }
+    } else if (s.kind === 'copy') {
+      try { copyFiles(io, s); results.push({ text: s.display, ok: true, out: '' }); } catch (e) { results.push({ text: s.display, ok: false, out: String(e.message) }); return { ok: false, results }; }
+    } else if (s.kind === 'mkdir' && s.exclusive) {
+      // A new folder outside every guarded root (the rescue): checked again here, after the preview.
+      try {
+        io.mkdirSync(path.dirname(s.path), { recursive: true, mode: 0o700 });
+        const real = path.join(io.realpathSync(path.dirname(s.path)), path.basename(s.path));
+        const inside = (s.guard || []).some((g) => { let gr = g; try { gr = io.realpathSync(g); } catch {} return real === gr || real.startsWith(gr + path.sep); });
+        if (inside) throw new Error('Choose a folder outside the workspace and its repos.');
+        try { io.mkdirSync(s.path, { mode: 0o700 }); } catch (e) { throw e && e.code === 'EEXIST' ? new Error(`${s.path} already exists. Choose another folder.`) : e; }
+        results.push({ text: s.display, ok: true, out: '' });
+      } catch (e) { results.push({ text: s.display, ok: false, out: String(e.message) }); return { ok: false, results }; }
     } else if (s.kind === 'mkdir') {
       // Only GutCheck's own run folder (layer-3 test runs), never inside a repo.
       try { io.mkdirSync(s.path, { recursive: true, mode: 0o700 }); results.push({ text: s.display, ok: true, out: '' }); } catch (e) { results.push({ text: s.display, ok: false, out: String(e.message) }); return { ok: false, results }; }
+    } else if (s.safeGit) {
+      // git with the repo's hooks, filters and config-defined commands switched off (the rescue).
+      const r = await ctx.safeGit(s.args, s.cwd, { timeout: s.timeout || COMMAND_TIMEOUT_MS });
+      results.push({ text: s.display, ok: r.ok, out: (r.stdout + r.stderr).trim().slice(-2000) });
+      if (!r.ok) return { ok: false, results };
     } else {
       const r = await ctx.run(s.cmd, s.args, { cwd: s.cwd, input: s.input, timeout: s.timeout || COMMAND_TIMEOUT_MS, env: s.env, maxBuffer: s.saveOutput ? 64 * 1024 * 1024 : undefined });
       // okCodes: tools that exit non-zero to report findings (mutmut exits 1-2 when mutants survive).

@@ -11,6 +11,7 @@ const { collectDrift } = require('./manifest-drift');
 const { applyPolicy, repoPolicy } = require('./policy');
 const { collectHygiene } = require('./hygiene');
 const { collectGitState } = require('./git-state');
+const { collectLocalOnly } = require('./local-only');
 const gh = require('./github');
 const { scanAgents } = require('./agents');
 const { lockVersions, superseded } = require('./dependabot-prs');
@@ -59,7 +60,7 @@ async function collectGit(dir) {
   const st = await git(['status', '--porcelain=v2', '--branch', '--ignore-submodules=dirty'], { cwd: dir });
   // A failed status (refused, or a filter that would not run) must not look like a clean repo.
   if (!st.ok) throw new Error(`git status failed: ${(st.stderr || '').trim().split('\n').pop().slice(0, 200)}`);
-  const g = { branch: null, detached: false, upstream: null, ahead: 0, behind: 0, dirty: 0, branches: [], remoteBranches: [], mergedBranches: [] };
+  const g = { branch: null, detached: false, upstream: null, ahead: 0, behind: 0, dirty: 0, untracked: 0, branches: [], remoteBranches: [], mergedBranches: [] };
   for (const line of st.stdout.split('\n')) {
     if (line.startsWith('# branch.head ')) {
       const head = line.slice(14);
@@ -72,7 +73,10 @@ async function collectGit(dir) {
         g.ahead = +m[1];
         g.behind = +m[2];
       }
-    } else if (line && !line.startsWith('#')) g.dirty++;
+    } else if (line && !line.startsWith('#')) {
+      g.dirty++;
+      if (line.startsWith('? ')) g.untracked++;
+    }
   }
   const refs = await git(['for-each-ref', '--format=%(refname:short)\t%(committerdate:iso-strict)', 'refs/heads'], { cwd: dir });
   g.branches = refs.stdout
@@ -229,7 +233,11 @@ async function collectLocal(dir, opts) {
   const drift = await collectDrift(dir);
   delete files.names;
   const gitState = await collectGitState(dir, { detached: g.detached, storage: hygiene.storage });
-  return { dir, ref, originUrl, files, hasWorkflows, git: g, gitState, deps, hygiene, agents, release, drift, runtimes: collectRuntimes(dir), depAutomation: auditDepAutomation(dir), repoPolicy: repoPolicy(dir) };
+  const localOnly = await collectLocalOnly(dir, {
+    branch: g.branch, noRemote: !rawOrigin, upstreamGone: !!hygiene.currentGone, stashes: hygiene.stashes,
+    uncommitted: g.dirty - g.untracked, untracked: g.untracked, detachedOnly: (gitState.detached && gitState.detached.unreferenced) || 0,
+  });
+  return { dir, ref, originUrl, files, hasWorkflows, git: g, gitState, localOnly, deps, hygiene, agents, release, drift, runtimes: collectRuntimes(dir), depAutomation: auditDepAutomation(dir), repoPolicy: repoPolicy(dir) };
 }
 
 const EMPTY_GH = () => ({ remote: null, prs: [], ci: { failed: [], error: null }, protection: null, alerts: [] });
@@ -265,7 +273,7 @@ async function finish(local, ghRes, opts) {
   const g = local.git;
   const base = (remote.remote && remote.remote.defaultBranch) || (g.branches.some((b) => b.name === 'main') ? 'main' : g.branches.some((b) => b.name === 'master') ? 'master' : null);
   g.mergedBranches = (await mergedInto(dir, base, g)).filter((b) => !(g.worktreeBranches || []).includes(b));
-  const snapshot = { path: dir, name: path.basename(dir), originUrl: local.originUrl, git: g, gitState: local.gitState, files: local.files, deps: local.deps, hasWorkflows: local.hasWorkflows, hygiene: local.hygiene, agents: local.agents, release: local.release, drift: local.drift, runtimes: local.runtimes, depAutomation: local.depAutomation, repoPolicy: local.repoPolicy, scannedAt: new Date().toISOString(), ...remote };
+  const snapshot = { path: dir, name: path.basename(dir), originUrl: local.originUrl, git: g, gitState: local.gitState, localOnly: local.localOnly, files: local.files, deps: local.deps, hasWorkflows: local.hasWorkflows, hygiene: local.hygiene, agents: local.agents, release: local.release, drift: local.drift, runtimes: local.runtimes, depAutomation: local.depAutomation, repoPolicy: local.repoPolicy, scannedAt: new Date().toISOString(), ...remote };
   // opts.policy: () => { ignores, baseline } from the data folder (the user's ignores and baseline).
   return applyPolicy({ ...snapshot, ...evaluate(snapshot) }, typeof opts.policy === 'function' ? opts.policy() : null, score);
 }

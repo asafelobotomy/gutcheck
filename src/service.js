@@ -71,7 +71,7 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
     const out = [];
     for (const it of items) {
       const repo = it && known.get(it.dir);
-      const p = await actions.plan(repo, it && it.action, { readOnly });
+      const p = await actions.plan(repo, it && it.action, { readOnly, workspaceRoot: settings().root, repoPaths: [...known.values()].map((x) => x.path), rescueDir: settings().rescueDir });
       if (!p.ok) { out.push({ ...p, repoName: repo && repo.name }); continue; }
       const token = crypto.randomBytes(16).toString('hex');
       plans.set(token, { plan: p, expires: Date.now() + PLAN_TTL });
@@ -123,7 +123,7 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
 
   // activeAt: newest of the last push and the newest local branch commit.
   const activeAt = (r) => [(r.remote && r.remote.pushedAt), ...((r.git && r.git.branches) || []).map((b) => b.date)].filter(Boolean).sort().pop() || null;
-  const wsRepos = () => [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name, originUrl: r.originUrl, activeAt: activeAt(r), identity: r.gitState && r.gitState.identity }));
+  const wsRepos = () => [...known.values()].filter((r) => !r.error).map((r) => ({ path: r.path, name: r.name, originUrl: r.originUrl, activeAt: activeAt(r), identity: r.gitState && r.gitState.identity, localOnly: r.localOnly }));
   const wsAdvice = async (root) => {
     if (!root || !fs.existsSync(root)) return null;
     try { return [...(await workspaceAdvice(root, wsRepos())), ...(await devAdvice(wsRepos()))]; } catch { return null; }

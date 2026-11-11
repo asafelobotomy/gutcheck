@@ -8,7 +8,8 @@ const { run } = require('./exec');
 const { agentAdvice } = require('./agents');
 const { workspaceIdentity } = require('./checks-gitstate');
 const { cacheAdvice } = require('./cache-sizes');
-const { DAY, COMMAND_TIMEOUT_MS, plural, list, sq } = require('./util');
+const { summarizeLocalOnly } = require('./local-only');
+const { DAY, COMMAND_TIMEOUT_MS, plural, list, sq, printable } = require('./util');
 
 const INACTIVE_DAYS = 90;
 const MAX_DEP_DIRS = 25;
@@ -67,10 +68,22 @@ async function depFolderAdvice(repos, now = Date.now()) {
   }];
 }
 
+// repos: [{ name, localOnly }]. One line per repo that holds work no remote has.
+function localOnlyAdvice(repos) {
+  const held = repos.filter((r) => r.localOnly && r.localOnly.any);
+  if (!held.length) return [];
+  return [{
+    id: 'ws-local-only', severity: 'info',
+    title: `${plural(held.length, 'repo')} ${held.length === 1 ? 'holds' : 'hold'} work that exists only on this machine`,
+    detail: held.map((r) => `${printable(r.name)}: ${summarizeLocalOnly(r.localOnly)}`).join('\n'),
+    note: 'Push it, or save a rescue copy (gutcheck fix <repo> rescue-bundle) before deleting or moving a repo.',
+  }];
+}
+
 // opts: { home, thresholdKiB } are injectable for tests.
 async function devAdvice(repos, opts = {}) {
   const [cfg, deps, caches, agents] = await Promise.all([gitConfigAdvice(), depFolderAdvice(repos), cacheAdvice(opts).catch(() => []), agentAdvice(repos, opts.home ? { home: opts.home } : {}).catch(() => [])]);
-  return [...cfg, ...workspaceIdentity(repos), ...deps, ...caches, ...agents].map((a) => ({ category: 'Workspace', ...a }));
+  return [...cfg, ...workspaceIdentity(repos), ...localOnlyAdvice(repos), ...deps, ...caches, ...agents].map((a) => ({ category: 'Workspace', ...a }));
 }
 
-module.exports = { devAdvice, gitConfigAdvice, depFolderAdvice, INACTIVE_DAYS };
+module.exports = { devAdvice, localOnlyAdvice, gitConfigAdvice, depFolderAdvice, INACTIVE_DAYS };

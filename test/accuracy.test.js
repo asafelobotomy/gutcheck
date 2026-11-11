@@ -354,3 +354,17 @@ test('git state: a repo under the maintenance thresholds gets no maintenance fin
     assert.ok(!(await scanRepo(d, {})).findings.some((f) => f.id === 'git-maintenance'), 'unregistered alone is not a threshold');
   } finally { rm(d); }
 });
+
+test('local-only: a pushed single-branch repo and a fresh repo raise no git-unpushed-branches', async () => {
+  const bare = tmp();
+  const d = repo();
+  try {
+    put(d, 'a.txt', 'a\n'); sh(d, 'add', '-A'); sh(d, 'commit', '-q', '-m', 'a');
+    sh(bare, 'init', '-q', '--bare');
+    sh(d, 'remote', 'add', 'origin', bare); sh(d, 'push', '-q', '-u', 'origin', 'main');
+    const ids = (r) => evaluate(r).findings.map((f) => f.id);
+    assert.ok(!ids(await scanRepo(d, {})).includes('git-unpushed-branches'));
+    const e = repo();
+    try { assert.ok(!ids(await scanRepo(e, {})).includes('git-unpushed-branches')); } finally { rm(e); }
+  } finally { rm(d); rm(bare); }
+});

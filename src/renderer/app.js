@@ -203,7 +203,7 @@ function branchesPanel(r) {
     h('div', { class: 'grow' }, h('b', {}, 'origin/' + b.name), ' ', h('span', { class: 'badge' }, 'remote only'), b.name === def ? h('span', { class: 'badge cur' }, 'default') : null, h('span', { class: 'muted' }, ' ' + fmtDate(b.date))),
     b.name !== def ? btn('Delete on GitHub', act('delete-remote', { branch: b.name }), 'dng') : null));
   return [h('h3', {}, `Branches (${rows.length} local, ${remoteOnly.length} remote-only)`),
-    h('div', { class: 'toolbar' }, btn('New branch…', act('create-branch', {})), btn('Pull', act('pull', {})), btn('Push', act('push', {}))),
+    h('div', { class: 'toolbar' }, btn('New branch…', act('create-branch', {})), btn('Pull', act('pull', {})), btn('Push', act('push', {})), btn('Save a rescue copy…', act('rescue-bundle', {}))),
     ...rows, ...remoteRows];
 }
 
