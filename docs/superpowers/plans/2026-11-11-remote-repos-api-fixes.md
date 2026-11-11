@@ -25,7 +25,7 @@
 - A danger plan on a remote repo (`pr-merge` with failing checks) needs the confirm name `owner/name`: Task 1 asserts `confirmName`.
 - A finding fix of a file type reached via `{ repo, finding }` on MCP: refused with `REMOTE_FILE_FIX`, Task 3.
 - After apply, the refresh goes through the injected `rescan` with the `remote:` key: Task 1.
-- Overview bulk Fix all mixing local and remote file fixes: remote entries become `null`, Task 4.
+- Overview bulk Fix all mixing local and remote file fixes: not offered (`RemoteView.canFix` in `overview-view.js`), Task 4.
 
 ---
 
@@ -57,9 +57,9 @@
 
 ### Task 4: App
 
-**Files:** Modify `src/renderer/remote-view.js` (`canFix(r, fix)`, `localOnly(r)`, `note` uses `REMOTE_NOTE`), `src/renderer/app.js`, `src/renderer/metrics.js`. Test: update `test/remote-ui.test.js`.
+**Files:** Modify `src/renderer/remote-view.js` (`canFix(r, fix)`, `localPanel(r, panel)`, `note` uses `REMOTE_NOTE`), `src/renderer/app.js`, `src/renderer/overview-view.js`. Test: update `test/remote-ui.test.js`.
 
-- [ ] Tests: remote detail shows Fix all and "Set description…", no "New branch…", no "+ LICENSE", no "Archive repo", no "Remove protection"; text includes `REMOTE_NOTE`. `Metrics.groupFindings` gives `null` for a remote add-file fix.
+- [ ] Tests: remote detail shows Fix all and "Set description…", no "New branch…", no "+ LICENSE", no "Archive repo", no "Remove protection"; text includes `REMOTE_NOTE`. Overview bulk Fix all checks `RemoteView.canFix`.
 - [ ] Implement; keep `app.js` under 400 lines. Run: PASS. Commit.
 
 ### Task 5: Docs and full suite

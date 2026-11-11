@@ -5,7 +5,7 @@ Part 2 of 3 of "GutCheck for remote repos". Builds on part 1 (`2026-11-11-remote
 | Part | Scope | Status |
 |---|---|---|
 | 1 | Find and scan uncloned GitHub repos, read-only | Done |
-| 2 | GitHub API fixes on uncloned repos (this spec) | Designed |
+| 2 | GitHub API fixes on uncloned repos (this spec) | Done |
 | 3 | File fixes delivered as pull requests from the cache clone | Later spec |
 
 ## Goal
@@ -59,9 +59,9 @@ No change in behaviour. `applyActions` keys by `repoPath` (`remote:owner/name`),
 
 - Detail view: Fix all shows when there is anything to fix. Finding fix buttons show when the fix type is in `API_ACTIONS`. The note under the toolbar is `REMOTE_NOTE`.
 - The Branches panel and "Add missing files" panel are hidden for remote repos (they are local git and file actions). In the Repository settings panel, "Remove protection" and "Archive repo" are hidden for remote repos.
-- Workspace overview: a group's fix list leaves out remote repos whose fix is not in `API_ACTIONS` (marked `null`, so the group is not bulk-fixed).
+- Workspace overview (`overview-view.js`): a group is not bulk-fixed when any of its fixes is on a remote repo and not in `API_ACTIONS`.
 
-`app.js` is at 390 lines, so the remote checks are helpers in `remote-view.js` (`canFix(r, fix)`, `localOnly(r)`).
+`app.js` is at 390 lines, so the remote checks are helpers in `remote-view.js` (`canFix(r, fix)`, `localPanel(r, panel)`).
 
 ## 6. Report ("Copy for LLM")
 
