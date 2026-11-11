@@ -62,7 +62,28 @@
 - [ ] Tests: remote detail shows Fix all and "Set description…", no "New branch…", no "+ LICENSE", no "Archive repo", no "Remove protection"; text includes `REMOTE_NOTE`. Overview bulk Fix all checks `RemoteView.canFix`.
 - [ ] Implement; keep `app.js` under 400 lines. Run: PASS. Commit.
 
-### Task 5: Docs and full suite
+### Task 5: Archive from the inactive finding
+
+**Files:** `src/checks.js` (fix on `inactive` when ADMIN), `src/actions-github.js` (`repo-archive`: admin check, warning), `src/renderer/fix-all.js` (allowlist, decision pick leave, STEP 13), `src/renderer/app.js` (Archive button back on remote). Test: `test/remote-branches.test.js`.
+
+- [ ] Tests: `inactive` carries the fix only for ADMIN; plan on a remote repo is `gh repo archive octo/app --yes`, danger, confirmName `octo/app`; non-admin refused; Fix all puts it in decisions with pick on "leave", and `order` runs it after `security-enable` and `pr-close`.
+- [ ] Implement; PASS; commit.
+
+### Task 6: Branches from GitHub
+
+**Files:** Create `src/remote-branches.js` (`parseBranches(data, defaultBranch)`, `fetchBranches(ref, defaultBranch, { run })`, `fetchRemoteData(refs, opts)`, `branchFindings(branches, snap)`); modify `src/remote-stage.js` (default `fetch`), `src/remote-scan.js` (`ghBranches`, extra findings). Test: `test/remote-branches.test.js`.
+
+- [ ] Tests: parse a canned GraphQL payload (merged by ancestry, merged by squash PR, unique > 0, default dropped, bad name dropped); `fetchBranches` passes `-f o= n= d=` and returns `null` on a failed run; `branchFindings` makes `gh-merged-branches` (fix only with push permission) and at most 5 `gh-branch-no-pr-*`, skipping branches with an open PR; `scanRemote` with `ghRes.branches` sets `ghBranches` and adds the findings.
+- [ ] Implement; PASS; commit.
+
+### Task 7: API branch actions
+
+**Files:** `src/actions-github.js` (factory also returns `deleteOnGitHub`; `pr-create` and `pr-close` remote variants), `src/actions.js` (`delete-remote` delegates for remote repos), `src/renderer/fix-all.js` (allowlist, decisions, STEP), `src/engine.js` (action catalogue params), `src/renderer/remote-view.js` + `app.js` (Branches on GitHub panel). Test: `test/remote-branches.test.js`, `test/remote-ui.test.js`.
+
+- [ ] Tests: per the spec's section 8 (args, check step expect, risk, undo, refusals); panel lists branches with buttons.
+- [ ] Implement; PASS; commit.
+
+### Task 8: Docs and full suite
 
 - [ ] `docs/sources.md` (`gh --repo`), `CHANGELOG.md` Unreleased, README remote section, AGENTS.md layout line.
 - [ ] `npm test`: all pass. Commit.

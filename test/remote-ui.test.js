@@ -55,7 +55,7 @@ test('a remote repo\'s detail: not cloned here, no folder or file buttons, API f
   assert.match(d.textContent, /GitHub fixes \(pull requests, CI, protection, security and repository settings\) run here/);
   assert.ok([...d.querySelectorAll('.finding button')].some((b) => b.textContent === 'Set description…'), 'API fix button on its finding');
   const all = [...d.querySelectorAll('button')].map((b) => b.textContent);
-  for (const local of ['New branch…', 'Pull', 'Push', 'Save a rescue copy…', '+ LICENSE', 'Archive repo', 'Remove protection']) assert.ok(!all.includes(local), `no ${local}`);
+  for (const local of ['New branch…', 'Pull', 'Push', 'Save a rescue copy…', '+ LICENSE', 'Remove protection']) assert.ok(!all.includes(local), `no ${local}`);
 });
 
 test('Settings > Remote repos loads, saves and clears the cache', async () => {
@@ -87,4 +87,26 @@ test('scan progress names the remote stage', async () => {
   assert.match(t.$('#ptext').textContent, /Scanned 1\/3/);
   t.emit.repo({ res: remote('app'), done: 2, total: 3, stage: 'remote' });
   assert.equal(t.$('#ptext').textContent, 'Checking remote repos: 2/3 (octo/app)');
+});
+
+test('a remote repo lists its branches on GitHub, with Open PR for unmerged work and Delete on GitHub', async () => {
+  const r = remote('app');
+  r.prs = [{ number: 7, title: 'F', headRefName: 'feat', isDraft: false, url: 'https://github.com/octo/app/pull/7' }];
+  r.ghBranches = [
+    { name: 'feat', oid: 'f'.repeat(40), date: '2026-10-01T00:00:00Z', unique: 2, mergedPr: null },
+    { name: 'done', oid: 'a'.repeat(40), date: '2026-09-01T00:00:00Z', unique: 0, mergedPr: null },
+    { name: 'idea', oid: 'c'.repeat(40), date: '2026-08-01T00:00:00Z', unique: 4, mergedPr: null },
+  ];
+  const t = await boot({ repos: [...REPOS, r] });
+  await scan(t);
+  click(t.$$('#repos li').find((x) => x.querySelector('.rname').textContent === 'octo/app'));
+  await tick();
+  const d = t.$('#detail');
+  assert.ok([...d.querySelectorAll('h3')].some((x) => x.textContent === 'Branches on GitHub (3)'));
+  const row = (n) => [...d.querySelectorAll('.row')].find((x) => x.querySelector('b') && x.querySelector('b').textContent === n);
+  const labels = (n) => [...row(n).querySelectorAll('button')].map((b) => b.textContent);
+  assert.deepEqual(labels('feat'), [], 'a branch with an open PR is left to the PR');
+  assert.deepEqual(labels('done'), ['Delete on GitHub']);
+  assert.deepEqual(labels('idea'), ['Open PR…', 'Delete on GitHub']);
+  assert.match(row('idea').textContent, /4 commits not in main/);
 });

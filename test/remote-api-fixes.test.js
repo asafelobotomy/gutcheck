@@ -31,7 +31,8 @@ const API = [
 ];
 
 test('API_ACTIONS is the allowlist from the spec', () => {
-  assert.deepEqual([...FixAll.API_ACTIONS].sort(), API.map((a) => a.type).sort());
+  // repo-archive, pr-create and delete-remote: remote-branches.test.js.
+  assert.deepEqual([...FixAll.API_ACTIONS].sort(), [...API.map((a) => a.type), 'repo-archive', 'pr-create', 'delete-remote'].sort());
 });
 
 for (const a of API) {
@@ -48,7 +49,7 @@ for (const a of API) {
   });
 }
 
-for (const a of [{ type: 'add-file', template: 'license' }, { type: 'commit-all', message: 'x' }, { type: 'pull' }, { type: 'delete-remote', branch: 'bump' }, { type: 'unprotect-branch' }, { type: 'gitignore-append', entries: ['node_modules/'] }]) {
+for (const a of [{ type: 'add-file', template: 'license' }, { type: 'commit-all', message: 'x' }, { type: 'pull' }, { type: 'delete-local', branch: 'bump' }, { type: 'unprotect-branch' }, { type: 'gitignore-append', entries: ['node_modules/'] }]) {
   test(`${a.type} is refused on a remote repo`, async () => {
     const p = await actions.plan(remoteResult(), a);
     assert.equal(p.ok, false);

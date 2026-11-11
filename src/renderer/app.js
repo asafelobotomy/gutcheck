@@ -232,7 +232,7 @@ function settingsPanel(r) {
       btn('Enable security updates', act('security-enable', { feature: 'security-fixes' })),
       btn('Enable secret scanning', act('security-enable', { feature: 'secret-scanning' })),
       btn('Edit description / merge options…', act('repo-edit', {})),
-      r.remote.archived || RemoteView.isRemote(r) ? null : btn('Archive repo', act('repo-archive', {}), 'dng'))];
+      r.remote.archived ? null : btn('Archive repo', act('repo-archive', {}), 'dng'))];
 }
 
 const FILE_TEMPLATES = [
@@ -269,7 +269,7 @@ function renderRepo() {
     toolbar, RemoteView.note(r),
     r.findings.length ? null : h('p', { class: 'ok-msg' }, 'No issues found. Nice.'),
     ...cats.flatMap((c) => [h('h3', {}, c), ...r.findings.filter((f) => f.category === c).map((f) => findingEl(r, f))]),
-    ...ignoredPanel(r), ...prsPanel(r), ...RemoteView.localPanel(r, branchesPanel), ...settingsPanel(r), ...RemoteView.localPanel(r, filesPanel));
+    ...ignoredPanel(r), ...prsPanel(r), ...RemoteView.branches(r, branchesPanel), ...settingsPanel(r), ...RemoteView.localPanel(r, filesPanel));
 }
 
 async function copyForLlm(b, dir, label) {

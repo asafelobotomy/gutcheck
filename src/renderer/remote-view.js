@@ -24,6 +24,26 @@ const RemoteView = (() => {
   const canFix = (r, fix) => !!fix && (!isRemote(r) || FixAll.API_ACTIONS.has(fix.type));
   // A panel of local git or file buttons (branches, missing files): none for a remote repo.
   const localPanel = (r, panel) => (isRemote(r) ? [] : panel(r));
+  // The branch list: a local repo's from git, a remote repo's from GitHub (ghBranches).
+  const branches = (r, panel) => (isRemote(r) ? ghBranchesPanel(r) : panel(r));
+
+  function ghBranchesPanel(r) {
+    const bs = Array.isArray(r.ghBranches) ? r.ghBranches : [];
+    if (!bs.length) return [];
+    const def = (r.remote && r.remote.defaultBranch) || 'the default branch';
+    const prs = new Map((r.prs || []).map((p) => [p.headRefName, p]));
+    return [h('h3', {}, `Branches on GitHub (${bs.length})`), ...bs.map((b) => {
+      const merged = b.unique === 0 || b.mergedPr != null;
+      const pr = prs.get(b.name);
+      return h('div', { class: 'row' },
+        h('div', { class: 'grow' }, h('b', {}, b.name), ' ',
+          merged ? h('span', { class: 'badge ok' }, 'merged') : h('span', { class: 'badge' }, `${b.unique ?? '?'} commits not in ${def}`),
+          pr ? h('span', { class: 'badge' }, `PR #${pr.number}`) : null,
+          h('span', { class: 'muted' }, ' ' + fmtDate(b.date))),
+        !pr && !merged && b.unique > 0 ? btn('Open PR…', actOn(r, 'pr-create', { branch: b.name })) : null,
+        !pr ? btn('Delete on GitHub', actOn(r, 'delete-remote', { branches: [b.name] }), merged ? '' : 'dng') : null);
+    })];
+  }
   const progress = (res, done, total, stage) => (stage === 'remote' ? `Checking remote repos: ${done}/${total} (${res.name})` : `Scanned ${done}/${total}`);
 
   async function openSettings() {
@@ -54,5 +74,5 @@ const RemoteView = (() => {
   }
 
   $('source').addEventListener('change', () => renderList());
-  return { isRemote, visible, chip, where, note, canFix, localPanel, progress, openSettings };
+  return { isRemote, visible, chip, where, note, canFix, localPanel, branches, progress, openSettings };
 })();

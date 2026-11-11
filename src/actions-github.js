@@ -2,8 +2,49 @@
 // settings. Built with actions.js's own step builders and plan errors, so plans read the same.
 const { PROTECTION } = require('./protection');
 const { tagProtection, releaseTag, RULESET_NAME } = require('./repo-rules');
+const { isMerged } = require('./remote-branches');
 
-module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh }) => ({
+const MAX_DELETE = 30;
+// A branch name in an API path: each segment URL-encoded ("fix#1" -> "fix%231"), slashes kept.
+const enc = (b) => b.split('/').map(encodeURIComponent).join('/');
+
+module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh }) => {
+  // Branches of a repo that is not cloned here come from GitHub (remote-branches.js), not from git.
+  const ghBranch = (r, name) => {
+    if (!Array.isArray(r.ghBranches)) fail('GutCheck could not read this repository\'s branches from GitHub. Rescan and try again.');
+    return r.ghBranches.find((b) => b.name === name) || fail(`"${cleanText(String(name), 60)}" is not a branch on GitHub in the last scan.`);
+  };
+  // Delete through the API only if the branch still points at the commit the scan saw.
+  const deleteSteps = (r, slug, b) => [
+    { kind: 'check', cmd: 'gh', args: ['api', `repos/${slug}/git/ref/heads/${enc(b.name)}`, '--jq', '.object.sha'], cwd: r.path, expect: b.oid, changed: 'The branch changed since the scan. Rescan and review it again.', display: `check ${b.name} is still at ${b.oid.slice(0, 7)}` },
+    gh(['api', '-X', 'DELETE', `repos/${slug}/git/refs/heads/${enc(b.name)}`], r.path),
+  ];
+  const restore = (slug, b) => `gh api -X POST repos/${slug}/git/refs -f ref=refs/heads/${b.name} -f sha=${b.oid}`;
+
+  // delete-remote on a repo that is not cloned here (actions.js hands it over): one or more branches.
+  function deleteOnGitHub(r, p) {
+    const slug = needRemote(r);
+    const want = [...new Set(Array.isArray(p.branches) ? p.branches : p.branch != null ? [p.branch] : [])];
+    if (!want.length || want.length > MAX_DELETE) fail(`Choose 1 to ${MAX_DELETE} branches.`);
+    const def = defaultBranch(r);
+    const list = want.map((n) => {
+      if (n === def) fail('Refusing to delete the default branch.');
+      const b = ghBranch(r, n);
+      const pr = (r.prs || []).find((x) => x.headRefName === n);
+      if (pr) fail(`PR #${pr.number} is open from ${b.name}. Close or merge it first.`);
+      return b;
+    });
+    const work = list.filter((b) => !isMerged(b));
+    return {
+      risk: work.length ? 'danger' : 'caution',
+      title: list.length === 1 ? `Delete branch ${list[0].name} on GitHub` : `Delete ${list.length} branches on GitHub`,
+      steps: list.flatMap((b) => deleteSteps(r, slug, b)),
+      warnings: [list.map((b) => b.name).join(', '), ...(work.length ? [`Not merged into ${def}: ${work.map((b) => `${b.name} (${b.unique ?? '?'} commits)`).join(', ')}. Their commits are lost unless they exist elsewhere.`] : [])],
+      undo: list.map((b) => restore(slug, b)).join('\n'),
+    };
+  }
+
+  const actions = {
   'pr-merge': {
     plan(r, p) {
       const slug = needRemote(r);
@@ -25,7 +66,12 @@ module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText,
     plan(r, p) {
       const slug = needRemote(r);
       const pr = (r.prs || []).find((x) => x.number === p.number) || fail('That PR was not in the last scan.');
-      return { risk: 'caution', title: `Close PR #${pr.number} without merging`, steps: [gh(['pr', 'close', String(pr.number), '-R', slug], r.path)], undo: `gh pr reopen ${pr.number} -R ${slug}`, note: pr.title };
+      const close = { risk: 'caution', title: `Close PR #${pr.number} without merging`, steps: [gh(['pr', 'close', String(pr.number), '-R', slug], r.path)], undo: `gh pr reopen ${pr.number} -R ${slug}`, note: pr.title };
+      if (!p.deleteBranch) return close;
+      // Only on a repo that is not cloned here: on a clone gh would also delete the local branch.
+      if (r.source !== 'remote') fail('Close the PR, then delete its branch on its own.');
+      const b = (r.ghBranches || []).find((x) => x.name === pr.headRefName && x.oid === pr.headRefOid) || fail(`Its branch is not in this repository at the PR's commit (a fork, or pushed to since the scan), so GutCheck will not delete it.`);
+      return { ...close, title: `Close PR #${pr.number} and delete its branch ${b.name}`, steps: [...close.steps, ...deleteSteps(r, slug, b)], undo: `${close.undo}\n${restore(slug, b)}` };
     },
   },
 
@@ -43,10 +89,17 @@ module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText,
       const slug = needRemote(r);
       const base = defaultBranch(r) || fail('Unknown default branch.');
       if (p.branch === base) fail('The branch is the default branch.');
-      localBranch(r, p.branch);
-      if (!(r.git.remoteBranches || []).some((x) => x.name === p.branch)) fail('Push the branch first: it does not exist on the remote.');
+      const remote = r.source === 'remote';
+      if (remote) {
+        const b = ghBranch(r, p.branch);
+        if (isMerged(b) || !(b.unique > 0)) fail(`${b.name} has no commits that are not in ${base}.`);
+      } else {
+        localBranch(r, p.branch);
+        if (!(r.git.remoteBranches || []).some((x) => x.name === p.branch)) fail('Push the branch first: it does not exist on the remote.');
+      }
       if ((r.prs || []).some((x) => x.headRefName === p.branch)) fail('A PR from this branch is already open.');
-      const title = cleanText(p.title, 200);
+      // --fill reads the local commits, so a repo that is not cloned here gets the branch name as title.
+      const title = cleanText(p.title, 200) || (remote ? p.branch : '');
       const args = ['pr', 'create', '-R', slug, '--head', p.branch, '--base', base, ...(title ? ['--title', title, '--body', ''] : ['--fill'])];
       return { risk: 'caution', title: `Open a PR from ${p.branch} into ${base}`, steps: [gh(args, r.path)] };
     },
@@ -169,7 +222,10 @@ module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText,
   'repo-archive': {
     plan(r) {
       const slug = needRemote(r);
-      return { risk: 'danger', title: `Archive ${slug} (read-only until unarchived)`, steps: [gh(['repo', 'archive', slug, '--yes'], r.path)], undo: `gh repo unarchive ${slug} --yes` };
+      if (r.remote.viewerPermission && r.remote.viewerPermission !== 'ADMIN') fail('Admin permission is required to archive a repository.');
+      return { risk: 'danger', title: `Archive ${slug} (read-only until unarchived)`, steps: [gh(['repo', 'archive', slug, '--yes'], r.path)], warnings: ['Pushes, pull requests, issues and settings changes are refused until you unarchive it.'], undo: `gh repo unarchive ${slug} --yes` };
     },
   },
-});
+};
+  return { actions, deleteOnGitHub };
+};

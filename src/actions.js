@@ -177,8 +177,10 @@ const ACTIONS = {
     },
   },
 
+  // On a repo that is not cloned here: through the API, from the branches GitHub listed.
   'delete-remote': {
     plan(r, p) {
+      if (r.source === 'remote') return GH.deleteOnGitHub(r, p);
       needRemote(r);
       const rb = (r.git.remoteBranches || []).find((x) => x.name === p.branch) || fail(`"${cleanText(String(p.branch), 60)}" is not a known remote branch.`);
       const name = safeName(rb.name);
@@ -301,7 +303,8 @@ const ACTIONS = {
 
 
 // GitHub-side actions live in actions-github.js, built with this file's step builders.
-Object.assign(ACTIONS, require('./actions-github')({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh: (ctx, args, cwd) => ctx.run('gh', args, { cwd }) }));
+const GH = require('./actions-github')({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh: (ctx, args, cwd) => ctx.run('gh', args, { cwd }) });
+Object.assign(ACTIONS, GH.actions);
 
 // AI agent actions live in actions-agent.js; their plan errors read like this file's.
 Object.assign(ACTIONS, require('./actions-gitstate')({ fail, nothing, git, readGit }));

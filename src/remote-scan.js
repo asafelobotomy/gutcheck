@@ -9,6 +9,7 @@ const path = require('node:path');
 const { run, SAFE_GIT_ENV } = require('./exec');
 const scanner = require('./scanner');
 const { defaultUrlFor } = require('./remote-cache');
+const { branchFindings } = require('./remote-branches');
 
 const WORKING_COPY_IDS = Object.freeze([
   'git-ahead', 'git-behind', 'git-detached', 'git-dirty', 'git-garbage', 'git-gone', 'git-identity', 'git-maintenance',
@@ -74,9 +75,12 @@ async function scanRemote(listing, { cacheDir = null, emptyDir = null, ghRes = n
     const detail = kind === 'too-large' ? `It is ${Math.round((listing.diskKB || 0) / 1024)} MB on GitHub, over the size limit in Settings.` : rest.join(':').trim();
     extra.push({ category: 'Repo', severity: 'info', ...make(detail) });
   }
+  // Branches come from GitHub (ghRes.branches, remote-branches.js): the copy has no refs of its own.
+  const ghBranches = ghRes && ghRes.ok && Array.isArray(ghRes.branches) ? ghRes.branches : null;
+  if (ghBranches) extra.push(...branchFindings(ghBranches, ghRes.snap));
   const res = await scanner.finish(local, ghRes, { policy, omit, extra });
   // ref: the ignore and "new since last scan" key stays owner/name even when GitHub is unreachable.
-  return { ...res, ref, source: 'remote', path: `remote:${ref.owner}/${ref.name}`, name: `${ref.owner}/${ref.name}`, cacheDir: cacheDir || null, partial: !cacheDir };
+  return { ...res, ref, source: 'remote', path: `remote:${ref.owner}/${ref.name}`, name: `${ref.owner}/${ref.name}`, cacheDir: cacheDir || null, partial: !cacheDir, ghBranches };
 }
 
 module.exports = { scanRemote, repoDir, ensureEmptyRepo, blankWorkingCopy, WORKING_COPY_IDS, FILE_GATED_IDS, isWorkingCopy };

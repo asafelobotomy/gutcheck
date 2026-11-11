@@ -17,8 +17,10 @@
     pull: 0, 'gitignore-append': 1, 'commit-all': 2, 'npm-install': 3, 'add-file': 4,
     'delete-merged': 5, 'worktree-prune': 5, push: 6,
     'split-instructions': 4, 'permissions-prune': 5,
-    'run-rerun': 7, 'pr-close': 8, 'pr-merge': 8, 'repo-edit': 9, 'security-enable': 9, 'protect-branch': 10,
+    'run-rerun': 7, 'pr-close': 8, 'pr-merge': 8, 'pr-create': 8, 'delete-remote': 9, 'repo-edit': 9, 'security-enable': 9, 'protect-branch': 10,
     'lsp-setup': 11, 'tests-run': 12, 'rescue-bundle': -1,
+    // An archived repo refuses every other change on GitHub, so archiving comes after all of them.
+    'repo-archive': 13,
   };
   const step = (a) => (a.type === 'add-file' && a.template === 'gitignore' ? 1 : STEP[a.type] ?? 9);
   const AUTO = new Set(['add-file', 'run-rerun', 'pull', 'push', 'delete-merged', 'security-enable', 'protect-branch', 'gitignore-append', 'worktree-prune', 'repo-edit', 'permissions-prune']);
@@ -35,12 +37,16 @@
 
   // A finding whose fix needs the owner -> { id, title, detail, choices: [{ label, action, fields? }], pick }.
   // pick: the choice selected at first (code-running choices start on "leave it").
-  function decision(f, fix) {
+  // remote: the repo is not cloned here, so closing a PR can also delete its branch on GitHub.
+  function decision(f, fix, remote = false) {
     const base = { id: f.id, title: f.title, detail: f.detail || '' };
     switch (fix.type) {
       case 'commit-all': return { ...base, pick: 0, choices: [{ label: 'Commit all of it', action: { type: 'commit-all' }, fields: [{ name: 'message', label: 'Commit message', required: true }] }, leave('Leave it uncommitted')] };
       case 'pr-merge': return { ...base, pick: 0, choices: [{ label: 'Squash and merge, then delete the branch', action: { ...fix, method: 'squash', deleteBranch: true } }, { label: 'Merge with a merge commit', action: { ...fix, method: 'merge', deleteBranch: true } }, leave('Leave it open')] };
-      case 'pr-close': return { ...base, pick: 0, choices: [{ label: 'Close it', action: fix }, leave('Leave it open')] };
+      case 'pr-close': return { ...base, pick: 0, choices: [{ label: 'Close it', action: fix }, ...(remote ? [{ label: 'Close it and delete its branch on GitHub', action: { ...fix, deleteBranch: true } }] : []), leave('Leave it open')] };
+      case 'delete-remote': return { ...base, pick: 0, choices: [{ label: `Delete ${fix.branches.length === 1 ? 'it' : `all ${fix.branches.length}`} on GitHub (each is checked first, and can be restored)`, action: fix }, leave()] };
+      // Work not in the default branch: the owner decides whether it becomes a PR or goes.
+      case 'pr-create': return { ...base, pick: 2, choices: [{ label: `Open a pull request from ${fix.branch}`, action: fix, fields: [{ name: 'title', label: 'Pull request title', required: true }] }, { label: `Delete ${fix.branch} on GitHub (its commits are lost unless they exist elsewhere)`, action: { type: 'delete-remote', branches: [fix.branch] } }, leave()] };
       case 'repo-edit': return { ...base, pick: 0, choices: [{ label: 'Set a description', action: { type: 'repo-edit' }, fields: [{ name: 'description', label: 'One sentence about the project', required: true }] }, leave('Skip')] };
       case 'npm-install': return { ...base, pick: 1, choices: [{ label: `Run ${fix.label || 'the install'} (runs the packages' install scripts)`, action: { type: 'npm-install' } }, leave('Skip')] };
       case 'split-instructions': return { ...base, pick: 0, choices: [{ label: `Split ${fix.file}: keep the core, move the largest sections to docs/agents/ (every line kept)`, action: fix }, leave()] };
@@ -51,6 +57,7 @@
       case 'maintenance-register': return { ...base, pick: 1, choices: [{ label: 'Register it (adds it to maintenance.repo in your global git config)', action: fix }, leave('Skip')] };
       // Pushing is the usual fix; a rescue copy is offered but never picked for the owner.
       case 'rescue-bundle': return { ...base, pick: 1, choices: [{ label: 'Save a rescue copy outside the workspace (the repo is not changed)', action: fix }, leave('Skip')] };
+      case 'repo-archive': return { ...base, pick: 1, choices: [{ label: 'Archive it (read-only on GitHub until you unarchive it)', action: fix }, leave('Leave it')] };
       case 'tests-run': return { ...base, pick: 1, choices: [{ label: 'Run it (executes the project\'s code)', action: fix }, leave('Skip')] };
       default: return { ...base, pick: 0, choices: [{ label: fix.label || 'Do it', action: fix }, leave()] };
     }
@@ -58,7 +65,7 @@
 
   // Repos that are on GitHub but not cloned here: only fixes made through the GitHub API run on them
   // (gh names the repo, so no folder is needed). Fixes that change files or local git need a clone.
-  const API_ACTIONS = new Set(['pr-merge', 'pr-close', 'pr-ready', 'run-rerun', 'protect-branch', 'protect-tags', 'actions-settings', 'security-enable', 'repo-edit']);
+  const API_ACTIONS = new Set(['pr-merge', 'pr-close', 'pr-ready', 'run-rerun', 'protect-branch', 'protect-tags', 'actions-settings', 'security-enable', 'repo-edit', 'repo-archive', 'pr-create', 'delete-remote']);
   const REMOTE_FILE_FIX = 'This fix changes files or local git, and the repo is not cloned in this workspace. Clone it to fix this; fixes as pull requests come in a later version.';
   const REMOTE_NOTE = 'Not cloned in this workspace: GitHub fixes (pull requests, CI, protection, security and repository settings) run here; fixes that change files need a clone for now.';
   const REMOTE_SKIP = 'changes files; the repo is not cloned here';
@@ -77,7 +84,7 @@
       if (NOT_HERE[fix.type]) { skipped.push({ id: f.id, title: f.title, reason: NOT_HERE[fix.type] }); continue; }
       if (remote && !API_ACTIONS.has(fix.type)) { skipped.push({ id: f.id, title: f.title, reason: REMOTE_SKIP }); continue; }
       const auto = AUTO.has(fix.type) && !(fix.type === 'repo-edit' && fix.deleteBranchOnMerge !== true) && !(fix.type === 'add-file' && fix.template in OWNER_FILES);
-      if (!auto) { decisions.push(decision(f, f.fix)); continue; }
+      if (!auto) { decisions.push(decision(f, f.fix, remote)); continue; }
       const action = fix.type === 'add-file' ? { ...fix, commit: true } : fix; // each added file is its own commit
       const key = JSON.stringify(action);
       if (!seen.has(key)) { seen.add(key); actions.push({ ...action, sev: f.severity }); }

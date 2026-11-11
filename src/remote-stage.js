@@ -6,6 +6,7 @@
 const github = require('./github');
 const { listRemote, selectUncloned } = require('./remote-list');
 const { scanRemote, ensureEmptyRepo } = require('./remote-scan');
+const { fetchRemoteData } = require('./remote-branches');
 
 const GB = 1024 ** 3;
 const key = (r) => `${r.owner}/${r.name}`;
@@ -34,8 +35,8 @@ async function scanOne(l, ctx) {
 }
 
 // deps: { localResults, settings (normalized), cache, policy, onBegin?(n), onRepo?(res),
-//         list = listRemote, fetch = github.fetchRepos, force }
-async function runRemoteStage({ localResults, settings, cache, policy, onBegin = () => {}, onRepo = () => {}, list = listRemote, fetch = github.fetchRepos, force = false }) {
+//         list = listRemote, fetch = fetchRemoteData (repo data and branches), force }
+async function runRemoteStage({ localResults, settings, cache, policy, onBegin = () => {}, onRepo = () => {}, list = listRemote, fetch = fetchRemoteData, force = false }) {
   if (!settings.enabled) return { results: [], status: idle(), listing: new Map() };
   const lr = await list({ orgs: settings.orgs, onCall: () => github.noteCall('graphql') });
   if (!lr.ok) return { results: [], status: idle({ ran: true, error: lr.error }), listing: new Map() };
@@ -64,7 +65,7 @@ async function runRemoteStage({ localResults, settings, cache, policy, onBegin =
 }
 
 // Rescan one remote repo after a change on GitHub (bypasses the GitHub cache).
-async function refreshRemote(l, { settings, cache, policy, fetch = github.fetchRepos }) {
+async function refreshRemote(l, { settings, cache, policy, fetch = fetchRemoteData }) {
   const ghMap = await fetch([{ owner: l.owner, name: l.name }], { force: true });
   const emptyDir = lazyEmpty(cache.root);
   return (await scanOne(l, { settings, cache, emptyDir, ghRes: ghMap.get(key(l)) || null, policy, keep: new Set([key(l)]) })).res;

@@ -28,10 +28,9 @@ An allowlist, `API_ACTIONS`, exported from `src/renderer/fix-all.js` so the app,
 
 Each of these is already written in `actions-github.js` against `owner/name` from `needRemote(r)` and reads only the scan's GitHub data (`r.remote`, `r.prs`, `r.ci`, `r.tagRulesets`, `r.actionsSettings`), which a remote result has, partial or not.
 
-**Left out, on purpose:**
-- `delete-remote`: it pushes a delete refspec from the local clone, and a remote result has no branch list (`remoteBranches` is blanked in part 1). An API version needs branch data the remote scan does not collect. Not needed for any finding's fix.
-- `pr-create`: needs a local branch.
-- `unprotect-branch` and `repo-archive`: danger actions that no finding offers; they stay local-only so the remote surface is only what Fix all and findings need. The app hides their buttons on remote repos.
+Added after review (section 8): `delete-remote`, `pr-create` and `repo-archive`, through the API.
+
+**Left out, on purpose:** `unprotect-branch`. Its only use is clearing protection so a preset can go on, which would leave the branch unprotected in between and drop stricter rules someone set; `protect-branch` refuses a protected branch for the same reason. The app hides its button on remote repos.
 
 ## 2. Planning (`actions.js`)
 
@@ -71,6 +70,35 @@ The remote section keeps its findings list and replaces the old note with `REMOT
 
 No new commands or tools. `engine.plan` already resolves `owner/name` and calls `FixAll.plan` and `service.planActions`, so `gutcheck fix` and `gutcheck_plan` pick up the change. A refused file fix comes back as a plan error with `REMOTE_FILE_FIX`.
 
+## 8. Branches on GitHub and archiving
+
+**Branch data.** A remote scan reads the repo's branches from GitHub, since it has no clone with refs. `src/remote-branches.js` runs one GraphQL query per remote repo (variables passed with `-f`, never built into the query):
+
+```
+repository(owner:$o, name:$n) { refs(refPrefix: "refs/heads/", first: 50, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) {
+  totalCount nodes { name target { ... on Commit { oid committedDate } }
+    compare(headRef: $d) { behindBy }
+    associatedPullRequests(first: 1, states: MERGED) { nodes { number headRefOid } } } } }
+```
+
+`compare` has the branch as base and the default branch `$d` as head, so `behindBy` is the number of the branch's commits that are not in the default branch. Each branch becomes `{ name, oid, date, unique, mergedPr }`; it counts as merged when `unique === 0` or a merged PR's head is its current commit (squash merges). The default branch and names that fail `validBranch` are dropped. A failed query leaves `ghBranches: null` (unknown), never `[]`. It is wrapped with `github.fetchRepos` as the remote stage's default `fetch`, so the result rides in `ghRes.branches`, tests that stub `fetch` make no call, and `refreshRemote` reads it fresh. The result carries `ghBranches`.
+
+**Findings** (remote repos only; local repos have their own branch checks), made in `remote-branches.js` and added through `finish`'s `extra`:
+- `gh-merged-branches` (info): merged branches with no open PR. Fix (with push permission): `{ type: 'delete-remote', branches: [up to 30 names] }`.
+- `gh-branch-no-pr-<name>` (info), up to 5, newest first: a branch with commits not in the default branch and no open PR. Fix: `{ type: 'pr-create', branch }`.
+
+**`delete-remote` on a remote repo** takes `branches` (or `branch`), each found in `ghBranches`, not the default branch, with no open PR. Per branch: a check step `gh api repos/<o>/<n>/git/ref/heads/<b> --jq .object.sha` that must print the scanned commit, then `gh api -X DELETE repos/<o>/<n>/git/refs/heads/<b>`. Path segments are URL-encoded. Risk caution when every branch is merged, danger otherwise. Undo: `gh api -X POST repos/<o>/<n>/git/refs -f ref=refs/heads/<b> -f sha=<oid>`, one line per branch.
+
+**`pr-create` on a remote repo** takes the branch from `ghBranches` (with unique commits, no open PR) and runs `gh pr create -R <o>/<n> --head <b> --base <default> --title <title or branch name> --body ''`; `--fill` is not used since it reads local commits.
+
+**Closing a PR and deleting its branch.** `pr-close` takes `deleteBranch: true` on a remote repo when `ghBranches` holds the PR's head branch at the PR's head commit (so a fork's PR, or a branch pushed to since, is never touched): the close step, then the same check and delete steps. On a local repo `deleteBranch` is refused (gh would also delete the local branch). Fix all offers "Close it and delete its branch" on remote repos.
+
+**`repo-archive`.** The `inactive` finding gets `{ type: 'repo-archive' }` as its fix when you are an admin, on local and remote repos. The plan refuses without admin permission and warns that pushes are refused until it is unarchived. Fix all asks, starting on "leave it", and runs it last of all GitHub changes (an archived repo refuses every other change). It is danger, so the repo name must be typed.
+
+**Fix all decisions:** `gh-merged-branches` asks "Delete them on GitHub" (picked) or leave; `gh-branch-no-pr-*` asks "Open a pull request" (title field), "Delete the branch on GitHub" or leave (picked); `inactive` asks "Archive it" or leave (picked). Run order: `pr-close`, `pr-merge`, `pr-create` (8), `delete-remote` (9), `repo-archive` (13, after everything else).
+
+**App:** remote repos get a "Branches on GitHub" panel (`RemoteView.branchesPanel`) listing `ghBranches` with "Open PR…" and "Delete on GitHub" buttons; the Archive button comes back for them.
+
 ## Testing (offline)
 
 - `actions.plan` on a remote result: each allowlisted action plans with only `gh` steps whose `cwd` is the temp folder and whose args name `owner/name`; `add-file`, `commit-all`, `delete-remote`, `pull`, `unprotect-branch` are refused with `REMOTE_FILE_FIX`.
@@ -87,6 +115,8 @@ No new commands or tools. `engine.plan` already resolves `owner/name` and calls 
 - `CHANGELOG.md` under `## [Unreleased]`: replace part 1's "Fixes for them come in a later version" sentence with what now works.
 - README remote section: which fixes run on uncloned repos.
 
+- Branches: query parsing (merged by ancestry and by squash PR, unique counts, default dropped, failure is `null`); the findings; `delete-remote` and `pr-create` plans on a remote repo (exact args, check step, risk, undo, refusals for the default branch, an open PR, an unknown branch); `pr-close` with `deleteBranch`; `repo-archive` from `inactive`; Fix all decisions and order.
+
 ## Not in part 2
 
-File fixes as pull requests (part 3), deleting branches on GitHub for remote repos, hosts other than GitHub.
+File fixes as pull requests (part 3), hosts other than GitHub.

@@ -85,7 +85,7 @@ async function applySteps(p, ctx) {
       // nothing that was not previewed may appear.
       const want = new Set(String(s.expect).split('\n'));
       const same = now != null && (s.subset ? now !== '' && now.split('\n').every((l) => want.has(l)) : now === s.expect);
-      results.push({ text: s.display, ok: same, out: same ? '' : now === '' && s.subset ? 'Nothing is left to commit.' : 'The files changed since the preview. Rescan and review it again.' });
+      results.push({ text: s.display, ok: same, out: same ? '' : now === '' && s.subset ? 'Nothing is left to commit.' : s.changed || 'The files changed since the preview. Rescan and review it again.' });
       if (!same) return { ok: false, results };
     } else if (s.kind === 'write') {
       try {
