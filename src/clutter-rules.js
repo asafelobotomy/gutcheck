@@ -97,4 +97,31 @@ async function dirSize(p, budget = { n: 20000 }) {
   return total;
 }
 
-module.exports = { CACHE_DIRS, FILE_RULES, VENV_NAMES, buildOutput, bigDirSize, dirSize, STALE_LOG_DAYS, STALE_BACKUP_DAYS, SCRATCH_DIR_RE };
+// A committed "<name>.env" can be plain config (a version pin a script sources). It counts as
+// config only when no key name or value looks like a credential; only key names are matched, and
+// values only for "://user:pass@". Nothing read here is returned. A dotfile .env is never config.
+const CRED_KEY_RE = /secret|token|passw|passwd|pwd|pass$|api_?key|private|credential|auth|(^|_)key$|dsn|session|cookie|salt|signing|webhook|database_url|conn(ection)?_?str/i;
+async function envIsConfigOnly(file) {
+  if (path.basename(file).startsWith('.')) return false;
+  let text;
+  try { const st = await fsp.lstat(file); if (!st.isFile() || st.size > 64 * 1024) return false; text = await fsp.readFile(file, 'utf8'); } catch { return false; }
+  for (const line of text.split('\n')) {
+    const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);
+    if (m && (CRED_KEY_RE.test(m[1]) || /:\/\/[^/\s:@]+:[^/\s@]+@/.test(m[2]))) return false;
+  }
+  return true;
+}
+
+// The shared git dir of a checkout: a linked worktree (".git" is a "gitdir:" file whose folder has
+// a "commondir") resolves to its main repo's, so two worktrees of one repo are not two clones.
+async function gitCommonDir(dir) {
+  const dotgit = path.join(dir, '.git');
+  let text;
+  try { text = await fsp.readFile(dotgit, 'utf8'); } catch { return dotgit; } // a folder, or no .git
+  const m = /^gitdir:\s*(.+?)\s*$/m.exec(text);
+  if (!m) return dotgit;
+  const gd = path.resolve(dir, m[1]);
+  try { return path.resolve(gd, (await fsp.readFile(path.join(gd, 'commondir'), 'utf8')).trim()); } catch { return gd; }
+}
+
+module.exports = { CACHE_DIRS, FILE_RULES, VENV_NAMES, buildOutput, bigDirSize, dirSize, STALE_LOG_DAYS, STALE_BACKUP_DAYS, SCRATCH_DIR_RE, envIsConfigOnly, gitCommonDir };

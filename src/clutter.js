@@ -21,7 +21,7 @@ const MAX_HASH_BYTES = 5 * 1024 * 1024;
 // Never descend into these: huge, owned by a tool, or not part of the source tree.
 const NO_DESCEND = new Set([...HEAVY_DIRS, '.git', '.venv', 'venv', '.next', '.nuxt', '.svelte-kit', '.cxx', '.gradle']);
 
-const { CACHE_DIRS, FILE_RULES, VENV_NAMES, buildOutput, bigDirSize, dirSize, STALE_LOG_DAYS, STALE_BACKUP_DAYS, SCRATCH_DIR_RE } = require('./clutter-rules');
+const { CACHE_DIRS, FILE_RULES, VENV_NAMES, buildOutput, bigDirSize, dirSize, STALE_LOG_DAYS, STALE_BACKUP_DAYS, SCRATCH_DIR_RE, envIsConfigOnly, gitCommonDir } = require('./clutter-rules');
 
 const { scratchAdvice } = require('./clutter-scratch');
 
@@ -255,16 +255,17 @@ async function scanClutter(dir) {
   // Declared submodules and git-ignored folders (build areas, vendored checkouts) are deliberate.
   const nestedIgnored = await ignoredSet(dir, nested);
   const strays = nested.filter((n) => !subs.has(n) && !nestedIgnored.has(n));
-  const advice = [...buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, root, nested: strays, templateSeen }), ...await scratchAdvice(dir, items)];
+  const trackedEnv = [];
+  for (const f of tracked.files) if (ENV_RE.test(path.posix.basename(f)) && !ENV_TEMPLATE_RE.test(path.posix.basename(f)) && !(await envIsConfigOnly(path.join(dir, f)))) trackedEnv.push(f);
+  const advice = [...buildAdvice({ items, trackedClutter, trackedEnv, liveEnv, envUnignored, root, nested: strays, templateSeen }), ...await scratchAdvice(dir, items)];
   return { items, advice, count: items.length, totalSize: items.reduce((n, i) => n + i.size, 0), truncated };
 }
 
 
-function buildAdvice({ items, trackedClutter, tracked, liveEnv, envUnignored, root, nested = [], templateSeen = false }) {
+function buildAdvice({ items, trackedClutter, trackedEnv, liveEnv, envUnignored, root, nested = [], templateSeen = false }) {
   const out = [];
   const add = (id, severity, title, detail, fix) => out.push({ id, category: 'Organisation', severity, title, detail, fix });
 
-  const trackedEnv = [...tracked.files].filter((f) => ENV_RE.test(path.posix.basename(f)) && !ENV_TEMPLATE_RE.test(path.posix.basename(f)));
   if (trackedEnv.length)
     add('env-tracked', 'error', `${plural(trackedEnv.length, 'env file is', 'env files are')} committed to git`, `${list(trackedEnv)}. Anyone with access to the repo can read them, and history keeps them. Run "git rm --cached <file>", ignore them, and rotate any secrets they held.`);
   if (envUnignored.length)
@@ -360,12 +361,16 @@ async function workspaceAdvice(root, repos) {
     else if (/^(old|backup|bak|copy|tmp|temp|archive|archived)$/i.test(m[2])) add('ws-stale-' + n, 'info', `${n} looks like an old or temporary repo`, 'Archive it on GitHub or delete it if it is finished with.');
   }
 
-  const byRemote = new Map();
+  const byRemote = new Map(); // remote -> (shared git dir -> folder name): worktrees of one repo count once
   for (const r of repos) {
     const k = normRemote(r.originUrl);
-    if (k) byRemote.set(k, [...(byRemote.get(k) || []), r.name]);
+    if (!k) continue;
+    const dirs = byRemote.get(k) || new Map();
+    const common = r.path ? await gitCommonDir(r.path) : r.name;
+    if (!dirs.has(common)) dirs.set(common, r.name);
+    byRemote.set(k, dirs);
   }
-  for (const [k, ns] of byRemote) if (ns.length > 1) add('ws-dup-clone-' + k, 'warn', `${k.split('/').slice(1).join('/')} is cloned ${ns.length} times`, `${ns.join(', ')}. Keep one working copy per repository.`);
+  for (const [k, ns] of [...byRemote].map(([key, dirs]) => [key, [...dirs.values()]])) if (ns.length > 1) add('ws-dup-clone-' + k, 'warn', `${k.split('/').slice(1).join('/')} is cloned ${ns.length} times`, `${ns.join(', ')}. Keep one working copy per repository.`);
 
   if (names.length >= 5) {
     const styles = new Map();

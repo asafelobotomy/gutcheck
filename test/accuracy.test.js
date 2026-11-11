@@ -8,7 +8,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { evaluate } = require('../src/checks');
 const { checkSecurityFeatures } = require('../src/checks-hygiene');
-const { scanClutter } = require('../src/clutter');
+const { scanClutter, workspaceAdvice } = require('../src/clutter');
 const { scanQuality } = require('../src/quality');
 const { reviewTests } = require('../src/tests/review');
 const { runnable } = require('../src/tests/runs');
@@ -367,4 +367,38 @@ test('local-only: a pushed single-branch repo and a fresh repo raise no git-unpu
     const e = repo();
     try { assert.ok(!ids(await scanRepo(e, {})).includes('git-unpushed-branches')); } finally { rm(e); }
   } finally { rm(d); rm(bare); }
+});
+
+test('a committed <name>.env that only pins versions is config, not a leaked secret', async () => {
+  const d = repo();
+  try {
+    put(d, 'pins.env', '# release the scripts build from\nTOOL_TAG=v1.2.3\nTOOL_COMMIT=abc123\n');
+    put(d, 'prod.env', 'API_TOKEN=x\n');
+    put(d, 'db.env', 'URL=postgres://u:p@h/db\n');
+    put(d, '.env', 'TOOL_TAG=v1\n');
+    sh(d, 'add', '-A'); sh(d, 'commit', '-qm', 'x');
+    const adv = (await scanClutter(d)).advice.find((a) => a.id === 'env-tracked');
+    assert.ok(adv, 'env files with credentials are still reported');
+    assert.ok(!adv.detail.includes('pins.env'), adv.detail);
+    for (const f of ['prod.env', 'db.env', '.env']) assert.ok(adv.detail.includes(f), f);
+    assert.ok(!/abc123|v1\.2\.3|u:p/.test(JSON.stringify(adv)), 'no values in the finding');
+  } finally { rm(d); }
+});
+
+test('a linked worktree is not a second clone of its repo', async () => {
+  const root = tmp();
+  try {
+    const main = path.join(root, 'app');
+    fs.mkdirSync(main); sh(main, 'init', '-q', '-b', 'main'); sh(main, 'config', 'user.email', 't@t'); sh(main, 'config', 'user.name', 't');
+    sh(main, 'commit', '-q', '--allow-empty', '-m', 'x');
+    sh(main, 'worktree', 'add', '-q', '-b', 'rel', path.join(root, 'app-wt'));
+    const url = 'https://github.com/me/app.git';
+    const repos = [{ name: 'app', path: main, originUrl: url }, { name: 'app-wt', path: path.join(root, 'app-wt'), originUrl: url }];
+    let ids = (await workspaceAdvice(root, repos)).map((a) => a.id);
+    assert.ok(!ids.includes('ws-dup-clone-github.com/me/app'), ids.join());
+    const clone = path.join(root, 'app2');
+    sh(root, 'clone', '-q', main, clone);
+    ids = (await workspaceAdvice(root, [...repos, { name: 'app2', path: clone, originUrl: url }])).map((a) => a.id);
+    assert.ok(ids.includes('ws-dup-clone-github.com/me/app'), 'a real second clone is still reported');
+  } finally { rm(root); }
 });

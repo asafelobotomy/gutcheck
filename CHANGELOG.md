@@ -42,6 +42,11 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 - Detached HEAD is info when every commit is also on a branch, tag or remote, a warning that counts the commits when some are held by nothing else, and is not reported during a rebase or bisect, which detach HEAD on purpose.
 
+### Fixed
+
+- A committed `<name>.env` file that holds only plain settings, such as a release tag and commit a script sources, is no longer reported as a committed secret. It still is when any key name looks like a credential (token, secret, password, key, auth, DSN and similar) or a value is a URL with a user and password; only key names and that URL shape are checked, and nothing from the file reaches the finding. A dotfile `.env` is always reported.
+- A linked worktree (`git worktree add`) in the workspace is no longer reported as a second clone of its repo.
+
 ## [0.27.1] - 2026-11-08
 
 ### Changed
