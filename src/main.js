@@ -18,6 +18,7 @@ const { normalizeRemoteSettings, validOwner } = require('./remote-settings');
 const { dataDir } = require('./paths');
 const { createSecretsCtl } = require('./secrets-ctl');
 const { registerIpc: registerSecretsIpc } = require('./secrets-glue');
+const uqTheme = require('./uq-theme');
 
 // The CLI and MCP server find the data folder through paths.js (GUTCHECK_DATA_DIR first); the app
 // uses the same one, so all three share settings, ignores and History.
@@ -248,6 +249,11 @@ handle('remote:clear', () => { const freedBytes = remoteCache.sizeBytes(); remot
 handle('open:url', (_e, url) => openExternal(url));
 handle('open:folder', (_e, dir) => { if (localKnown(dir)) shell.openPath(dir); });
 
+// uQ's theme (uq-theme.js): the tokens.json text for the renderer, which validates it.
+const UQ_DIR = uqTheme.uqDir(process.env, app.getPath('home'));
+handle('uq-tokens:read', () => uqTheme.readTokens(UQ_DIR));
+let uqWatcher = null; // kept for the app's lifetime
+
 // One running copy: a second launch only wakes the first one (singleInstance quits this process).
 if (trayCtl.singleInstance()) {
   // Defence in depth: the app loads only its own bundled page, so deny every permission request,
@@ -262,6 +268,7 @@ if (trayCtl.singleInstance()) {
     try { if (app.isPackaged && isAutostart(app, { dir: autostartDir() })) setAutostart(app, true, { dir: autostartDir() }); } catch {}
     trayCtl.create();
     createWindow();
+    uqWatcher = uqTheme.watchTheme(UQ_DIR, () => send(uqTheme.CHANGED));
     setInterval(() => { scheduledScan().catch(() => {}); }, sched.CHECK_EVERY_MS).unref();
   });
   app.on('window-all-closed', () => app.quit());

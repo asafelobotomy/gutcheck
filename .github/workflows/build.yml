@@ -25,6 +25,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run check:uq-tokens
       - run: npm test
       # Electron itself ships inside the app, so dev dependencies are audited too.
       - run: npm audit

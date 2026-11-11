@@ -53,3 +53,13 @@ contextBridge.exposeInMainWorld('api', {
   onBegin: (cb) => ipcRenderer.on('scan:begin', (_e, d) => cb(d)),
   onRepo: (cb) => ipcRenderer.on('scan:repo', (_e, d) => cb(d)),
 });
+
+// uQ's theme (main: uq-theme.js; renderer: uq-theme.mjs, which validates every value).
+contextBridge.exposeInMainWorld('uqTokens', {
+  read: () => ipcRenderer.invoke('uq-tokens:read'),
+  subscribe: (cb) => {
+    const f = () => cb();
+    ipcRenderer.on('uq-tokens-changed', f);
+    return () => ipcRenderer.removeListener('uq-tokens-changed', f);
+  },
+});
