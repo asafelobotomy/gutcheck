@@ -341,4 +341,4 @@ async function fetchActionsSettings(ref, opts = {}) {
   return val;
 }
 
-module.exports = { fetchTagRulesets, fetchActionsSettings, fetchRepos, fetchFailedRuns, fetchSecurity, fetchAlerts, protectionAvailable, refreshRate, getRate, rulesetCovers, refMatches };
+module.exports = { noteCall, fetchTagRulesets, fetchActionsSettings, fetchRepos, fetchFailedRuns, fetchSecurity, fetchAlerts, protectionAvailable, refreshRate, getRate, rulesetCovers, refMatches };
