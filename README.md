@@ -43,6 +43,15 @@ Where the advice comes from (GitHub docs, OpenSSF Scorecard, git documentation a
 
 Each repo gets a grade (A to D); ignored findings do not count. A workspace overview groups the same issue across repos into ranked recommendations.
 
+## GitHub repos not cloned here
+
+GutCheck can also check your GitHub repos that have no folder in the workspace. Turn it on in Settings > **GitHub repos not cloned here**: it covers repos you own plus the organisations you list, and leaves out forks, archived repos and any `owner/name` you skip.
+
+- **How:** GutCheck downloads a shallow copy (latest commit of the default branch) of each into its own data folder, `remote-cache/`, and refreshes it only when the repo was pushed to. Hooks, LFS downloads, submodules and the `ext`, `fd` and `file` transports are off, so nothing in the repo runs. Repos over the size limit (500 MB by default) are not downloaded, and the cache stays under its limit (5 GB by default) by deleting the copies scanned longest ago.
+- **What is checked:** everything a local repo gets, except checks that describe your own working copy (uncommitted work, stashes, branches, unfinished git operations, the origin URL, installed dependencies, storage). Without a copy, only the GitHub checks run, marked "GitHub checks only".
+- **Where it shows:** in the list with a **Remote** tag and an All / Local / Remote filter; `gutcheck scan` tags them `[remote]` (`--remote` / `--no-remote` override the setting for one run); MCP results carry `source: "remote"`. `gutcheck remote` shows what was checked and what was left out and why; `gutcheck remote --clear-cache` deletes the copies.
+- **Fixes:** not yet. Plans, Fix all and "Copy for LLM" say to clone the repo to fix it.
+
 ## Screenshots
 
 All screenshots show a made-up demo workspace (`npm run screenshots` rebuilds them).
