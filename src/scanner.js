@@ -221,9 +221,10 @@ const safeJSON = (p) => {
 async function collectLocal(dir, opts) {
   exec.forgetGitDrivers(dir); // read the repo's drivers afresh: an action may have changed them
   // Strip any user:token@ from the URL so credentials never reach the UI, logs or reports.
-  const rawOrigin = (await git(['remote', 'get-url', 'origin'], { cwd: dir })).stdout.trim();
+  // opts.origin ({ ref, originUrl }): a cache clone of an uncloned repo (remote-scan.js) names its repo here.
+  const rawOrigin = opts.origin ? opts.origin.originUrl : (await git(['remote', 'get-url', 'origin'], { cwd: dir })).stdout.trim();
   const originUrl = rawOrigin.replace(/^([a-z+]+:\/\/)[^/@]*@/i, '$1');
-  const ref = parseGithubRemote(originUrl);
+  const ref = opts.origin ? opts.origin.ref : parseGithubRemote(originUrl);
   const files = collectFiles(dir);
   const wfDir = path.join(dir, '.github', 'workflows');
   let hasWorkflows = false;
@@ -275,7 +276,10 @@ async function finish(local, ghRes, opts) {
   g.mergedBranches = (await mergedInto(dir, base, g)).filter((b) => !(g.worktreeBranches || []).includes(b));
   const snapshot = { path: dir, name: path.basename(dir), originUrl: local.originUrl, git: g, gitState: local.gitState, localOnly: local.localOnly, files: local.files, deps: local.deps, hasWorkflows: local.hasWorkflows, hygiene: local.hygiene, agents: local.agents, release: local.release, drift: local.drift, runtimes: local.runtimes, depAutomation: local.depAutomation, repoPolicy: local.repoPolicy, scannedAt: new Date().toISOString(), ...remote };
   // opts.policy: () => { ignores, baseline } from the data folder (the user's ignores and baseline).
-  return applyPolicy({ ...snapshot, ...evaluate(snapshot) }, typeof opts.policy === 'function' ? opts.policy() : null, score);
+  // opts.omit(id): findings that do not apply to this result; opts.extra: findings the caller adds
+  // (both from remote-scan.js, for repos that are not cloned in the workspace).
+  const ev = score([...evaluate(snapshot).findings.filter((f) => !(opts.omit && opts.omit(f.id))), ...(opts.extra || [])]);
+  return applyPolicy({ ...snapshot, ...ev }, typeof opts.policy === 'function' ? opts.policy() : null, score);
 }
 
 const failed = (dir, e) => ({ path: dir, name: path.basename(dir), error: String(e && e.message ? e.message : e), findings: [], score: 0, grade: '?' });
@@ -318,4 +322,4 @@ async function scanAll(dirs, opts = {}, onResult = () => {}) {
   return results;
 }
 
-module.exports = { discover, scanRepo, scanAll, parseGithubRemote, collectLocal };
+module.exports = { discover, scanRepo, scanAll, parseGithubRemote, collectLocal, finish };
