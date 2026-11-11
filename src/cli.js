@@ -25,6 +25,9 @@ Usage: gutcheck <command> [options]
                                 fix <repo> tests-run kind=coverage|mutation --yes
   workspace                     workspace and machine advice (git config, disk, AI agent setup)
   local-only                    repos holding work that exists only on this machine
+  remote [--clear-cache]        your GitHub repos not cloned in this folder: which were checked, which
+                                were left out and why, and the cache size; --clear-cache deletes
+                                GutCheck's copies of them. Turn remote repos on in the app's Settings
   secrets                       secret files that exist only on this machine (env files, keys,
                                 credentials in your home folder) and whether they are backed up
   secrets --backup [--yes]      preview copying every unbacked or changed one into the password
@@ -53,6 +56,7 @@ Usage: gutcheck <command> [options]
   mcp [--allow-actions]         run as an MCP server on stdio (read-only unless --allow-actions)
 
 Options: --root <folder>  --deep  --json  --yes  --confirm <name>  --help  --version
+         --remote / --no-remote  include or leave out GitHub repos not cloned here, for this run
 `;
 
 // key=value pairs for fix: numbers and booleans are converted, a,b,c becomes a list for list params.
@@ -85,8 +89,21 @@ function printRepos(r, out) {
   for (const x of r.repos) {
     if (x.error) { out(`  ${x.name.padEnd(28)} scan failed: ${x.error}`); continue; }
     const git = [x.dirty ? `${x.dirty} uncommitted` : '', x.ahead ? `${x.ahead} unpushed` : '', x.behind ? `${x.behind} behind` : ''].filter(Boolean).join(', ');
-    out(`  ${x.grade} ${String(x.score).padStart(3)}  ${x.name.padEnd(28)} ${x.errors}E ${x.warnings}W ${x.info}I${git ? `  (${git})` : ''}`);
+    const tag = x.source === 'remote' ? ` [remote${x.partial ? ', GitHub checks only' : ''}]` : '';
+    out(`  ${x.grade} ${String(x.score).padStart(3)}  ${x.name.padEnd(28)} ${x.errors}E ${x.warnings}W ${x.info}I${git ? `  (${git})` : ''}${tag}`);
   }
+}
+
+const kb = (n) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : n >= 1024 ** 2 ? `${Math.round(n / 1024 ** 2)} MB` : `${Math.round((n || 0) / 1024)} KB`);
+function printRemote(r, out) {
+  const st = r.status;
+  if (!st || !st.ran) out('Remote repos are off. Turn them on in the app\'s Settings, or pass --remote.');
+  else if (st.error) out(`Remote repos not checked: ${st.error}`);
+  else {
+    out(`${st.included} remote repo${st.included === 1 ? '' : 's'} checked${st.cloned ? `, ${st.cloned} downloaded or updated` : ''}.`);
+    if (st.excluded.length) { out('Left out:'); st.excluded.forEach((x) => out(`  ${x.owner}/${x.name}: ${x.why}`)); }
+  }
+  out(`Cache: ${kb(r.cacheBytes)}`);
 }
 
 function printFindings(r, out) {
@@ -170,7 +187,8 @@ async function secretsCmd(engine, f, rest, out, err, json) {
   return 0;
 }
 
-async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (s) => process.stderr.write(s + '\n'), env = process.env } = {}) {
+// engineOpts: extra createEngine options (tests stub GitHub and the remote cache through it).
+async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (s) => process.stderr.write(s + '\n'), env = process.env, engineOpts = {} } = {}) {
   const a = parseArgs(argv);
   const [cmd, ...rest] = a._;
   const f = a.flags;
@@ -179,10 +197,10 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
   if (cmd === 'mcp') { await require('./mcp').start({ allowActions: !!f['allow-actions'] }); return 0; }
 
   // fix is explicit, so the CLI may plan; it still runs nothing without --yes.
-  const engine = createEngine({ allowActions: cmd === 'fix', env, via: 'cli' });
+  const engine = createEngine({ allowActions: cmd === 'fix', env, via: 'cli', ...engineOpts });
   const json = (v) => out(JSON.stringify(v, null, 2));
   const scanned = async () => {
-    const s = await engine.scan({ root: f.root || (cmd === 'scan' ? rest[0] : undefined), deep: !!f.deep, recordSeen: cmd === 'new', onProgress: (d, t) => { if (process.stderr.isTTY) process.stderr.write(`\rScanning ${d}/${t}…`); } });
+    const s = await engine.scan({ root: f.root || (cmd === 'scan' ? rest[0] : undefined), deep: !!f.deep, recordSeen: cmd === 'new', remote: f.remote ? true : f['no-remote'] ? false : undefined, onProgress: (d, t) => { if (process.stderr.isTTY) process.stderr.write(`\rScanning ${d}/${t}…`); } });
     if (process.stderr.isTTY) process.stderr.write('\r\x1b[K');
     return s;
   };
@@ -200,6 +218,8 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
     return r.ok ? 0 : 1;
   }
   if (cmd === 'history') return done(engine.history({ limit: Number(f.limit) || 50 }), (r) => r.entries.forEach((e) => out(`${e.ts}  ${e.ok ? 'ok    ' : 'FAILED'}  ${e.repo}: ${e.title}${e.via ? `  (${e.via})` : ''}`)));
+
+  if (cmd === 'remote' && f['clear-cache']) return done(await engine.remote({ clearCache: true }), (r) => out(`Cleared the remote repo cache (${kb(r.freedBytes)}).`));
 
   const s = await scanned();
   if (!s.ok && cmd !== 'scan') { err(`gutcheck: ${s.error}`); return 1; }
@@ -241,6 +261,7 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
       });
     }
     case 'repo': return done(await engine.repoDetail({ repo: rest[0] }));
+    case 'remote': return done(await engine.remote(), printRemote);
     case 'report': { const r = await engine.report({ repo: rest[0] }); if (!r.ok) return done(r); out(r.text); return 0; }
     case 'clutter': return done(await engine.clutter({ repos: rest }));
     case 'quality': return done(await engine.quality({ repos: rest }));

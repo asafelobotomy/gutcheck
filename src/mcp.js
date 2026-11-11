@@ -18,7 +18,7 @@ const RO = { readOnlyHint: true, destructiveHint: false, openWorldHint: true };
 
 const TOOLS = [
   { name: 'gutcheck_overview', title: 'Workspace overview',
-    description: 'Scan a folder of git repos (or reuse the last scan) and list every repo with its health grade, score, error/warning counts and git state, worst first. Start here. Scanning takes up to a minute for a large workspace.',
+    description: 'Scan a folder of git repos (or reuse the last scan) and list every repo with its health grade, score, error/warning counts and git state, worst first. When the user has turned it on, their GitHub repos that are not cloned here are listed too, with source "remote" and name owner/name: findings only, fixes are refused. Start here. Scanning takes up to a minute for a large workspace.',
     inputSchema: { type: 'object', properties: { root: str('Workspace folder, e.g. ~/Projects. Default: the folder last scanned in GutCheck.'), deep: { type: 'boolean', description: 'Also check git history for huge files and npm packages for updates (slower).' }, rescan: { type: 'boolean', description: 'Scan again even if a scan is cached.' } } },
     annotations: RO, run: async (e, a, progress) => { if (a.rescan || a.root || a.deep) { const s = await e.scan({ root: a.root, deep: !!a.deep, onProgress: progress }); if (!s.ok) return s; } return e.repos({ onProgress: progress }); } },
   { name: 'gutcheck_findings', title: 'Findings',

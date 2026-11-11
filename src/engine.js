@@ -93,7 +93,7 @@ function createEngine(opts = {}) {
     remoteStatus: () => ws && ws.remoteStatus(),
   });
 
-  const remoteCache = createRemoteCache({ root: path.join(dir, 'remote-cache') });
+  const remoteCache = (opts.remoteDeps && opts.remoteDeps.cache) || createRemoteCache({ root: path.join(dir, 'remote-cache') });
   ws = createWorkspaceScanner({ known, service, policy: policy.load, seen, remote: { settings: () => store.load().remote, cache: remoteCache, ...(opts.remoteDeps || {}) } });
   const root = () => ws.root();
   const via = opts.via || 'cli';
@@ -104,9 +104,9 @@ function createEngine(opts = {}) {
   // Concurrent calls for the same folder share one scan; another folder waits for it, then scans.
   // recordSeen: compare with the stored findings and store these (only `new` does; other commands
   // must not use up the "new since last scan" baseline).
-  async function scan({ root: r, deep = false, recordSeen = false, onProgress } = {}) {
+  async function scan({ root: r, deep = false, recordSeen = false, onProgress, remote } = {}) {
     const s = store.load();
-    const out = await ws.scan({ root: r || s.cliRoot || s.root || '', deep, recordSeen, onProgress });
+    const out = await ws.scan({ root: r || s.cliRoot || s.root || '', deep, recordSeen, onProgress, remote });
     if (out.ok && out.root !== s.cliRoot) store.update({ cliRoot: out.root }); // never replaces the app's own folder
     return out;
   }
@@ -134,6 +134,7 @@ function createEngine(opts = {}) {
     errors: r.findings.filter((f) => f.severity === 'error').length, warnings: r.findings.filter((f) => f.severity === 'warn').length, info: r.findings.filter((f) => f.severity === 'info').length,
     branch: r.git && r.git.branch, dirty: r.git && r.git.dirty, ahead: r.git && r.git.ahead, behind: r.git && r.git.behind,
     remote: r.remote && !r.remote.unreachable ? `${r.remote.owner}/${r.remote.name}` : null,
+    source: r.source === 'remote' ? 'remote' : 'local', partial: r.partial || undefined,
   };
   const finding = (r, f) => ({ repo: r.name, id: f.id, severity: f.severity, category: f.category, title: f.title, detail: f.detail, url: f.url || undefined, fix: f.fix ? { ...f.fix, label: undefined } : undefined, fixLabel: f.fix ? f.fix.label : undefined });
 
@@ -172,6 +173,14 @@ function createEngine(opts = {}) {
     if (x.error) return { ok: false, error: x.error };
     const r = x.repo;
     return { ok: true, ...summary(r), git: r.git, prs: r.prs, failedRuns: r.ci && r.ci.failed, findings: (r.findings || []).map((f) => finding(r, f)), ignored: (r.ignored || []).map(ignoreView), drift: r.drift || undefined };
+  }
+
+  // Repos on GitHub not cloned here: what the last scan included and left out, and the cache size.
+  async function remote({ clearCache = false, onProgress } = {}) {
+    if (clearCache) { const freedBytes = remoteCache.sizeBytes(); remoteCache.clear(); return { ok: true, cleared: true, freedBytes }; }
+    const s = await ensure({ onProgress });
+    if (!s.ok) return s;
+    return { ok: true, status: ws.remoteStatus(), cacheBytes: remoteCache.sizeBytes() };
   }
 
   async function report({ repo, onProgress } = {}) {
@@ -351,7 +360,7 @@ function createEngine(opts = {}) {
 
   const history = ({ limit = 50 } = {}) => ({ ok: true, entries: readAudit(auditFile, Math.max(1, Math.min(500, limit))) });
 
-  return { scan, repos, findings, localOnly, repoDetail, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, secrets: secrets.list, secretsPlan: secrets.plan, secretsApply: secrets.apply, secretsVerify: secrets.verify, secretsSkip: secrets.skip, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
+  return { scan, repos, findings, localOnly, repoDetail, remote, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, secrets: secrets.list, secretsPlan: secrets.plan, secretsApply: secrets.apply, secretsVerify: secrets.verify, secretsSkip: secrets.skip, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
 }
 
 module.exports = { createEngine, dataDir, ACTION_CATALOG };
