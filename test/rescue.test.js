@@ -185,3 +185,26 @@ test('a failing bundle step stops apply and keeps the folder', async () => {
   assert.ok(fs.existsSync(destOf(p)));
   assert.match(p.note, /what was written so far stays there/);
 });
+
+// Found on a real repo: a stash patch is relative to the commit the stash was made on, not to HEAD.
+test('each stash patch restores on the base commit MANIFEST.txt names for it', async () => {
+  const d = repo({ 'f.txt': '1\n' });
+  put(d, 'f.txt', '1\nold stash\n'); sh(d, 'stash', 'push', '-q');
+  commitFile(d, 'f.txt', '1\n2\n');
+  put(d, 'f.txt', '1\n2\nnew stash\n'); sh(d, 'stash', 'push', '-q');
+  commitFile(d, 'f.txt', '1\n2\n3\n'); // HEAD is now neither stash's base
+  const p = await rescuePlan(d, { dest: baseDir() });
+  assert.equal(p.ok, true, p.error);
+  assert.equal((await apply(p)).ok, true);
+  const dest = destOf(p);
+  const manifest = fs.readFileSync(path.join(dest, 'MANIFEST.txt'), 'utf8');
+  for (const [n, want] of [[0, '1\n2\nnew stash\n'], [1, '1\nold stash\n']]) {
+    const m = new RegExp(`git switch -c rescued-stash-${n} ([0-9a-f]{40}) && git apply stash-${n}\\.patch`).exec(manifest);
+    assert.ok(m, `manifest names the base of stash ${n}`);
+    const clone = fresh('restore');
+    execFileSync('git', ['clone', '-q', path.join(dest, 'repo.bundle'), clone]);
+    sh(clone, 'switch', '-q', '-c', `rescued-stash-${n}`, m[1]);
+    sh(clone, 'apply', path.join(dest, `stash-${n}.patch`));
+    assert.equal(fs.readFileSync(path.join(clone, 'f.txt'), 'utf8'), want);
+  }
+});

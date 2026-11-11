@@ -89,7 +89,13 @@ module.exports = ({ fail, nothing }) => ({
           if (!withUntracked) warnings.push('This git cannot include untracked files in stash patches; they stay only in the bundle\'s stash commits.');
           for (let n = 0; n < lo.stashes; n++) {
             steps.push(step(['stash', 'show', '-p', '--binary', ...(withUntracked ? ['--include-untracked'] : []), `--output=${out(`stash-${n}.patch`)}`, `stash@{${n}}`]));
-            written.push(`stash-${n}.patch: stash@{${n}} (git apply stash-${n}.patch)`);
+            // A stash patch applies to the commit the stash was made on, not to HEAD. The bundle
+            // holds that commit when a ref reaches it (nothing reachable only from older stashes).
+            const base = (await git(['rev-parse', '-q', '--verify', `stash@{${n}}^1`])).stdout.trim();
+            const held = /^[0-9a-f]{40,64}$/.test(base) && (await git(['rev-list', '--count', base, '--not', '--all'])).stdout.trim() === '0';
+            written.push(`stash-${n}.patch: stash@{${n}}, made on commit ${base || '(unknown)'}`
+              + (held ? `\n    restore: git switch -c rescued-stash-${n} ${base} && git apply stash-${n}.patch`
+                : '\n    that commit is not in the bundle: apply it with git apply --3way on the nearest commit'));
           }
         }
       }
@@ -118,8 +124,8 @@ module.exports = ({ fail, nothing }) => ({
         '',
         'Restore:',
         '  git clone repo.bundle <name>',
-        '  cd <name> && git apply ../uncommitted.patch',
-        '  git apply ../stash-0.patch   # or keep it as a branch',
+        '  cd <name> && git apply ../uncommitted.patch   # on the commit named in HEAD above',
+        '  each stash: the restore line under Files (a stash applies to the commit it was made on)',
         '  cp -r ../untracked/. .',
         '',
       ].join('\n');
