@@ -98,7 +98,7 @@ function renderList() {
   for (const [view, id] of Object.entries(NAV)) { const b = $(id); if (b) { if (state.view === view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); } }
   const q = $('q').value.toLowerCase();
   const sort = $('sort').value;
-  let rs = [...state.repos.values()].filter((r) => r.name.toLowerCase().includes(q));
+  let rs = RemoteView.visible([...state.repos.values()]).filter((r) => r.name.toLowerCase().includes(q));
   rs.sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : sort === 'prs' ? (b.prs?.length || 0) - (a.prs?.length || 0) : (a.score ?? 0) - (b.score ?? 0));
   $('repos').replaceChildren(...rs.map((r) => {
     const c = counts(r);
@@ -111,7 +111,7 @@ function renderList() {
           c.err ? h('span', { class: 'b-err' }, `${c.err} err`) : null,
           c.warn ? h('span', { class: 'b-warn' }, `${c.warn} warn`) : null,
           r.prs?.length ? h('span', {}, plural(r.prs.length, 'PR')) : null,
-          !r.remote && !r.error ? h('span', {}, 'local only') : null))), () => select(r.path));
+          !r.remote && !r.error ? h('span', {}, 'local only') : null, RemoteView.chip(r)))), () => select(r.path));
   }));
 }
 
@@ -173,7 +173,7 @@ function findingEl(r, f) {
   return h('div', { class: 'finding ' + f.severity },
     h('div', { class: 't' }, h('b', {}, f.title), h('span', {}, f.detail || '')),
     f.url ? btn('Open ↗', () => window.api.openUrl(f.url)) : null,
-    f.fix && f.fix.type === 'permissions-prune' ? btn('Review rules…', () => reviewRules(r, f.fix.hashes)) : f.fix ? btn(f.fix.label, () => runActions([{ repo: r, action: f.fix }])) : null,
+    RemoteView.isRemote(r) ? null : f.fix && f.fix.type === 'permissions-prune' ? btn('Review rules…', () => reviewRules(r, f.fix.hashes)) : f.fix ? btn(f.fix.label, () => runActions([{ repo: r, action: f.fix }])) : null,
     ignoreButton(r, f));
 }
 
@@ -258,15 +258,15 @@ function renderRepo() {
   const fixable = all.actions.length + all.decisions.length;
   if (fixable) mk(`Fix all issues (${fixable})…`, () => fixAllIssues(r, all)).classList.add('primary');
   mk('Rescan', async (b) => { b.disabled = true; await refreshOne(r.path); });
-  if (!r.git || !Array.isArray(r.git.remotes) || r.git.remotes.length) mk('Fetch & prune', actOn(r, 'fetch'));
-  mk('Open folder', () => window.api.openFolder(r.path));
+  if (!RemoteView.isRemote(r) && (!r.git || !Array.isArray(r.git.remotes) || r.git.remotes.length)) mk('Fetch & prune', actOn(r, 'fetch'));
+  if (!RemoteView.isRemote(r)) mk('Open folder', () => window.api.openFolder(r.path));
   if (r.remote) mk('Open on GitHub ↗', () => window.api.openUrl(r.remote.url));
   toolbar.append(copyButton(r.path, r.name));
   const cats = [...new Set(r.findings.map((f) => f.category))];
   put(d, 
     h('div', { class: 'dhead' }, h('div', { class: 'grade g' + r.grade }, r.grade), h('h2', {}, r.name), h('span', { class: 'pill' }, `${r.score}/100`)),
-    h('div', { class: 'sub' }, r.path, r.git?.branch ? `  ·  ${r.git.branch}` : ''),
-    toolbar,
+    h('div', { class: 'sub' }, RemoteView.where(r), r.git?.branch ? `  ·  ${r.git.branch}` : ''),
+    toolbar, RemoteView.note(r),
     r.findings.length ? null : h('p', { class: 'ok-msg' }, 'No issues found. Nice.'),
     ...cats.flatMap((c) => [h('h3', {}, c), ...r.findings.filter((f) => f.category === c).map((f) => findingEl(r, f))]),
     ...ignoredPanel(r), ...prsPanel(r), ...branchesPanel(r), ...settingsPanel(r), ...filesPanel(r));
@@ -352,11 +352,11 @@ function showRate(rate) {
   pill.title = `Resets ${new Date(rate.core.reset).toLocaleTimeString()} (REST) / ${new Date(rate.graphql.reset).toLocaleTimeString()} (GraphQL)`;
 }
 
-window.api.onRepo(({ res, done, total }) => {
+window.api.onRepo(({ res, done, total, stage }) => {
   state.repos.set(res.path, res);
   $('bar').style.width = (done / total) * 100 + '%';
   $('progress').setAttribute('aria-valuenow', String(Math.round((done / total) * 100)));
-  $('ptext').textContent = `Scanned ${done}/${total}`;
+  $('ptext').textContent = RemoteView.progress(res, done, total, stage);
   schedulePaint();
 });
 

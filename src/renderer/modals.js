@@ -147,7 +147,9 @@ const BACKGROUND_SPEC = {
   lead: ['Startup, tray and scheduled scans'],
   // Opening the agents dialog closes this one without saving (it has its own Save/Connect steps).
   extra: (close) => [h('h4', {}, 'AI agents'), h('p', { class: 'sub' }, 'Let Claude, Codex, Cursor, Copilot or Gemini use GutCheck\'s scans and fixes over MCP.'),
-    h('div', {}, h('button', { onclick: () => { close(null); openAgents(); } }, 'Connect an AI agent…'))],
+    h('div', {}, h('button', { onclick: () => { close(null); openAgents(); } }, 'Connect an AI agent…')),
+    h('h4', {}, 'Remote repos'), h('p', { class: 'sub' }, 'Also check your GitHub repos that are not cloned in this folder.'),
+    h('div', {}, h('button', { onclick: () => { close(null); RemoteView.openSettings(); } }, 'GitHub repos not cloned here…'))],
   fields: [
     { name: 'launchOnStartup', label: 'Launch GutCheck when I log in (starts in the tray)', type: 'checkbox' },
     { name: 'minimizeToTray', label: 'Minimise to the system tray', type: 'checkbox' },

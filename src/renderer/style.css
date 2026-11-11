@@ -15,6 +15,8 @@ button:disabled { opacity: .5; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #0b0d12; font-weight: 600; }
 .deep { color: var(--muted); display: flex; gap: 4px; align-items: center; }
 .pill { padding: 2px 9px; border-radius: 99px; font-size: 12px; border: 1px solid var(--line); color: var(--muted); }
+.pill.remote { font-size: 11px; padding: 0 7px; }
+.remote-note { color: var(--muted); font-size: 13px; margin: 6px 0 10px; }
 .pill.ok { color: var(--ok); border-color: var(--ok); } .pill.bad { color: var(--err); border-color: var(--err); }
 #progress { height: 20px; position: relative; background: var(--panel); border-bottom: 1px solid var(--line); }
 #bar { height: 100%; width: 0; background: #2b3270; transition: width .2s; }

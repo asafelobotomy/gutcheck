@@ -29,6 +29,11 @@
           <option value="name">Name</option>
           <option value="prs">Most open PRs</option>
         </select>
+        <select id="source" aria-label="Show local or remote repos" hidden>
+          <option value="all">All repos</option>
+          <option value="local">Cloned here</option>
+          <option value="remote">Only on GitHub</option>
+        </select>
       </div>
       <button id="dashboard" class="nav">Dashboard</button>
       <button id="overview" class="nav">Workspace overview</button>
@@ -57,5 +62,6 @@
   <script src="agents-view.js"></script>
   <script src="policy-view.js"></script>
   <script src="usage-view.js"></script>
+  <script src="remote-view.js"></script>
 </body>
 </html>

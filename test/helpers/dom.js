@@ -59,7 +59,8 @@ function fakeSecrets(calls, scan, over = {}) {
   };
 }
 
-async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clutter = CLUTTER, quality = QUALITY, secrets = SECRETS, secretsApi = {} } = {}) {
+const REMOTE_INFO = { settings: { enabled: false, orgs: [], forks: false, archived: false, skip: [], maxSizeMB: 500, cacheMaxGB: 5 }, status: null, cacheBytes: 0, orgs: [] };
+async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clutter = CLUTTER, quality = QUALITY, secrets = SECRETS, secretsApi = {}, remote = REMOTE_INFO } = {}) {
   const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8').replace(/<script[^>]*><\/script>/g, '');
   const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true, url: 'file:///app/index.html' });
   const w = dom.window;
@@ -89,10 +90,11 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
     testsScan: async (d) => { calls.push(['testsScan', d]); return TESTS; },
     setIgnore: async (o) => { calls.push(['ignore', o]); return { ok: true }; }, drift: async () => ({ file: '/d/baseline.json', rules: null }), initBaseline: async () => ({ ok: true }), openBaseline: async () => {}, onDone: (cb) => { onDone = cb; },
     onBegin: (cb) => { onBegin = cb; }, onRepo: (cb) => { onRepo = cb; },
+    remote: async () => remote, remoteOrgs: async () => remote.orgs, setRemote: async (p) => { calls.push(['remoteSet', p]); return p; }, remoteClear: async () => { calls.push(['remoteClear']); return { freedBytes: remote.cacheBytes }; },
     secrets: fakeSecrets(calls, secrets, secretsApi),
   };
   const ctx = dom.getInternalVMContext();
-  for (const f of ['metrics.js', 'fix-all.js', 'app.js', 'modals.js', 'fixall-view.js', 'overview-view.js', 'clutter-view.js', 'quality-view.js', 'tests-view.js', 'secrets-view.js', 'dashboard.js', 'agents-view.js', 'policy-view.js', 'usage-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
+  for (const f of ['metrics.js', 'fix-all.js', 'app.js', 'modals.js', 'fixall-view.js', 'overview-view.js', 'clutter-view.js', 'quality-view.js', 'tests-view.js', 'secrets-view.js', 'dashboard.js', 'agents-view.js', 'policy-view.js', 'usage-view.js', 'remote-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
   await tick();
   return { dom, w, doc: w.document, calls, $: (s) => w.document.querySelector(s), $$: (s) => [...w.document.querySelectorAll(s)], run: (code) => new vm.Script(code).runInContext(ctx), emit: { begin: (d) => onBegin(d), repo: (d) => onRepo(d), done: (d) => onDone(d) } };
 }

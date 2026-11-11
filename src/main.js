@@ -15,6 +15,7 @@ const { createPolicyStore, driftReport, inactiveIgnores } = require('./policy');
 const sched = require('./schedule');
 const { createWorkspaceScanner } = require('./workspace-scan');
 const { createRemoteCache } = require('./remote-cache');
+const { normalizeRemoteSettings, validOwner } = require('./remote-settings');
 const { dataDir } = require('./paths');
 const { createSecretsCtl } = require('./secrets-ctl');
 const { registerIpc: registerSecretsIpc } = require('./secrets-glue');
@@ -244,6 +245,11 @@ handle('agents:copy', (_e, { id, allowActions } = {}) => {
   return { ok: true };
 });
 
+// Repos on GitHub not cloned here: settings (only the remote keys, cleaned), your orgs, the cache.
+handle('remote:get', () => ({ settings: normalizeRemoteSettings(loadSettings().remote), status: ws.remoteStatus(), cacheBytes: remoteCache.sizeBytes() }));
+handle('remote:set', (_e, patch) => { const next = normalizeRemoteSettings({ ...normalizeRemoteSettings(loadSettings().remote), ...(patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {}) }); updateSettings({ remote: next }); return next; });
+handle('remote:orgs', async () => { const r = await run('gh', ['api', 'user/orgs', '--jq', '.[].login']); return r.ok ? r.stdout.split('\n').map((s) => s.trim()).filter(validOwner) : []; });
+handle('remote:clear', () => { const freedBytes = remoteCache.sizeBytes(); remoteCache.clear(); return { freedBytes }; });
 handle('open:url', (_e, url) => openExternal(url));
 handle('open:folder', (_e, dir) => { if (localKnown(dir)) shell.openPath(dir); });
 
