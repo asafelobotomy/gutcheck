@@ -12,7 +12,7 @@ const defaultCtx = (over = {}) => {
   const ctx = { run, fs, readOnly: false, clutter: scanClutter, ...over };
   // Read-only git for plans and checks: exec.git's guards (repo drivers blanked, no lazy fetch).
   // A runner injected by tests gets the fixed options only, since it runs no real git.
-  ctx.safeGit = ctx.safeGit || (ctx.run === run ? (args, cwd, o = {}) => exec.git(args, { cwd, timeout: o.timeout }) : (args, cwd, o = {}) => ctx.run('git', [...READONLY_GIT, ...args], { cwd, env: SAFE_GIT_ENV, timeout: o.timeout }));
+  ctx.safeGit = ctx.safeGit || (ctx.run === run ? (args, cwd, o = {}) => exec.git(args, { cwd, timeout: o.timeout, maxBuffer: o.maxBuffer }) : (args, cwd, o = {}) => ctx.run('git', [...READONLY_GIT, ...args], { cwd, env: SAFE_GIT_ENV, timeout: o.timeout, maxBuffer: o.maxBuffer }));
   // A repo's config entries for some keys, and those its own config decided (git-safety.js). An
   // injected runner has no real repo behind it, so it sees none.
   ctx.gitConfig = ctx.gitConfig || (ctx.run === run ? exec.configEntries : async () => ({ all: [], untrusted: [] }));
@@ -146,6 +146,16 @@ async function applySteps(p, ctx) {
       }
     } else if (s.kind === 'copy') {
       try { copyFiles(io, s); results.push({ text: s.display, ok: true, out: '' }); } catch (e) { results.push({ text: s.display, ok: false, out: String(e.message) }); return { ok: false, results }; }
+    } else if (s.kind === 'mkdir' && s.exclusive) {
+      // A new folder outside every guarded root (the rescue): checked again here, after the preview.
+      try {
+        io.mkdirSync(path.dirname(s.path), { recursive: true, mode: 0o700 });
+        const real = path.join(io.realpathSync(path.dirname(s.path)), path.basename(s.path));
+        const inside = (s.guard || []).some((g) => { let gr = g; try { gr = io.realpathSync(g); } catch {} return real === gr || real.startsWith(gr + path.sep); });
+        if (inside) throw new Error('Choose a folder outside the workspace and its repos.');
+        try { io.mkdirSync(s.path, { mode: 0o700 }); } catch (e) { throw e && e.code === 'EEXIST' ? new Error(`${s.path} already exists. Choose another folder.`) : e; }
+        results.push({ text: s.display, ok: true, out: '' });
+      } catch (e) { results.push({ text: s.display, ok: false, out: String(e.message) }); return { ok: false, results }; }
     } else if (s.kind === 'mkdir') {
       // Only GutCheck's own run folder (layer-3 test runs), never inside a repo.
       try { io.mkdirSync(s.path, { recursive: true, mode: 0o700 }); results.push({ text: s.display, ok: true, out: '' }); } catch (e) { results.push({ text: s.display, ok: false, out: String(e.message) }); return { ok: false, results }; }

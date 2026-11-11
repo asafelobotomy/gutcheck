@@ -186,6 +186,69 @@ test('a failing bundle step stops apply and keeps the folder', async () => {
   assert.match(p.note, /what was written so far stays there/);
 });
 
+// ---- Final review fixes
+
+test('review: secret-named files are never copied, even where the secret scan does not reach', async () => {
+  const d = repo({ 'a.txt': 'a\n' });
+  put(d, 'a/b/c/d/e/f/g/.env', 'TOKEN=deep\n');
+  put(d, 'dist/.env', 'TOKEN=dist\n');
+  put(d, 'big/.env', `TOKEN=${'x'.repeat(1100 * 1024)}\n`);
+  put(d, 'keep.txt', 'keep\n');
+  const p = await rescuePlan(d, { dest: baseDir(), ctx: { maxFileBytes: 10 * 1024 * 1024 } });
+  assert.equal(p.ok, true, p.error);
+  const copy = p.steps.find((s) => s.kind === 'copy');
+  assert.deepEqual(copy.files.map((f) => f.rel), ['keep.txt']);
+});
+
+test('review: a second rescue into the same folder stops before writing anything', async () => {
+  const d = fullRepo();
+  const base = baseDir();
+  const p1 = await rescuePlan(d, { dest: base });
+  const p2 = await rescuePlan(d, { dest: base }); // planned before the first one ran
+  assert.equal((await apply(p1)).ok, true);
+  const dest = destOf(p1);
+  const before = fs.readFileSync(path.join(dest, 'repo.bundle'));
+  const mtime = fs.statSync(path.join(dest, 'uncommitted.patch')).mtimeMs;
+  const r2 = await apply(p2);
+  assert.equal(r2.ok, false);
+  assert.match(r2.results[0].out, /already exists/);
+  assert.deepEqual(fs.readFileSync(path.join(dest, 'repo.bundle')), before);
+  assert.equal(fs.statSync(path.join(dest, 'uncommitted.patch')).mtimeMs, mtime);
+});
+
+test('review: a destination swapped for a symlink into the workspace after planning is refused', async () => {
+  const d = fullRepo();
+  const ws = fresh('ws'); fs.mkdirSync(ws);
+  const base = baseDir();
+  const p = await rescuePlan(d, { dest: base, ws });
+  fs.mkdirSync(path.dirname(path.dirname(destOf(p))), { recursive: true });
+  fs.symlinkSync(ws, path.dirname(destOf(p))); // <base>/<date> -> the workspace
+  const r = await apply(p);
+  assert.equal(r.ok, false);
+  assert.match(r.results[0].out, /outside the workspace/);
+  assert.deepEqual(fs.readdirSync(ws), []);
+});
+
+test('review: stashes are counted when planning, not taken from the scan', async () => {
+  const d = fullRepo();
+  const scanned = await scanRepo(d, {});
+  sh(d, 'stash', 'drop', '-q');
+  const p = await plan(scanned, { type: 'rescue-bundle', dest: baseDir() }, { workspaceRoot: fresh('ws'), repoPaths: [d] });
+  assert.equal(p.ok, true, p.error);
+  assert.ok(!p.steps.some((s) => s.args && s.args[0] === 'stash'));
+  assert.equal((await apply(p)).ok, true);
+});
+
+test('review: a failed untracked-file listing refuses the plan instead of saving none', async () => {
+  const d = fullRepo();
+  const r = await scanRepo(d, {});
+  const real = require('../src/exec').git;
+  const ctx = { workspaceRoot: fresh('ws'), repoPaths: [d], safeGit: (args, cwd) => (args[0] === 'ls-files' ? { ok: false, stdout: '', stderr: 'maxBuffer exceeded' } : real(args, { cwd })) };
+  const p = await plan(r, { type: 'rescue-bundle', dest: baseDir() }, ctx);
+  assert.equal(p.ok, false);
+  assert.match(p.error, /untracked files/);
+});
+
 // Found on a real repo: a stash patch is relative to the commit the stash was made on, not to HEAD.
 test('each stash patch restores on the base commit MANIFEST.txt names for it', async () => {
   const d = repo({ 'f.txt': '1\n' });

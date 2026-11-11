@@ -9,11 +9,13 @@ const os = require('node:os');
 const path = require('node:path');
 const { expandHome, printable, plural } = require('./util');
 const { findRepoSecrets } = require('./secrets');
+const { looksSecret } = require('./secret-patterns');
 const { summarizeLocalOnly } = require('./local-only');
 
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const BUNDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const MiB = 1024 * 1024;
+const LS_MAX_BUFFER = 128 * MiB;
 
 // The real path of p, even when its last parts do not exist yet.
 function realOf(p) {
@@ -49,8 +51,10 @@ module.exports = ({ fail, nothing }) => ({
       const git = (args) => ctx.safeGit(args, r.path);
       const lo = r.localOnly || { branches: [], stashes: 0, uncommitted: 0, untracked: 0, any: false };
       const hasCommits = !(r.hygiene && r.hygiene.noCommits) && (await git(['rev-parse', '-q', '--verify', 'HEAD'])).ok;
-      const ls = await git(['ls-files', '-o', '--exclude-standard', '-z']);
-      const others = ls.ok ? ls.stdout.split('\0').filter(Boolean) : [];
+      const ls = await ctx.safeGit(['ls-files', '-o', '--exclude-standard', '-z'], r.path, { maxBuffer: LS_MAX_BUFFER });
+      // A rescue that silently saved no untracked files would be worse than none.
+      if (!ls.ok) fail(`Could not list the untracked files, so a rescue would miss them: ${printable(String(ls.stderr || '').trim().split('\n').pop().slice(0, 200))}`);
+      const others = ls.stdout.split('\0').filter(Boolean);
       if (!hasCommits && !others.length) nothing('Nothing to save: the repo has no commits and no untracked files.');
 
       // Untracked files: keep regular files that are not secrets and not too large.
@@ -65,14 +69,17 @@ module.exports = ({ fail, nothing }) => ({
         if (!st.isFile()) { skipped.push(`skipped ${printable(rel)}: not a regular file`); continue; }
         let rp = abs;
         try { rp = fs.realpathSync(abs); } catch { /* keep abs */ }
-        if (secrets.has(rp)) { skipped.push(`skipped ${printable(rel)}: secret (back it up with GutCheck's Secrets backup)`); continue; }
+        // The name check fails closed where the secret scan stops (depth, size, build folders).
+        if (secrets.has(rp) || looksSecret(rel)) { skipped.push(`skipped ${printable(rel)}: secret (back it up with GutCheck's Secrets backup)`); continue; }
         if (st.size > max) { skipped.push(`skipped ${printable(rel)}: too large (${mb(st.size)})`); continue; }
         keep.push({ rel, size: st.size, mtimeMs: st.mtimeMs });
       }
 
       const step = (args, extra = {}) => ({ safeGit: true, cmd: 'git', args, cwd: r.path, display: `git ${args.map(printable).join(' ')}`, ...extra });
       const out = (f) => path.join(dest, f);
-      const steps = [{ kind: 'mkdir', path: dest, display: `create ${printable(dest)} (private)` }];
+      // exclusive: apply creates the folder itself, so it fails if the folder exists by then, and
+      // refuses a path that now resolves into the workspace (a symlink swapped in after the preview).
+      const steps = [{ kind: 'mkdir', path: dest, exclusive: true, guard: guarded, display: `create ${printable(dest)} (private, new)` }];
       const written = [];
       const warnings = [];
       if (hasCommits) {
@@ -83,11 +90,13 @@ module.exports = ({ fail, nothing }) => ({
           steps.push(step(['diff', 'HEAD', '--binary', `--output=${out('uncommitted.patch')}`]));
           written.push('uncommitted.patch: changes to tracked files (git apply uncommitted.patch)');
         }
-        if (lo.stashes > 0) {
+        // Counted now, not taken from the scan: a stash dropped since would stop the rescue halfway.
+        const stashCount = (await git(['stash', 'list', '--format=%gd'])).stdout.split('\n').filter(Boolean).length;
+        if (stashCount > 0) {
           // Feature check on the real git rather than a version number.
           const withUntracked = (await git(['stash', 'show', '--include-untracked', '--stat', 'stash@{0}'])).ok;
           if (!withUntracked) warnings.push('This git cannot include untracked files in stash patches; they stay only in the bundle\'s stash commits.');
-          for (let n = 0; n < lo.stashes; n++) {
+          for (let n = 0; n < stashCount; n++) {
             steps.push(step(['stash', 'show', '-p', '--binary', ...(withUntracked ? ['--include-untracked'] : []), `--output=${out(`stash-${n}.patch`)}`, `stash@{${n}}`]));
             // A stash patch applies to the commit the stash was made on, not to HEAD. The bundle
             // holds that commit when a ref reaches it (nothing reachable only from older stashes).
