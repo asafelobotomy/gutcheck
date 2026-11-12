@@ -1,0 +1,20 @@
+/* uQ's theme. uq-theme.mjs sets --uq-* and data-uq-variant on <html> from uQ's tokens.json
+ * (~/.local/state/uq/theme/tokens.json) when GutCheck runs on the uQ desktop; these rules point
+ * GutCheck's colours (style.css) at them, for a dark or a light uQ theme. Without uQ the attribute
+ * is never set and nothing here applies. */
+:root[data-uq-variant] {
+  --bg: var(--uq-bg); --panel: var(--uq-surface); --panel2: var(--uq-surface-alt); --line: var(--uq-border);
+  --text: var(--uq-text); --muted: var(--uq-text-muted); --accent: var(--uq-accent);
+  --err: var(--uq-error); --warn: var(--uq-warning); --info: var(--uq-accent); --ok: var(--uq-success);
+  --code-bg: color-mix(in srgb, var(--uq-bg) 85%, var(--uq-text));
+}
+:root[data-uq-variant] body { font-family: var(--uq-font-ui), system-ui, sans-serif; }
+:root[data-uq-variant="light"] { color-scheme: light; }
+:root[data-uq-variant] button.primary, :root[data-uq-variant] button.danger:not(:disabled) { color: var(--uq-accent-text); }
+:root[data-uq-variant] code, :root[data-uq-variant] pre.prev, :root[data-uq-variant] pre.warnbox { background: var(--code-bg); }
+:root[data-uq-variant] code { font-family: var(--uq-font-mono), ui-monospace, monospace; }
+:root[data-uq-variant] #bar { background: color-mix(in srgb, var(--accent) 45%, var(--bg)); }
+:root[data-uq-variant] .gA, :root[data-uq-variant] .r-safe { background: color-mix(in srgb, var(--ok) 22%, var(--bg)); }
+:root[data-uq-variant] .gB { background: color-mix(in srgb, var(--info) 22%, var(--bg)); color: var(--info); }
+:root[data-uq-variant] .gC, :root[data-uq-variant] .r-caution { background: color-mix(in srgb, var(--warn) 22%, var(--bg)); }
+:root[data-uq-variant] .gD, :root[data-uq-variant] .g\?, :root[data-uq-variant] .r-danger { background: color-mix(in srgb, var(--err) 22%, var(--bg)); }

@@ -290,6 +290,10 @@ A baseline says what every repo should have. **Baseline** in the sidebar (or `gu
 
 The tray icon toggles the window on click and has Show and Quit. Only one copy runs: launching GutCheck again shows the existing window. If your desktop has no system tray (some GNOME setups need a tray extension), GutCheck never hides its window, so it can't get lost.
 
+## uQ theme
+
+On the [uQ](https://github.com/asafelobotomy/uq) desktop the window follows uQ's theme, dark or light, and changes with it. The main process reads `~/.local/state/uq/theme/tokens.json` (or under `$XDG_STATE_HOME`) and watches that folder; the window applies the colours and font only after checking every value, so a broken file cannot inject CSS. Elsewhere, or if the file is missing or broken, GutCheck keeps its own colours. GutCheck only reads that file.
+
 ## Install
 
 Download the AppImage from the [latest release](../../releases/latest), then:
@@ -323,6 +327,8 @@ npm run screenshots   # rebuild docs/images from a made-up demo workspace (needs
 ```
 
 [AGENTS.md](AGENTS.md) describes the layout and the rules every change follows (read-only scans, plan, preview, apply, files under 400 lines). [CONTRIBUTING.md](CONTRIBUTING.md) covers pull requests, and [docs/sources.md](docs/sources.md) where each check comes from.
+
+`src/vendor/uq-tokens/` is vendored from uQ's `web/uq-tokens` (`uq-tokens.js` unchanged; `uq-tokens.css` holds GutCheck's palette as fallbacks; `package.json` there only marks it as an ES module for the tests). To update it, copy the new `uq-tokens.js` over it and bump the version pinned in the `check:uq-tokens` script; CI fails when the two differ.
 
 `package.json` has an `overrides` entry that lifts only the vulnerable `minimatch` versions (7.0.0 to 11.0.3, a glob-pattern DoS in build tooling) to a patched 11.x. Older majors that `glob` and `asar` need are left alone, because they are not affected and 11.x is not API-compatible with them. Remove it once `electron-builder` updates; `npm audit` should stay at 0 and `npm ls minimatch` should show nothing invalid.
 

@@ -25,6 +25,7 @@ GutCheck is an Electron app (plus a CLI and an MCP server) that checks the healt
 - Actions: `actions.js` plans, `apply.js` runs exactly the planned steps. `renderer/fix-all.js` (shared with the CLI and MCP) builds a repo's "Fix all issues" plan and its run order; `renderer/fixall-view.js` is the wizard.
 - `scripts/version.js`: changelog sections, `npm run bump`, release notes. `scripts/demo/`: the made-up workspace and Electron capture behind `npm run screenshots` (README images in `docs/images/`).
 - `src/renderer/`: plain DOM scripts loaded in order by `index.html`, sharing globals. `test/helpers/dom.js` loads them in the same order in jsdom.
+- uQ theme: `src/uq-theme.js` (main: read and watch uQ's tokens.json), `window.uqTokens` in `preload.js`, `renderer/uq-theme.mjs` (the one ES module, loads `src/vendor/uq-tokens/`, copied unchanged) and `renderer/uq-theme.css` (maps `--uq-*` onto the app's colours).
 
 ## Rules
 
