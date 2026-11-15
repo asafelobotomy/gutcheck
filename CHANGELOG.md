@@ -4,6 +4,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-15
+
 ### Security
 
 - Scanning a repo whose `.git/config` someone else wrote can no longer run their programs. A filter (`clean`, `process`) or diff (`textconv`) driver set in the repo's own config, or in a file it includes, is switched off for every git call a scan or a plan makes; a driver your own global config sets to the same value, such as git-lfs, still runs, while ones only the repo sets, such as git-crypt's, are off during scans. Scans also no longer check commit signatures (which ran `gpg.program`), `git blame` skips textconv, never look inside submodules (whose own config could run a filter), never fetch missing objects in a partial clone (which ran the repo's `uploadpack` or `sshCommand`; on git older than 2.44 a partial clone is refused), never fall back to a repo alias for `git lfs`, and never let the trusted git-lfs filter run a program the repo's config names for it (`lfs.extension.*`, `lfs.customtransfer.*`, `lfs.standalonetransferagent`, plus `core.askPass` and `credential.helper`). A repo whose `git status` then fails is reported as an error instead of looking clean. The `ext::` and `fd::` transports are blocked for scans and actions. If GutCheck cannot read a repo's drivers, it refuses the git call instead of running it unprotected. A submodule with uncommitted edits inside it no longer counts as a change in its parent; new commits in it still do.
@@ -47,7 +49,11 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 ### Fixed
 
 - A branch that has diverged from its upstream (local and upstream commits both) is reported as diverged, with `git pull --rebase` steps in "Copy for LLM", instead of "can be fast-forwarded". It no longer offers Pull (ff-only) or Push, which would both fail, and Fix all no longer adds a push for it.
-- The code-quality secret scan no longer reports a private-key header written inside a regex (anchored with `^`/`$` or followed by a group) as a key; GutCheck's own `src/secret-patterns.js` raised two.
+- The code-quality secret scan no longer reports a private-key header written inside a regex (anchored with `^`/`# Changelog
+
+All notable changes to GutCheck. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Add changes under **Unreleased**; `npm run bump -- patch|minor|major` turns that into a dated release, and CI publishes it with this section as the release notes.
+
+ or followed by a group) as a key; GutCheck's own `src/secret-patterns.js` raised two.
 - A committed `<name>.env` file that holds only plain settings, such as a release tag and commit a script sources, is no longer reported as a committed secret. It still is when any key name looks like a credential (token, secret, password, key, auth, DSN and similar) or a value is a URL with a user and password; only key names and that URL shape are checked, and nothing from the file reaches the finding. A dotfile `.env` is always reported.
 - A linked worktree (`git worktree add`) in the workspace is no longer reported as a second clone of its repo.
 - A linked worktree whose main checkout is in the same workspace no longer repeats that repository's GitHub findings (CI, pull requests, repo settings, security features, Dependabot alerts) or loses points for them: they are listed once, under the main checkout.
@@ -349,7 +355,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 - First release: health checks for every git repo in a folder.
 
-[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.27.1...HEAD
+[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.27.1...v0.28.0
 [0.27.1]: https://github.com/asafelobotomy/gutcheck/compare/v0.27.0...v0.27.1
 [0.27.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.26.1...v0.27.0
 [0.26.1]: https://github.com/asafelobotomy/gutcheck/compare/v0.26.0...v0.26.1
