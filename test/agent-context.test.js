@@ -108,6 +108,8 @@ test('LSP: a missing or turned-off plugin gets a Set up fix that installs or ena
   assert.match(f[0].detail, /Set up installs the plugin;/);
   assert.match(f[1].title, /pyright-language?server is missing|pyright-langserver is missing/);
   const bin = tmp('gutcheck-bin-');
+  const oldHome = process.env.HOME;
+  process.env.HOME = tmp('gutcheck-home-'); // no plugin folders: the official marketplace by default
   try {
     for (const b of ['claude', 'npm']) { fs.writeFileSync(path.join(bin, b), '#!/bin/sh\n'); fs.chmodSync(path.join(bin, b), 0o755); }
     const r = { path: bin, name: 'x', git: {}, agents: { context: { lsp: [{ name: 'pyright-lsp', command: 'pyright-langserver', files: 9, installed: false, enabled: false, binary: false }] } } };
@@ -117,7 +119,23 @@ test('LSP: a missing or turned-off plugin gets a Set up fix that installs or ena
     assert.ok(p.steps.every((x) => x.cwd === os.homedir()), 'installs run from the home folder, not the repo (its .npmrc)');
     assert.equal(p.risk, 'danger', 'a global install changes the machine: the repo name must be typed');
     assert.equal((await plan(r, { type: 'lsp-setup', plugin: 'nope' })).ok, false);
-  } finally { rm(bin); }
+  } finally { rm(bin, process.env.HOME); process.env.HOME = oldHome; }
+});
+
+test('LSP: the plugin is installed from the marketplace Claude Code has, not a hardcoded one', () => {
+  const home = tmp('gutcheck-home-');
+  const base = path.join(home, '.claude', 'plugins');
+  const put = (f, v) => { fs.mkdirSync(base, { recursive: true }); fs.writeFileSync(path.join(base, f), JSON.stringify(v)); };
+  try {
+    assert.equal(C.lspMarketplace(home, 'rust-analyzer-lsp'), 'claude-plugins-official', 'nothing on disk: the old default');
+    put('plugin-directory-cache-v2.json', { schemaVersion: 2, listings: [] });
+    assert.equal(C.lspMarketplace(home, 'rust-analyzer-lsp'), 'anthropic-plugin-directory', 'only the built-in directory (2026-11-15: install failed with "not found")');
+    put('known_marketplaces.json', { 'claude-plugins-official': {}, trailofbits: {} });
+    assert.equal(C.lspMarketplace(home, 'rust-analyzer-lsp'), 'claude-plugins-official', 'the official marketplace when it has been added');
+    put('installed_plugins.json', { plugins: { 'pyright-lsp@anthropic-plugin-directory': [{}], 'clangd-lsp@--evil': [{}] } });
+    assert.equal(C.lspMarketplace(home, 'pyright-lsp'), 'anthropic-plugin-directory', 'enabling uses the marketplace it was installed from');
+    assert.equal(C.lspMarketplace(home, 'clangd-lsp'), 'claude-plugins-official', 'a marketplace name that looks like an option is not used');
+  } finally { rm(home); }
 });
 
 test('usage: transcripts give tool, skill, command and server counts; claude mcp list is parsed without targets', async () => {

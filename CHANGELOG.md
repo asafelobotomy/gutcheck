@@ -4,6 +4,10 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Fixed
+
+- Set up for an LSP plugin installs it from the marketplace Claude Code actually has: the one it is already installed from, else `claude-plugins-official` when added, else the built-in `anthropic-plugin-directory`. It used to always name `claude-plugins-official`, so every install failed on machines without it.
+
 ## [0.28.0] - 2026-11-15
 
 ### Security

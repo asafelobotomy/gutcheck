@@ -109,6 +109,21 @@ function lspCatalog(home) {
   return Object.keys(out).length ? out : LSP_FALLBACK;
 }
 
+// The marketplace to install or enable an LSP plugin from: the one it is already installed from, else
+// the official marketplace when it has been added, else Claude Code's built-in plugin directory.
+const MARKET_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+function lspMarketplace(home, name) {
+  const base = path.join(home, '.claude', 'plugins');
+  const inst = readJson(path.join(base, 'installed_plugins.json'));
+  const key = Object.keys((inst && (inst.plugins || inst)) || {}).find((k) => k.split('@')[0] === name && k.includes('@'));
+  const from = key && key.slice(key.indexOf('@') + 1);
+  if (from && MARKET_RE.test(from)) return from;
+  const known = readJson(path.join(base, 'known_marketplaces.json'));
+  if (known && typeof known === 'object' && Object.prototype.hasOwnProperty.call(known, 'claude-plugins-official')) return 'claude-plugins-official';
+  if (['plugin-directory-cache-v2.json', 'plugin-directory-bindings.json'].some((f) => fs.existsSync(path.join(base, f)))) return 'anthropic-plugin-directory';
+  return 'claude-plugins-official';
+}
+
 const onPath = (cmd, env = process.env) => (env.PATH || '').split(path.delimiter).some((d) => { try { fs.accessSync(path.join(d, cmd), fs.constants.X_OK); return true; } catch { return false; } });
 
 // Plugins Claude Code has installed and enabled (name without @marketplace).
@@ -206,4 +221,4 @@ function checkContext(s) {
   return out;
 }
 
-module.exports = { scanContext, checkContext, importsOf, sections, measure, classifyRule, hashRule, lspCatalog, LSP_FALLBACK, INSTR_INFO, INSTR_WARN };
+module.exports = { scanContext, checkContext, importsOf, sections, measure, classifyRule, hashRule, lspCatalog, lspMarketplace, LSP_FALLBACK, INSTR_INFO, INSTR_WARN };

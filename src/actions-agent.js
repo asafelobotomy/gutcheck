@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { dataDir } = require('./paths');
-const { classifyRule, lspCatalog, LSP_FALLBACK, INSTR_INFO } = require('./agent-context');
+const { classifyRule, lspCatalog, lspMarketplace, LSP_FALLBACK, INSTR_INFO } = require('./agent-context');
 const { claudeBin } = require('./agent-connect');
 
 class PlanError extends Error {}
@@ -155,7 +155,8 @@ function planLsp(r, p, ctx) {
   // Installs run from the home folder: a repo's .npmrc, nuget.config or Gemfile must not pick the registry.
   if (!l.installed || !l.enabled) {
     if (!bin) fail('Claude Code was not found (not on PATH, nor bundled with Claude Desktop).');
-    steps.push(!l.installed ? cmd(bin, ['plugin', 'install', `${name}@claude-plugins-official`, '--scope', 'user'], home) : cmd(bin, ['plugin', 'enable', `${name}@claude-plugins-official`, '--scope', 'user'], home));
+    const id = `${name}@${lspMarketplace(home, name)}`;
+    steps.push(cmd(bin, ['plugin', l.installed ? 'enable' : 'install', id, '--scope', 'user'], home));
   }
   const notes = [];
   if (!l.binary) {
