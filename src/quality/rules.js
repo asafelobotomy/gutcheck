@@ -51,9 +51,11 @@ function entropy(s) {
 // browser key inside a saved web page (Google's browser keys are public by design and restricted by referrer).
 const softSecret = (kind, rel, testFile) => testFile || (kind === 'Google API key' && /\.html?$/i.test(rel));
 
+// A key header written as a regex to recognise keys (anchored with ^/$ or followed by a group), not a key.
+const PEM_IN_REGEX = /(?:\/\^?|\^)-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----(?:\$|\(|\[)/;
 function secretKinds(line, testFile) {
   const out = [];
-  for (const [kind, re] of SECRET_PATTERNS) if (re.test(line)) out.push(kind);
+  for (const [kind, re] of SECRET_PATTERNS) if (re.test(line) && !(kind === 'Private key' && PEM_IN_REGEX.test(line))) out.push(kind);
   if (!out.length && !testFile) {
     const m = GENERIC_SECRET.exec(line);
     if (m && !PLACEHOLDER.test(m[1]) && !URL_VALUE.test(m[1]) && !ENV_LOOKUP.test(line) && entropy(m[1]) >= 3) out.push('Hardcoded credential');

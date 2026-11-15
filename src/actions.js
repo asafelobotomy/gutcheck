@@ -56,6 +56,13 @@ const localBranch = (repo, b) => (repo.git.branches || []).find((x) => x.name ==
 // A name from a scan goes on a git command line only if it cannot be read as an option (B6, B7).
 const safeName = (b, verb = 'Refusing') => (validBranch(b) ? b : fail(`${verb}: "${cleanText(String(b), 60)}" is not a safe branch name.`));
 // The current branch's upstream as git has it now: the remote and the branch there (B5, B8).
+// The remote's default branch: GitHub's answer from the scan, else <remote>/HEAD as git last saw it.
+async function remoteDefault(r, remote, ctx) {
+  if (remote === 'origin' && defaultBranch(r)) return defaultBranch(r);
+  const h = await readGit(ctx, ['symbolic-ref', '-q', `refs/remotes/${remote}/HEAD`], r.path);
+  const ref = h.ok ? h.stdout.trim() : '';
+  return ref.startsWith(`refs/remotes/${remote}/`) ? ref.slice(`refs/remotes/${remote}/`.length) : null;
+}
 async function upstreamOf(r, b, ctx, verb) {
   const u = await readGit(ctx, ['for-each-ref', '--format=%(upstream:remotename)%00%(upstream:remoteref)', `refs/heads/${b}`], r.path);
   const [remote, ref] = u.ok ? u.stdout.replace(/\n$/, '').split('\0') : [];
@@ -98,6 +105,7 @@ const ACTIONS = {
       if (!r.git.upstream) fail('Current branch has no upstream to pull from.');
       if (r.git.detached || !r.git.branch) fail('Detached HEAD: nothing to pull into.');
       const b = safeName(r.git.branch, 'Refusing to pull');
+      if (r.git.ahead > 0) fail(`${b} has diverged from ${r.git.upstream} (${r.git.ahead} local, ${r.git.behind} upstream commits), so it cannot fast-forward. Rebase or merge it by hand.`);
       const { remote, dest } = await upstreamOf(r, b, ctx, 'pull');
       const track = `refs/remotes/${remote}/${dest}`;
       return {
@@ -114,10 +122,17 @@ const ACTIONS = {
     async plan(r, p, ctx) {
       if (r.git.detached || !r.git.branch) fail('Detached HEAD: nothing to push.');
       const b = safeName(r.git.branch, 'Refusing to push');
-      const { remote, dest } = r.git.upstream ? await upstreamOf(r, b, ctx, 'push') : { remote: 'origin', dest: b };
+      let { remote, dest } = r.git.upstream ? await upstreamOf(r, b, ctx, 'push') : { remote: 'origin', dest: b };
+      let setUpstream = !r.git.upstream, note;
+      // A branch made from origin/main tracks main; pushing it there would land unreviewed work on the
+      // default branch. Push it under its own name instead and track that (git push -u, as for a new branch).
+      if (dest !== b && dest === await remoteDefault(r, remote, ctx)) {
+        note = `${b} tracks ${remote}/${dest}, the default branch. This pushes it to a new ${remote}/${b} and tracks that instead; open a pull request to merge it.`;
+        dest = b; setUpstream = true;
+      }
       // No tags or submodules either: push.followTags and push.recurseSubmodules would add them.
-      const args = ['push', '--no-follow-tags', '--recurse-submodules=no', ...(r.git.upstream ? [] : ['-u']), '--', remote, `refs/heads/${b}:refs/heads/${dest}`];
-      return { risk: 'safe', title: `Push ${b}`, uses: ['push'], remotes: [remote], pushes: true, steps: [git(args, r.path, undefined, ['-c', `remote.${remote}.mirror=false`, '-c', 'push.default=simple'])] };
+      const args = ['push', '--no-follow-tags', '--recurse-submodules=no', ...(setUpstream ? ['-u'] : []), '--', remote, `refs/heads/${b}:refs/heads/${dest}`];
+      return { risk: 'safe', title: dest === b ? `Push ${b}` : `Push ${b} to ${remote}/${dest}`, uses: ['push'], remotes: [remote], pushes: true, note, steps: [git(args, r.path, undefined, ['-c', `remote.${remote}.mirror=false`, '-c', 'push.default=simple'])] };
     },
   },
 

@@ -81,7 +81,10 @@ function fixFor(f, r) {
   if (id === 'git-detached') return { phase: 1, rank: 0, why: 'Commits made on a detached HEAD can be lost.', cmds: ['git switch -c rescue-work   # keeps any commits made here', `# or go back: git switch ${D}`] };
   if (id === 'git-dirty') return { phase: 1, rank: 2, why: 'Uncommitted work is not backed up.', cmds: ['git status --short', '# review the files, make sure none are secrets or clutter, then:', 'git add -A', 'git commit -m "<describe the change>"'], note: 'Do the "Protect secrets" and "Remove clutter" steps first so they are not committed by accident.' };
   // Pull before anything is committed: a fast-forward needs no local commits (Fix all runs the same order).
+  if (id === 'git-behind' && g.ahead > 0) return { phase: 1, rank: 1, why: 'Local branch and its upstream have both moved on.', cmds: ['git pull --rebase   # replays the local commits on top of the upstream', '# resolve any conflicts and run the tests, then:', 'git push'], note: 'Commit or stash uncommitted work first. Never force-push to resolve this.' };
   if (id === 'git-behind') return { phase: 1, rank: 1, why: 'Local branch is behind its upstream.', cmds: ['git pull --ff-only'], note: 'Pull before committing anything, so it can fast-forward.' };
+  if (id === 'git-ahead' && g.behind > 0) return { phase: 1, rank: 3, why: 'Unpushed commits exist only on this machine.', cmds: [], note: 'Do the "diverged" step first; the push is part of it.' };
+  if (id === 'git-ahead' && r.remote && r.remote.defaultBranch && g.upstream && g.branch !== def && g.upstream.endsWith('/' + def)) return { phase: 1, rank: 3, why: 'Unpushed commits exist only on this machine.', cmds: [`git push -u origin ${here(g.branch)}`, `gh pr create${R} --fill`], note: `The branch tracks ${t(g.upstream, LEN.short)}, the default branch: push it under its own name, not onto ${t(def, LEN.short)}.` };
   if (id === 'git-ahead') return { phase: 1, rank: 3, why: 'Unpushed commits exist only on this machine.', cmds: ['git push'] };
   if (id === 'git-no-upstream') return { phase: 1, rank: 4, why: 'Branch is not tracking a remote.', cmds: [`git push -u origin ${here(g.branch)}`] };
 

@@ -98,7 +98,7 @@
     const all = [...auto, ...answers.filter((a) => a && a.action).map((a) => ({ ...a.action, sev: a.sev || 'info' }))];
     const g = (r && r.git) || {};
     const commits = all.some((a) => (a.type === 'add-file' && a.commit) || a.type === 'commit-all');
-    if (commits && !all.some((a) => a.type === 'push') && r.remote && !r.remote.unreachable && g.branch && !g.detached) all.push({ type: 'push', sev: 'warn' });
+    if (commits && !all.some((a) => a.type === 'push') && r.remote && !r.remote.unreachable && g.branch && !g.detached && !(g.behind > 0 && g.ahead > 0)) all.push({ type: 'push', sev: 'warn' });
     const sorted = all.map((a, i) => ({ a, i })).sort((x, y) => step(x.a) - step(y.a) || SEV[x.a.sev] - SEV[y.a.sev] || x.i - y.i).map(({ a }) => { const { sev, ...rest } = a; return rest; });
     // .gitignore rules appended just before the owner's commit change .gitignore itself.
     const gi = sorted.findIndex((a) => a.type === 'gitignore-append');

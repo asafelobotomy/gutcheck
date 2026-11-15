@@ -17,6 +17,7 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 - Read-only mode now also blocks ignoring findings and creating a baseline, in the app, the CLI and MCP.
 - The secrets CLI and backup preview escape control, bidi and other invisible characters in file names, so a folder name cannot send terminal escapes.
 - Git 2.54's config-based hooks (`hook.<name>.command` and `.event`) in a repo's own config, or a file it includes, no longer run during scans or plan checks: they ran even with `core.hooksPath=/dev/null`. GutCheck now switches each one off with `hook.<name>.enabled=false` for every scan and plan git call; hooks in your own global or system config are left alone, like your own hook files. Plan previews name such a hook (name and event, never the command), and Fix all holds the step like any other repo hook.
+- Push no longer sends a branch onto the default branch it tracks. A branch made from `origin/main` (so it tracks `main`) is pushed to a new branch of its own name and tracks that, with a note to open a pull request; before, the "safe" Push sent it to `main`.
 ### Added
 
 - `inactive` (no pushes for a year) now offers **Archive…** to repo admins, local and remote. It is a danger action (type the repo name), Fix all asks and starts on "leave it", and it runs after every other GitHub change, since an archived repo refuses them.
@@ -45,6 +46,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ### Fixed
 
+- A branch that has diverged from its upstream (local and upstream commits both) is reported as diverged, with `git pull --rebase` steps in "Copy for LLM", instead of "can be fast-forwarded". It no longer offers Pull (ff-only) or Push, which would both fail, and Fix all no longer adds a push for it.
+- The code-quality secret scan no longer reports a private-key header written inside a regex (anchored with `^`/`$` or followed by a group) as a key; GutCheck's own `src/secret-patterns.js` raised two.
 - A committed `<name>.env` file that holds only plain settings, such as a release tag and commit a script sources, is no longer reported as a committed secret. It still is when any key name looks like a credential (token, secret, password, key, auth, DSN and similar) or a value is a URL with a user and password; only key names and that URL shape are checked, and nothing from the file reaches the finding. A dotfile `.env` is always reported.
 - A linked worktree (`git worktree add`) in the workspace is no longer reported as a second clone of its repo.
 - A linked worktree whose main checkout is in the same workspace no longer repeats that repository's GitHub findings (CI, pull requests, repo settings, security features, Dependabot alerts) or loses points for them: they are listed once, under the main checkout.

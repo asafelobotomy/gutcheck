@@ -67,14 +67,27 @@ function checkPRs(s) {
   return out;
 }
 
+// The branch tracks the remote's default branch under another name (made from origin/main, say).
+const tracksDefault = (g, remote) => {
+  const def = remote && remote.defaultBranch;
+  return !!(def && g.upstream && g.branch !== def && g.upstream.endsWith('/' + def));
+};
+
 function checkBranches(s) {
   const out = [];
   const g = s.git;
   if (g.dirty > 0)
     out.push({ id: 'git-dirty', category: 'Branches', severity: 'warn', title: `${g.dirty} uncommitted change${g.dirty > 1 ? 's' : ''}`, detail: g.detached || !g.branch ? 'On a detached HEAD: create a branch before committing.' : `On branch ${g.branch}`, fix: g.detached || !g.branch ? undefined : { type: 'commit-all', label: 'Commit all…' } });
-  if (g.ahead > 0)
-    out.push({ id: 'git-ahead', category: 'Branches', severity: 'warn', title: `${g.ahead} unpushed commit${g.ahead > 1 ? 's' : ''} on ${g.branch}`, detail: 'Push to back up your work.', fix: { type: 'push', label: 'Push' } });
-  if (g.behind > 0)
+  // Diverged: a fast-forward pull fails and a plain push is rejected, so neither is offered.
+  const diverged = g.ahead > 0 && g.behind > 0;
+  if (g.ahead > 0) {
+    const onDefault = tracksDefault(g, s.remote);
+    const detail = diverged ? `Rebase or merge ${g.upstream} first: the push would be rejected.` : onDefault ? `It tracks ${g.upstream}, the default branch: Push sends it to a new branch of its own for a pull request.` : 'Push to back up your work.';
+    out.push({ id: 'git-ahead', category: 'Branches', severity: 'warn', title: `${g.ahead} unpushed commit${g.ahead > 1 ? 's' : ''} on ${g.branch}`, detail, fix: diverged ? undefined : { type: 'push', label: 'Push' } });
+  }
+  if (diverged)
+    out.push({ id: 'git-behind', category: 'Branches', severity: 'warn', title: `${g.branch} has diverged from ${g.upstream}`, detail: `${g.ahead} local and ${g.behind} upstream commit${g.behind > 1 ? 's' : ''}. A fast-forward is not possible: rebase onto ${g.upstream} (or merge it), then push.` });
+  else if (g.behind > 0)
     out.push({ id: 'git-behind', category: 'Branches', severity: 'info', title: `${g.behind} commit${g.behind > 1 ? 's' : ''} behind upstream`, detail: `${g.branch} can be fast-forwarded.`, fix: { type: 'pull', label: 'Pull (ff-only)' } });
   if (g.branch && !g.upstream && s.remote && !(s.hygiene && s.hygiene.noCommits))
     out.push({ id: 'git-no-upstream', category: 'Branches', severity: 'info', title: `Branch ${g.branch} has no upstream`, detail: 'Not tracking a remote branch.', fix: { type: 'push', label: 'Push & set upstream' } });
