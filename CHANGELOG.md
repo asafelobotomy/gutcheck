@@ -4,6 +4,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-15
+
 ### Fixed
 
 - Set up for an LSP plugin installs it from the marketplace Claude Code actually has: the one it is already installed from, else `claude-plugins-official` when added, else the built-in `anthropic-plugin-directory`. It used to always name `claude-plugins-official`, so every install failed on machines without it.
@@ -359,7 +361,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 - First release: health checks for every git repo in a folder.
 
-[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.28.1...HEAD
+[0.28.1]: https://github.com/asafelobotomy/gutcheck/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.27.1...v0.28.0
 [0.27.1]: https://github.com/asafelobotomy/gutcheck/compare/v0.27.0...v0.27.1
 [0.27.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.26.1...v0.27.0
