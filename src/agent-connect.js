@@ -261,8 +261,10 @@ function createAgentConnect(opts = {}) {
           const file = fs.existsSync(s.file) ? fs.realpathSync(s.file) : s.file; // a symlinked dotfile stays a symlink
           const bak = s.file + '.gutcheck.bak';
           if (s.backup && !fs.existsSync(bak)) fs.copyFileSync(file, bak); // the user's original, kept once
-          fs.writeFileSync(file + '.tmp', s.content, { mode: 0o600 }); // agent configs can hold tokens
-          fs.renameSync(file + '.tmp', file);
+          // A new, unguessable name opened exclusively: a link planted at a fixed .tmp name is never followed.
+          const tmp = `${file}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+          fs.writeFileSync(tmp, s.content, { mode: 0o600, flag: 'wx' }); // agent configs can hold tokens
+          fs.renameSync(tmp, file);
           results.push({ text: `wrote ${s.file}`, ok: true, out: '' });
         } catch (e) { results.push({ text: `write ${s.file}`, ok: false, out: String(e.message) }); ok = false; }
       }

@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { apply, defaultCtx } = require('./apply');
 const { SAFE_GIT_ENV } = require('./exec');
-const { MAX_PLAN_ITEMS, sq } = require('./util');
+const { MAX_PLAN_ITEMS, sq, printable } = require('./util');
 const INSTALLERS = ['npm install', 'yarn install', 'pnpm install', 'bun install'];
 const { TEMPLATES, findEcosystems } = require('./templates');
 const { detectStacks } = require('./tests/stack');
@@ -22,7 +22,7 @@ const fail = (msg) => { throw new PlanError(msg); };
 // Not an error: there is nothing for the action to do (the app shows it as a note, not a failure).
 const nothing = (msg) => { const e = new PlanError(msg); e.nothing = true; throw e; };
 
-const cleanText = (s, max) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) : '');
+const cleanText = (s, max) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, ' ').trim().slice(0, max) : ''); // controls, line separators, bidi
 
 // Read-only git for planning: the scans' guards (no hooks, fsmonitor, repo drivers or lazy fetch).
 const readGit = (ctx, args, cwd) => ctx.safeGit(args, cwd);
@@ -278,7 +278,7 @@ const ACTIONS = {
       for (const it of picked) if (it.keep && chosen.has(it.keep)) fail(`"${it.path}" and the file it duplicates, "${it.keep}", are both selected. Keep one.`);
       const steps = picked.map((it) => ({
         kind: 'remove', root: r.path, rel: it.path, path: path.join(r.path, ...it.path.split('/')), mode: it.mode, fileStat: it.kind === 'file' ? { size: it.size, mtime: it.mtime } : null,
-        display: it.mode === 'trash' ? `move to trash: ${it.path}${it.kind === 'dir' ? '/' : ''}` : `delete (regenerable): ${it.path}${it.kind === 'dir' ? '/' : ''}`,
+        display: it.mode === 'trash' ? `move to trash: ${printable(it.path)}${it.kind === 'dir' ? '/' : ''}` : `delete (regenerable): ${printable(it.path)}${it.kind === 'dir' ? '/' : ''}`,
         note: it.reason,
       }));
       const env = picked.filter((it) => it.category === 'env');

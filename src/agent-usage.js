@@ -95,7 +95,9 @@ async function usage(home, repos = [], { now = Date.now(), days = WINDOW_DAYS, p
 
 // ---------------------------------------------------------------- does it work (consent 2)
 
-const redact = (s) => { let t = String(s || '').slice(0, 160); for (const w of t.split(/\s+/)) if (w.length >= 16 && (R.secretKinds(w, false).length || /[A-Za-z0-9_+/=-]{32,}/.test(w))) t = t.replace(w, '[redacted]'); return t.replace(/https?:\/\/\S+/g, '[url]'); };
+// Credential shapes at any length: key=value and key: value, Bearer and Basic values, a password in a URL.
+const SHAPES = [[/((?:pass(?:word|wd|phrase)?|pwd|secret|token|api[_-]?key|access[_-]?key|credentials?|auth)[\w.-]*["']?\s*[=:]\s*)["']?[^\s"',;]+/gi, '$1[redacted]'], [/\b(bearer|basic)\s+[^\s"',;]+/gi, '$1 [redacted]'], [/(:\/\/[^\s/:@]*:)[^\s/@]+@/g, '$1[redacted]@']];
+const redact = (s) => { let t = String(s || '').slice(0, 160); for (const [re, to] of SHAPES) t = t.replace(re, to); for (const w of t.split(/\s+/)) if (w.length >= 16 && (R.secretKinds(w, false).length || /[A-Za-z0-9_+/=-]{32,}/.test(w))) t = t.replace(w, '[redacted]'); return t.replace(/https?:\/\/\S+/g, '[url]'); };
 
 // `claude mcp list` lines: "<name>: <target> - ✔ Connected" / "✘ Failed to connect — why" / needs auth.
 function parseMcpList(text) {

@@ -16,7 +16,7 @@ const viaOf = (v) => (v == null ? undefined : VIA.has(v) ? v : 'mcp');
 const ID_RE = /^[A-Za-z0-9][\w.:/-]{0,120}\*?$/; // a finding id, or a prefix ending in * (pr-stale-*)
 
 const readJSON = (f) => { try { const v = JSON.parse(fs.readFileSync(f, 'utf8')); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
-const writeJSON = (f, v) => { fs.writeFileSync(f + '.tmp', JSON.stringify(v, null, 2) + '\n'); fs.renameSync(f + '.tmp', f); };
+const writeJSON = (f, v) => { fs.writeFileSync(f + '.tmp', JSON.stringify(v, null, 2) + '\n', { mode: 0o600 }); fs.renameSync(f + '.tmp', f); };
 
 // The key ignores are stored under: owner/name for GitHub repos (stable across clones), else the folder
 // name. Still owner/name when GitHub cannot be reached (offline, rate limit): the scan keeps both from

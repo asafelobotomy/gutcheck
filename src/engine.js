@@ -74,7 +74,8 @@ const brief = (x) => {
 function createEngine(opts = {}) {
   const env = opts.env || process.env;
   const dir = dataDir(env);
-  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  // Private: settings, the audit log and ignores say what is on this machine (audit A10).
+  try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); fs.chmodSync(dir, 0o700); } catch {}
   const store = createSettingsStore(path.join(dir, 'settings.json'));
   const known = new Map();
   const allowActions = !!opts.allowActions;
@@ -89,7 +90,7 @@ function createEngine(opts = {}) {
   const trendFile = path.join(dir, 'trend.json');
   const trendStore = {
     read: () => JSON.parse(fs.readFileSync(trendFile, 'utf8')),
-    write: (a) => { fs.writeFileSync(trendFile + '.tmp', JSON.stringify(a)); fs.renameSync(trendFile + '.tmp', trendFile); },
+    write: (a) => { fs.writeFileSync(trendFile + '.tmp', JSON.stringify(a), { mode: 0o600 }); fs.renameSync(trendFile + '.tmp', trendFile); },
   };
   const auditFile = path.join(dir, 'audit.log');
   const policy = createPolicyStore(dir);

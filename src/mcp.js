@@ -112,7 +112,7 @@ function createServer({ engine, send, log = () => {} }) {
     if (notice && tool.name === 'gutcheck_overview' && body && typeof body === 'object') body.notice = notice;
     // A refusal is just its message; a partial failure (some plans did not run) keeps the full result.
     if (failed && out.error) return reply(id, { content: [{ type: 'text', text: out.error }], isError: true });
-    return reply(id, { content: [{ type: 'text', text: text(body) }], ...(typeof body === 'string' ? {} : { structuredContent: body }), isError: failed });
+    return reply(id, { content: [{ type: 'text', text: text(body) }], ...(typeof body === 'string' || JSON.stringify(body, null, 1).length > MAX_TEXT ? {} : { structuredContent: body }), isError: failed }); // a cut result carries no full copy beside it
   }
 
   async function handle(msg) {

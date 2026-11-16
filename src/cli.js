@@ -239,7 +239,8 @@ async function main(argv, { out: rawOut = (s) => process.stdout.write(s + '\n'),
       r.findings.forEach((x) => out(`${icon[x.severity]} ${x.repo}: ${x.title}  [${x.id}]`));
       if (f.notify) {
         const n = require('./schedule').notification(r.findings); // warnings and errors only, as in the app
-        if (n) await require('./exec').run('notify-send', ['--app-name=GutCheck', n.title, n.body]);
+        // notify-send hands the body to the daemon as markup: workflow and branch names in it are others' text.
+        if (n) await require('./exec').run('notify-send', ['--app-name=GutCheck', '--', n.title, n.body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')]);
       }
       return 0;
     }

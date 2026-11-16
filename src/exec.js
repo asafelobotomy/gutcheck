@@ -2,8 +2,13 @@ const { execFile } = require('node:child_process');
 
 // Run a command without a shell. Resolves { ok, stdout, stderr } and never rejects.
 // opts.env adds to the environment; with opts.cleanEnv it IS the environment (nothing inherited).
+// Variables that point git at a repo, index or object store. Set when GutCheck is started from a git
+// hook or alias, they would make every call read (or change) that repo instead of the one in cwd.
+const REPO_ENV = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR', 'GIT_NAMESPACE', 'GIT_PREFIX', 'GIT_GRAFT_FILE', 'GIT_SHALLOW_FILE', 'GIT_EXTERNAL_DIFF'];
+const inherited = () => { const e = { ...process.env }; for (const k of REPO_ENV) delete e[k]; return e; };
+
 function run(cmd, args, opts = {}) {
-  const env = opts.cleanEnv ? { ...(opts.env || {}) } : { ...process.env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GIT_TERMINAL_PROMPT: '0', ...(opts.env || {}) };
+  const env = opts.cleanEnv ? { ...(opts.env || {}) } : { ...inherited(), GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GIT_TERMINAL_PROMPT: '0', ...(opts.env || {}) };
   return new Promise((resolve) => {
     const child = execFile(
       cmd,

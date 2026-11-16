@@ -148,6 +148,8 @@ async function languages(dir) {
 const hashRule = (rule) => crypto.createHash('sha256').update(rule).digest('hex').slice(0, 8);
 
 // A rule's shape with no value in it: Bash(printf … [142 chars, literal text]).
+// The first word of a Bash rule is shown only when it is one of these (audit S10).
+const KNOWN_COMMANDS = new Set('git gh npm npx node pnpm yarn bun deno python python3 pip pip3 uv pytest ruff cargo rustc go make cmake docker podman kubectl terraform ls cat rm mv cp mkdir rmdir echo printf grep rg find fd sed awk curl wget chmod chown cd test jq yq tar zip unzip ssh scp rsync head tail wc sort uniq diff touch which env export source bash sh zsh eslint tsc vitest jest prettier brew apt pacman systemctl journalctl du df ps kill time xargs tee'.split(' '));
 function classifyRule(rule) {
   const m = /^(\w+)(?:\((.*)\))?$/s.exec(rule) || [null, 'Rule', rule];
   const tool = m[1];
@@ -161,7 +163,7 @@ function classifyRule(rule) {
   if (inner.length > ONEOFF_LONG) flags.push('long');
   const wildcard = /(:\*|\*)\s*$/.test(inner) || /^[\w.-]+$/.test(inner);
   const word = /^([a-z][\w.-]{0,24})(\s|$)/.exec(inner);
-  const first = word && !R.secretKinds(word[1], false).length ? word[1] : '';
+  const first = word && KNOWN_COMMANDS.has(word[1]) ? word[1] : ''; // only a command's name, never a word that may be a password
   const shape = `${tool}(${first ? first + ' ' : ''}… [${inner.length} chars${flags.length ? ', ' + flags.join(', ') : ''}])`;
   const oneOff = tool === 'Bash' && !wildcard && flags.length > 0;
   return { hash: hashRule(rule), tool, shape, oneOff, tokenLike };
