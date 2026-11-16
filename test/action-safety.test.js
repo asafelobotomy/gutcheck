@@ -129,3 +129,39 @@ test('E1: a partial clone with a plain network remote may fetch, and the plan sa
   assert.match(p.note, /partial clone/);
   for (const s of p.steps.filter((x) => x.cmd === 'git')) assert.equal(s.env.GIT_NO_LAZY_FETCH, undefined);
 });
+
+test('E4: fetch, pull and push refuse a repo whose own config redirects or weakens the connection', async () => {
+  const { networkSettings } = require('../src/git-safety');
+  const e = (key, value) => ({ key, value, origin: 'file:.git/config' });
+  assert.deepEqual(networkSettings([
+    e('http.proxy', 'http://token@attacker:8080'), e('http.sslverify', 'false'), e('http.sslverify', null), e('http.https://github.com/.extraheader', 'X: y'),
+    e('remote.origin.proxy', 'http://a'), e('remote.-x y.proxy', 'http://a'), e('url.https://attacker/.pushinsteadof', 'https://github.com/'),
+    e('http.proxy', ''), e('http.postbuffer', '524288000'), e('core.sshcommand', 'x'),
+  ]), ['http.proxy', 'http.sslverify', 'http.extraheader', 'remote.origin.proxy', 'remote.<name>.proxy', 'url.<address>.pushInsteadOf']);
+
+  const d = repo({ 'a.txt': 'a\n' });
+  sh(d, 'remote', 'add', 'origin', 'https://github.com/o/n.git');
+  const scanned = await scanRepo(d, {});
+  assert.equal((await plan(scanned, { type: 'fetch' })).ok, true);
+  for (const [key, value, named] of [['http.proxy', 'http://user:tok@attacker.invalid:8080', 'http.proxy'], ['http.sslVerify', 'false', 'http.sslverify'], ['remote.origin.proxy', 'http://attacker.invalid', 'remote.origin.proxy'], ['url.https://attacker.invalid/.pushInsteadOf', 'https://github.com/', 'url.<address>.pushInsteadOf']]) {
+    sh(d, 'config', key, value);
+    const p = await plan(scanned, { type: 'fetch' });
+    assert.equal(p.ok, false, key);
+    assert.ok(p.error.includes(`(${named})`), p.error);
+    assert.ok(!p.error.includes('attacker'), 'no address or token in the message');
+    sh(d, 'config', '--unset', key);
+  }
+  // The user's own proxy (global config) is theirs to set.
+  sh(d, 'config', '--file', process.env.GIT_CONFIG_GLOBAL, 'http.proxy', 'http://corp.invalid:3128');
+  try { assert.equal((await plan(scanned, { type: 'fetch' })).ok, true); } finally { sh(d, 'config', '--file', process.env.GIT_CONFIG_GLOBAL, '--unset', 'http.proxy'); }
+});
+
+test('F2: the rescue copy saves edits made after the last scan', async () => {
+  const d = repo({ 'f.txt': 'one\n' });
+  const scanned = await scanRepo(d, {}); // clean at scan time
+  put(d, 'f.txt', 'one\nlater\n');
+  const p = await plan(scanned, { type: 'rescue-bundle', dest: fresh('rescue') }, { workspaceRoot: fresh('ws'), repoPaths: [d] });
+  assert.equal(p.ok, true, p.error);
+  assert.equal((await apply(p)).ok, true);
+  assert.match(fs.readFileSync(path.join(destOf(p), 'uncommitted.patch'), 'utf8'), /^\+later$/m);
+});

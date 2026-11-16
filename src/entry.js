@@ -1,4 +1,4 @@
-// App entry. `--cli <command...>` and `--mcp [--allow-actions]` run GutCheck headless (no window,
+// App entry. `--cli <command...>` and `--mcp [--allow-actions [--allow-danger]]` run GutCheck headless (no window,
 // no tray, no single-instance lock), so the AppImage doubles as the command line and MCP server.
 const argv = process.argv;
 const at = argv.findIndex((a) => a === '--cli' || a === '--mcp');

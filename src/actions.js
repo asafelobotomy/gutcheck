@@ -262,7 +262,7 @@ const ACTIONS = {
     plan(r) {
       const want = ((r.deps && r.deps.installer) || []).join(' ');
       const [cmd, ...args] = (INSTALLERS.includes(want) ? want : 'npm install').split(' ');
-      return { risk: 'caution', title: `Run ${cmd} install`, steps: [{ kind: 'cmd', cmd, args, cwd: r.path, display: `${cmd} ${args.join(' ')}`, timeout: 300000 }], warnings: ["This executes the project's package install scripts."] };
+      return { risk: 'danger', runsRepoCode: true, title: `Run ${cmd} install`, steps: [{ kind: 'cmd', cmd, args, cwd: r.path, display: `${cmd} ${args.join(' ')}`, timeout: 300000 }], warnings: ["This executes the project's package install scripts."] };
     },
   },
   // Remove detected clutter. Paths from the UI are only looked up in a FRESH scan, so anything
@@ -369,7 +369,7 @@ async function plan(repo, action, ctx = {}) {
       display: out.steps.map((s) => ({ text: s.display, preview: s.preview, note: s.note })),
       warnings: [...(out.warnings || []), ...code.warnings],
       // Fix all leaves these out of what it runs on its own (renderer/fix-all.js).
-      runsRepoCode: code.runsRepoCode,
+      runsRepoCode: code.runsRepoCode || !!out.runsRepoCode, // npm-install says so itself
       // What recheck() inspects again just before the plan runs.
       inspected: { uses: out.uses || [], remotes: out.remotes || [], pushes: !!out.pushes, target: out.target || null, runsGit },
       undo: out.undo || null,

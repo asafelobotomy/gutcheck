@@ -4,6 +4,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+// A private HOME for this file's git calls: the developer's own global ignore file (which may list
+// .claude/settings.local.json) must not decide whether a repo ignores it.
+Object.assign(process.env, require('./helpers/env').isolatedEnv());
 const { scanAgents, checkAgents, agentAdvice, agentFix, mcpLiteralSecrets, projectKey, balooState, INSTRUCTION_MAX_LINES } = require('../src/agents');
 const { buildReport } = require('../src/report');
 

@@ -103,11 +103,11 @@ test('read-only server: scans, findings, report and catalogue work; plan and app
   } finally { cleanup(root, dataD); }
 });
 
-test('with --allow-actions: plan from a finding or an action, apply exactly once, danger needs the repo name, history records it', async () => {
+test('with --allow-actions: plan from a finding or an action, apply exactly once, danger needs --allow-danger and the repo name, history records it', async () => {
   const root = workspace();
   const dataD = tmp('gutcheck-data-');
   try {
-    const c = client(createEngine({ env: envFor(dataD), allowActions: true, via: 'mcp' }));
+    let c = client(createEngine({ env: envFor(dataD), allowActions: true, via: 'mcp' }));
     await c.req('initialize', {});
     await c.call('gutcheck_overview', { root });
 
@@ -123,9 +123,20 @@ test('with --allow-actions: plan from a finding or an action, apply exactly once
     assert.equal(again.isError, true);
     assert.match(again.structuredContent.results[0].error, /expired/, 'a token runs once');
 
-    // A dangerous plan is refused without the repo name, and runs with it.
+    // Without --allow-danger a dangerous plan is shown but gets no token and no name to echo (audit 2026-11-16, F1).
     sh(path.join(root, 'alpha'), 'branch', 'scratch');
     await c.call('gutcheck_overview', { root, rescan: true });
+    const off = data(await c.call('gutcheck_plan', { items: [{ repo: 'alpha', action: { type: 'delete-local', branch: 'scratch', force: true } }] })).plans[0];
+    assert.equal(off.ok, false);
+    assert.match(off.error, /--allow-danger/);
+    assert.equal(off.risk, 'danger');
+    assert.ok(off.commands.length > 0, 'the commands are still shown, for the user');
+    assert.ok(!('token' in off) && !('confirmName' in off));
+
+    // With it, a dangerous plan is refused without the repo name, and runs with it.
+    c = client(createEngine({ env: envFor(dataD), allowActions: true, allowDanger: true, via: 'mcp' }));
+    await c.req('initialize', {});
+    await c.call('gutcheck_overview', { root });
     const p2 = data(await c.call('gutcheck_plan', { items: [{ repo: 'alpha', action: { type: 'delete-local', branch: 'scratch', force: true } }] }));
     const plan = p2.plans[0];
     assert.equal(plan.risk, 'danger');

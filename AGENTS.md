@@ -29,7 +29,7 @@ GutCheck is an Electron app (plus a CLI and an MCP server) that checks the healt
 
 ## Rules
 
-- Scans are read-only and never run a repo's code: every git call goes through `exec.git` (hooks and fsmonitor disabled). Only the opt-in `tests-run` action executes project code.
+- Scans are read-only and never run a repo's code: every git call goes through `exec.git` (hooks and fsmonitor disabled). Only the opt-in `tests-run` and `npm-install` actions execute project code; both are rated danger.
 - Every change goes plan, preview, apply. Nothing deletes repos, changes visibility, force-pushes or rewrites history.
 - Never put secret values, `.env` contents or settings values into findings, reports or logs.
 - Keep files under 400 lines; GutCheck checks itself.

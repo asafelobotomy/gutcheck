@@ -77,3 +77,26 @@ test('mcp engine: ignoring needs --allow-actions on the server; drift and new ar
     assert.deepEqual(d.ignored, [{ id: 'no-remote', title: 'No GitHub remote', reason: '"scratch"', from: 'Ignored through an AI agent (MCP)', note: 'Written by an AI agent through MCP, not in GutCheck by the user.' }]);
   } finally { for (const d of [root, data]) fs.rmSync(d, { recursive: true, force: true }); }
 });
+
+test('cli: no command prints terminal escapes or bidi controls from a repo name, and --json still parses (audit 2026-11-16, T3)', async () => {
+  const root = tmp('gutcheck-upws-');
+  const evil = 'al\x1b]0;PWNED\x07\x1b[31mpha‮';
+  const d = path.join(root, evil);
+  fs.mkdirSync(d);
+  sh(d, 'init', '-q', '-b', 'main');
+  sh(d, 'config', 'user.email', 't@t'); sh(d, 'config', 'user.name', 't');
+  sh(d, 'commit', '-q', '--allow-empty', '-m', 'init');
+  const env = isolatedEnv({ GUTCHECK_DATA_DIR: tmp('gutcheck-updata-') });
+  try {
+    const raw = /[\x00-\x08\x0b-\x1f\x7f-\x9f‮]/;
+    for (const argv of [['scan', root], ['findings', '--root', root], ['repo', evil, '--root', root], ['ignored', '--root', root], ['local-only', '--root', root]]) {
+      const r = await run(argv, env);
+      assert.ok(!raw.test(r.out + r.err), `${argv[0]} printed a raw control character`);
+    }
+    const scan = await run(['scan', root], env);
+    assert.ok(scan.out.includes('al\\x1b]0;PWNED\\x07'), scan.out);
+    const j = await run(['findings', '--json', '--root', root], env);
+    assert.ok(!raw.test(j.out));
+    assert.ok(JSON.parse(j.out).findings.some((f) => f.repo === evil), 'the name survives as JSON escapes');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

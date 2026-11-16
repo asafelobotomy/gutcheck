@@ -18,6 +18,7 @@ const FixAll = require('./renderer/fix-all');
 const { createSecretsCtl } = require('./secrets-ctl');
 const { engineSecrets, SECRET_TYPES, MCP_REFUSAL } = require('./secrets-glue');
 
+const DANGER_OFF = 'This is a dangerous action. An agent can run it only when GutCheck\'s MCP server was started with --allow-danger as well as --allow-actions; otherwise ask the user to run it in the GutCheck app or with the gutcheck command.';
 const OFF = 'Actions are turned off: start GutCheck with --allow-actions to plan and apply changes. Everything else works read-only.';
 
 const { dataDir } = require('./paths');
@@ -77,6 +78,9 @@ function createEngine(opts = {}) {
   const store = createSettingsStore(path.join(dir, 'settings.json'));
   const known = new Map();
   const allowActions = !!opts.allowActions;
+  // Over MCP the caller is an agent, and it would be the one typing the repo name: dangerous plans
+  // need the person who started the server to have said so (audit 2026-11-16, F1).
+  const dangerOff = opts.via === 'mcp' && !opts.allowDanger;
   let ws = null; // the shared workspace scanner, made once the service exists
   const settings = () => {
     const s = store.load();
@@ -291,8 +295,9 @@ function createEngine(opts = {}) {
     // without a token, so a caller cannot apply them from this answer. Planning the one action
     // explicitly ({ repo, action }) still returns a token, with the warning.
     const isHeld = (p, k) => resolved[k].all && p.ok && !FixAll.automatic(p);
+    const shown = (p) => (dangerOff && p.ok && p.confirmName ? { ok: false, repo: p.repoName, title: p.title, risk: p.risk, commands: p.display.map((d) => d.text), error: DANGER_OFF } : pub(p));
     const held = plans.filter(isHeld).map((p) => { const { token, ...rest } = pub(p); return { ...rest, note: 'This runs the repo\'s own code: ask the user to run this in the GutCheck app or CLI.' }; });
-    return { ok: true, plans: [...plans.filter((p, k) => !isHeld(p, k)).map(pub), ...errors], ...(held.length ? { held } : {}), ...(decisions.length ? { decisions } : {}) };
+    return { ok: true, plans: [...plans.filter((p, k) => !isHeld(p, k)).map(shown), ...errors], ...(held.length ? { held } : {}), ...(decisions.length ? { decisions } : {}) };
   }
 
   // Only plans returned by plan() can run. Danger plans need confirm: { <token>: '<repo name>' }.
@@ -304,7 +309,7 @@ function createEngine(opts = {}) {
     const startedAt = Date.now(); // plans fresh now stay valid for the whole batch
     for (const t of tokens) {
       if (typeof t === 'string' && t.startsWith('s:')) res.push({ title: 'Back up secret files', ...(await secrets.apply(t)), repoName: 'Secrets' });
-      else if (typeof t === 'string' && t.startsWith('a:')) { const r = store.load().readOnly ? { ok: false, error: 'Read-only mode is on in the GutCheck app.' } : await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm, failed, startedAt })));
+      else if (typeof t === 'string' && t.startsWith('a:')) { const r = store.load().readOnly ? { ok: false, error: 'Read-only mode is on in the GutCheck app.' } : await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm: dangerOff ? {} : confirm, failed, startedAt })));
     }
     return { ok: res.every((r) => r.ok), results: res.map((r) => ({ ok: r.ok, ...(r.skipped ? { skipped: true } : {}), repo: r.repoName, title: r.title, error: r.error, steps: (r.results || []).map((x) => ({ cmd: x.text, ok: x.ok, output: brief(x) })) })) };
   }

@@ -19,7 +19,7 @@ const RO = { readOnlyHint: true, destructiveHint: false, openWorldHint: true };
 
 const TOOLS = [
   { name: 'gutcheck_overview', title: 'Workspace overview',
-    description: 'Scan a folder of git repos (or reuse the last scan) and list every repo with its health grade, score, error/warning counts and git state, worst first. When the user has turned it on, their GitHub repos that are not cloned here are listed too, with source "remote" and name owner/name: findings only, fixes are refused. Start here. Scanning takes up to a minute for a large workspace.',
+    description: 'Scan a folder of git repos (or reuse the last scan) and list every repo with its health grade, score, error/warning counts and git state, worst first. When the user has turned it on, their GitHub repos that are not cloned here are listed too, with source "remote" and name owner/name: fixes that change files are refused, GitHub-side fixes (settings, PRs, branches) can be planned. Start here. Scanning takes up to a minute for a large workspace.',
     inputSchema: { type: 'object', properties: { root: str('Workspace folder, e.g. ~/Projects. Default: the folder last scanned in GutCheck.'), deep: { type: 'boolean', description: 'Also check git history for huge files and npm packages for updates (slower).' }, rescan: { type: 'boolean', description: 'Scan again even if a scan is cached.' } } },
     annotations: RO, run: async (e, a, progress) => { if (a.rescan || a.root || a.deep) { const s = await e.scan({ root: a.root, deep: !!a.deep, onProgress: progress }); if (!s.ok) return s; } return e.repos({ onProgress: progress }); } },
   { name: 'gutcheck_findings', title: 'Findings',
@@ -60,7 +60,7 @@ const TOOLS = [
     inputSchema: { type: 'object', required: ['items'], properties: { items: { type: 'array', minItems: 1, maxItems: 200, items: { type: 'object', properties: { ...repoArg, agentFix: { type: 'object', additionalProperties: true, description: 'A machine-level fix from gutcheck_agent_usage' }, all: { type: 'boolean', description: 'Every fix for this repo, in run order' }, answers: { type: 'object', additionalProperties: true, description: 'With all: the user\'s choices, by finding id' }, finding: str('A finding id that has a fix'), params: { type: 'object', additionalProperties: true, description: 'Extra parameters for the finding\'s fix, e.g. { "message": "..." } for commit-all' }, action: { type: 'object', required: ['type'], properties: { type: str('Action type from gutcheck_actions') }, additionalProperties: true } } } } } },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true }, run: (e, a) => e.plan(a) },
   { name: 'gutcheck_apply', title: 'Apply planned changes',
-    description: 'Run plans from gutcheck_plan, exactly as previewed. Ask the user first. Plans with risk "danger" also need confirm: { "<token>": "<repo name>" }. GutCheck never deletes repos, changes visibility, force-pushes or rewrites history. Each repo is rescanned afterwards and the change is recorded in the app\'s History.',
+    description: 'Run plans from gutcheck_plan, exactly as previewed. Ask the user first. Plans with risk "danger" are only offered when the user started this server with --allow-danger; they also need confirm: { "<token>": "<repo name>" }. GutCheck never deletes repos, changes visibility, force-pushes or rewrites history. Each repo is rescanned afterwards and the change is recorded in the app\'s History.',
     inputSchema: { type: 'object', required: ['tokens'], properties: { tokens: { type: 'array', items: { type: 'string' }, minItems: 1 }, confirm: { type: 'object', additionalProperties: { type: 'string' }, description: 'Token -> repo name, for danger plans.' } } },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }, run: (e, a) => e.apply(a) },
   { name: 'gutcheck_history', title: 'Action history',
@@ -138,12 +138,12 @@ function createServer({ engine, send, log = () => {} }) {
 }
 
 // stdio entry. Requests run concurrently (the engine shares one scan between them).
-function start({ allowActions = false, input = process.stdin, output = process.stdout, logStream = process.stderr } = {}) {
-  const engine = createEngine({ allowActions, via: 'mcp' });
+function start({ allowActions = false, allowDanger = false, input = process.stdin, output = process.stdout, logStream = process.stderr } = {}) {
+  const engine = createEngine({ allowActions, allowDanger: allowActions && allowDanger, via: 'mcp' });
   const log = (m) => logStream.write(`[gutcheck-mcp] ${m}\n`);
   const send = (m) => output.write(JSON.stringify(m) + '\n');
   const server = createServer({ engine, send, log });
-  log(`ready (${allowActions ? 'actions allowed' : 'read-only'}; data ${engine.dataDir})`);
+  log(`ready (${allowActions ? (allowDanger ? 'actions allowed, dangerous ones too' : 'actions allowed') : 'read-only'}; data ${engine.dataDir})`);
   const rl = readline.createInterface({ input, crlfDelay: Infinity });
   const inflight = new Set();
   rl.on('line', (line) => {

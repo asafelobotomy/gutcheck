@@ -59,7 +59,7 @@ test('B9: the same core.sshCommand in the user\'s global config is the user\'s o
   } finally { sh(d, 'config', '--file', GLOBAL, '--unset', 'core.sshCommand'); }
 });
 
-test('B9: credential helpers, upload-pack, askpass and a non-http url rewrite are refused; an https rewrite is not', async () => {
+test('B9: credential helpers, upload-pack, askpass and url rewrites from the repo config are refused; an https rewrite from the user config is not', async () => {
   for (const [key, value, named] of [
     ['credential.helper', '!touch /tmp/x', 'credential.helper'],
     ['credential.https://example.com.helper', 'store', 'credential.<url>.helper'],
@@ -75,8 +75,15 @@ test('B9: credential helpers, upload-pack, askpass and a non-http url rewrite ar
     assert.ok(!p.error.includes('example.com'), 'no URL in the message');
   }
   const d = sshRepo();
+  // A plain rewrite runs no program, but it sends the step to a host the preview does not name
+  // (audit 2026-11-16, E4): refused when the repo's own config sets it, kept when the user's does.
   sh(d, 'config', 'url.https://example.com/.insteadOf', 'ssh://example.invalid/');
-  assert.ok((await planOn(d, { type: 'fetch' })).ok);
+  const re = await planOn(d, { type: 'fetch' });
+  assert.equal(re.ok, false);
+  assert.ok(re.error.includes('(url.<address>.insteadOf)') && !re.error.includes('example.com'), re.error);
+  sh(d, 'config', '--unset', 'url.https://example.com/.insteadOf');
+  sh(d, 'config', '--file', GLOBAL, 'url.https://example.com/.insteadOf', 'ssh://example.invalid/');
+  try { assert.ok((await planOn(d, { type: 'fetch' })).ok); } finally { sh(d, 'config', '--file', GLOBAL, '--unset', 'url.https://example.com/.insteadOf'); }
 });
 
 // A husky-style repo: core.hooksPath=.husky with a pre-commit hook that leaves a marker.

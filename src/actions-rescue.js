@@ -86,7 +86,10 @@ module.exports = ({ fail, nothing }) => ({
         steps.push(step(['bundle', 'create', out('repo.bundle'), '--all'], { timeout: BUNDLE_TIMEOUT_MS }));
         steps.push(step(['bundle', 'verify', out('repo.bundle')]));
         written.push('repo.bundle: every branch, tag and the latest stash (git clone repo.bundle <folder>)');
-        if (lo.uncommitted > 0) {
+        // Asked now, not taken from the scan: edits made since would otherwise be left out.
+        const st = await git(['status', '--porcelain', '--untracked-files=no', '--ignore-submodules=dirty']);
+        if (!st.ok) fail('Could not check for uncommitted changes, so a rescue could miss them.');
+        if (st.stdout.trim()) {
           // Git's own diff only: an external diff program (diff.external, GIT_EXTERNAL_DIFF) or a textconv
           // filter would run instead and leave a patch that cannot be applied.
           steps.push(step(['diff', '--no-ext-diff', '--no-textconv', 'HEAD', '--binary', `--output=${out('uncommitted.patch')}`]));

@@ -117,3 +117,24 @@ test('secrets: a repo secret file becomes a phase 0 step that runs gutcheck secr
     assert.match(wmd, /## Workspace-level tidy-up[\s\S]*Probably test keys: ~\/\.ssh\/test_key[\s\S]*gutcheck secrets --backup/);
   } finally { for (const d of [dir, home, data]) fs.rmSync(d, { recursive: true, force: true }); }
 });
+
+test('report commands never carry a branch name that git would read as an option (audit 2026-11-16, T2)', () => {
+  const { unsafeName } = require('../src/text-safe');
+  for (const b of ['--force', '--mirror', '-D', '--delete']) assert.equal(unsafeName(b), true, b);
+  assert.equal(unsafeName('feature/x-1'), false);
+});
+
+test('a merged branch named like an option is left out of the report\'s commands', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gutcheck-report-'));
+  try {
+    sh(dir, 'init', '-q', '-b', 'main');
+    sh(dir, 'config', 'user.name', 'T'); sh(dir, 'config', 'user.email', 't@e.com');
+    fs.writeFileSync(path.join(dir, 'a.txt'), '1');
+    sh(dir, 'add', '-A'); sh(dir, 'commit', '-qm', 'first');
+    sh(dir, 'branch', 'merged-one');
+    for (const b of ['-D', '--force']) sh(dir, 'update-ref', `refs/heads/${b}`, 'HEAD');
+    const md = buildReport({ repos: [await scanRepo(dir, {})] });
+    assert.match(md, /git branch -d 'merged-one'/);
+    assert.ok(!md.includes("'-D'") && !md.includes("'--force'"), md);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

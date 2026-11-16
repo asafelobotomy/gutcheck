@@ -18,8 +18,10 @@ const ID_RE = /^[A-Za-z0-9][\w.:/-]{0,120}\*?$/; // a finding id, or a prefix en
 const readJSON = (f) => { try { const v = JSON.parse(fs.readFileSync(f, 'utf8')); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
 const writeJSON = (f, v) => { fs.writeFileSync(f + '.tmp', JSON.stringify(v, null, 2) + '\n'); fs.renameSync(f + '.tmp', f); };
 
-// The key ignores are stored under: owner/name for GitHub repos (stable across clones), else the folder name.
-const repoKey = (r) => (r.remote && r.remote.owner && !r.remote.unreachable ? `${r.remote.owner}/${r.remote.name}` : r.ref ? `${r.ref.owner}/${r.ref.name}` : path.basename(r.path || r.dir || ''));
+// The key ignores are stored under: owner/name for GitHub repos (stable across clones), else the folder
+// name. Still owner/name when GitHub cannot be reached (offline, rate limit): the scan keeps both from
+// the origin URL, and a key that changed would drop every ignore until the next good scan.
+const repoKey = (r) => (r.remote && r.remote.owner && r.remote.name ? `${r.remote.owner}/${r.remote.name}` : r.ref ? `${r.ref.owner}/${r.ref.name}` : path.basename(r.path || r.dir || ''));
 
 // Repo-local rules: .gutcheck.json { "ignore": { "<id>": "<reason>" } }. Read as data only: whoever
 // controls the repo writes them, so a wildcard needs 4 characters before its * and applyPolicy never

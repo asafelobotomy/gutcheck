@@ -295,3 +295,11 @@ test('commit-all refuses env files and keys, but not their templates or deletion
     assert.ok(p.ok, `${fine}: ${p.error}`);
   }
 });
+
+test('npm-install is a danger plan that says it runs the repo\'s code (audit 2026-11-16, F3)', async () => {
+  const p = await plan({ ...ghRepo(), deps: { installer: ['npm', 'install'] } }, { type: 'npm-install' }, { checkRepo: async () => {}, gitConfig: async () => ({ all: [], untrusted: [] }) });
+  assert.ok(p.ok, p.error);
+  assert.equal(p.risk, 'danger');
+  assert.equal(p.confirmName, ghRepo().name);
+  assert.equal(p.runsRepoCode, true);
+});
