@@ -72,7 +72,7 @@ test('B9: credential helpers, upload-pack, askpass and url rewrites from the rep
     const p = await planOn(d, { type: 'fetch' });
     assert.equal(p.ok, false, key);
     assert.ok(p.error.includes(`(${named})`), p.error);
-    assert.ok(!p.error.includes('example.com'), 'no URL in the message');
+    assert.doesNotMatch(p.error, /example\.com/, 'no URL in the message');
   }
   const d = sshRepo();
   // A plain rewrite runs no program, but it sends the step to a host the preview does not name
@@ -80,7 +80,8 @@ test('B9: credential helpers, upload-pack, askpass and url rewrites from the rep
   sh(d, 'config', 'url.https://example.com/.insteadOf', 'ssh://example.invalid/');
   const re = await planOn(d, { type: 'fetch' });
   assert.equal(re.ok, false);
-  assert.ok(re.error.includes('(url.<address>.insteadOf)') && !re.error.includes('example.com'), re.error);
+  assert.ok(re.error.includes('(url.<address>.insteadOf)'), re.error);
+  assert.doesNotMatch(re.error, /example\.com/, 'no URL in the message');
   sh(d, 'config', '--unset', 'url.https://example.com/.insteadOf');
   sh(d, 'config', '--file', GLOBAL, 'url.https://example.com/.insteadOf', 'ssh://example.invalid/');
   try { assert.ok((await planOn(d, { type: 'fetch' })).ok); } finally { sh(d, 'config', '--file', GLOBAL, '--unset', 'url.https://example.com/.insteadOf'); }
