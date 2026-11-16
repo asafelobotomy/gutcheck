@@ -44,6 +44,7 @@ function ignored(rel, rules) {
 
 async function listFiles(dir) {
   const r = await git(['ls-files', '-co', '--exclude-standard', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
+  if (!r.ok) throw new Error(`could not list this repo's files (${String(r.stderr || '').trim().split('\n').pop().slice(0, 160) || 'git ls-files failed'})`); // never "no files, so nothing found"
   return [...new Set(r.stdout.split('\0').filter(Boolean))].sort();
 }
 

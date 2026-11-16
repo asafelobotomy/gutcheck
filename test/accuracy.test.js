@@ -368,3 +368,13 @@ test('local-only: a pushed single-branch repo and a fresh repo raise no git-unpu
     try { assert.ok(!ids(await scanRepo(e, {})).includes('git-unpushed-branches')); } finally { rm(e); }
   } finally { rm(d); rm(bare); }
 });
+
+test('git: a detached HEAD is not offered as a merged branch to delete (audit 2026-11-16, K2)', async () => {
+  const d = repo();
+  try {
+    put(d, 'a', '1'); sh(d, 'add', '-A'); sh(d, 'commit', '-qm', 'one');
+    put(d, 'a', '2'); sh(d, 'commit', '-qam', 'two');
+    sh(d, 'branch', 'done', 'HEAD~1'); sh(d, 'checkout', '-q', 'HEAD~1');
+    assert.deepEqual((await scanRepo(d, {})).git.mergedBranches, ['done'], 'git branch --merged also lists "(HEAD detached at …)"');
+  } finally { rm(d); }
+});

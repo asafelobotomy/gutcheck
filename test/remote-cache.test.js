@@ -121,6 +121,22 @@ test('a clone whose config gained a key clone never writes is replaced, never fe
   assert.ok(!fs.existsSync(pwned));
 });
 
+test('a reftable clone (init.defaultRefFormat) is kept, not cloned again on every scan (audit 2026-11-16, K7)', async () => {
+  const o = origin();
+  const root = tmp('gutcheck-rc-root-');
+  const t = testRun();
+  const cache = createRemoteCache({ root, run: t.run, urlFor: () => o.bare });
+  process.env.GIT_DEFAULT_REF_FORMAT = 'reftable'; // the same as init.defaultRefFormat in the user's config
+  try {
+    const r = await cache.sync(listing());
+    assert.ok(r.ok, r.error);
+    assert.equal(execFileSync('git', ['config', '--local', '--get', 'extensions.refstorage'], { cwd: r.dir, encoding: 'utf8' }).trim(), 'reftable');
+    const before = t.calls.length;
+    assert.ok((await cache.sync(listing())).ok);
+    assert.ok(!t.calls.slice(before).some((c) => c.args.includes('clone')), 'the copy was thrown away');
+  } finally { delete process.env.GIT_DEFAULT_REF_FORMAT; }
+});
+
 test('an LFS filter from the user config never runs during clone or refresh', async () => {
   const home = tmp('gutcheck-rc-home-');
   const marker = path.join(home, 'marker');

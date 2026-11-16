@@ -61,6 +61,9 @@ const sha = async (p, size) => {
 
 async function trackedSet(dir) {
   const r = await git(['ls-files', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
+  // A failed or cut-short listing must not read as "nothing is tracked": committed files would look
+  // like clutter, and a scan of no files like a clean one (audit 2026-11-16, K3).
+  if (!r.ok) throw new Error(`could not list this repo's files (${String(r.stderr || '').trim().split('\n').pop().slice(0, 160) || 'git ls-files failed'})`);
   const files = new Set();
   const dirs = new Set();
   for (const f of r.stdout.split('\0')) {

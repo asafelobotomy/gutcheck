@@ -173,7 +173,7 @@ test('branch names are URL-encoded in API paths', async () => {
   const p = await actions.plan(r, { type: 'delete-remote', branch: 'fix#1' });
   assert.ok(p.ok, p.error);
   assert.match(args(p)[1], /git\/refs\/heads\/fix%231$/);
-  assert.match(p.undo, /ref=refs\/heads\/fix#1 /);
+  assert.match(p.undo, /'ref=refs\/heads\/fix#1' /, 'quoted: an unquoted # starts a comment when pasted');
 });
 
 test('pr-create on a remote repo: from the GitHub branch, with a title, no --fill; refuses merged and PR branches', async () => {
@@ -221,4 +221,11 @@ test('Fix all: merged branches and no-PR branches are questions; close offers de
   assert.deepEqual(order, ['pr-close', 'delete-remote']);
   const local = FixAll.plan({ ...r, source: undefined, ghBranches: undefined });
   assert.ok(!local.decisions.find((d) => d.id === 'pr-superseded-7').choices.some((x) => x.action && x.action.deleteBranch), 'not on a cloned repo');
+});
+
+test('pr-close with deleteBranch is danger: the PR\'s unmerged commits go with the branch (audit 2026-11-16, F4, F5)', async () => {
+  const p = await actions.plan(remoteResult(), { type: 'pr-close', number: 7, deleteBranch: true });
+  assert.equal(p.risk, 'danger');
+  assert.equal(p.confirmName, remoteResult().name);
+  assert.equal((await actions.plan(remoteResult(), { type: 'pr-close', number: 7 })).risk, 'caution');
 });

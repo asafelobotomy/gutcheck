@@ -75,3 +75,10 @@ test('selectUncloned: case-insensitive match with local clones, filters, empty r
   const all = selectUncloned(listing, [], normalizeRemoteSettings({ forks: true, archived: true }));
   assert.deepEqual(all.include.map((x) => x.name), ['app', 'fork', 'old', 'skipme', 'keep']);
 });
+
+test('a null repo node (an org\'s SAML or IP rule) is skipped, not a crash (audit 2026-11-16, K12)', async () => {
+  const { run } = stubRun({ 'viewer:': page('viewer', [node('me', 'a'), null, node('me', 'b')]) });
+  const r = await listRemote({ run, orgs: [] });
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(r.repos.map((x) => x.name), ['a', 'b']);
+});

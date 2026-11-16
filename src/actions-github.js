@@ -19,7 +19,9 @@ module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText,
     { kind: 'check', cmd: 'gh', args: ['api', `repos/${slug}/git/ref/heads/${enc(b.name)}`, '--jq', '.object.sha'], cwd: r.path, expect: b.oid, changed: 'The branch changed since the scan. Rescan and review it again.', display: `check ${b.name} is still at ${b.oid.slice(0, 7)}` },
     gh(['api', '-X', 'DELETE', `repos/${slug}/git/refs/heads/${enc(b.name)}`], r.path),
   ];
-  const restore = (slug, b) => `gh api -X POST repos/${slug}/git/refs -f ref=refs/heads/${b.name} -f sha=${b.oid}`;
+  // Shown as a command to paste: a branch name is GitHub's text, so it is quoted unless plain.
+  const arg = (a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`);
+  const restore = (slug, b) => `gh api -X POST repos/${slug}/git/refs -f ${arg(`ref=refs/heads/${b.name}`)} -f ${arg(`sha=${b.oid}`)}`;
 
   // delete-remote on a repo that is not cloned here (actions.js hands it over): one or more branches.
   function deleteOnGitHub(r, p) {
@@ -71,7 +73,8 @@ module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText,
       // Only on a repo that is not cloned here: on a clone gh would also delete the local branch.
       if (r.source !== 'remote') fail('Close the PR, then delete its branch on its own.');
       const b = (r.ghBranches || []).find((x) => x.name === pr.headRefName && x.oid === pr.headRefOid) || fail(`Its branch is not in this repository at the PR's commit (a fork, or pushed to since the scan), so GutCheck will not delete it.`);
-      return { ...close, title: `Close PR #${pr.number} and delete its branch ${b.name}`, steps: [...close.steps, ...deleteSteps(r, slug, b)], undo: `${close.undo}\n${restore(slug, b)}` };
+      // Danger, like delete-remote of an unmerged branch: the PR is closed unmerged, so its commits go with it.
+      return { ...close, risk: 'danger', title: `Close PR #${pr.number} and delete its branch ${b.name}`, steps: [...close.steps, ...deleteSteps(r, slug, b)], undo: `${close.undo}\n${restore(slug, b)}` };
     },
   },
 

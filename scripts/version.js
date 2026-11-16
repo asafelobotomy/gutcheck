@@ -44,7 +44,7 @@ function bump(root, kind, { today = new Date().toISOString().slice(0, 10) } = {}
   const unreleased = section(log, 'Unreleased');
   if (unreleased == null) throw new Error('CHANGELOG.md has no "## [Unreleased]" section');
   if (!unreleased) throw new Error('Nothing under "## [Unreleased]" in CHANGELOG.md: say what changed first');
-  let updated = log.replace(/^## \[Unreleased\][^\n]*\n[\s\S]*?(?=^## |^\[Unreleased\]:|(?![\s\S]))/m, `## [Unreleased]\n\n## [${version}] - ${today}\n\n${unreleased}\n\n`);
+  let updated = log.replace(/^## \[Unreleased\][^\n]*\n[\s\S]*?(?=^## |^\[Unreleased\]:|(?![\s\S]))/m, () => `## [Unreleased]\n\n## [${version}] - ${today}\n\n${unreleased}\n\n`); // a function: an entry may hold $& or $'
   // Compare links at the bottom: Unreleased now starts at the new tag.
   updated = updated.replace(/^\[Unreleased\]: (\S+)\/compare\/(\S+)\.\.\.HEAD$/m, (all, base, from) => `[Unreleased]: ${base}/compare/v${version}...HEAD\n[${version}]: ${base}/compare/${from}...v${version}`);
   // package.json and the lockfile keep their formatting: only the version strings change.

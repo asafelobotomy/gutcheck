@@ -20,6 +20,14 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 - The rescue copy saves uncommitted changes made after the last scan. It took "nothing uncommitted" from the scan, so edits made since were left out of the copy with no warning; it now asks git when the plan is made.
 - Ignored findings stay ignored when GitHub cannot be reached (offline, rate limit, `gh` logged out). The repo's key fell back to its folder name, so its ignores stopped applying, the findings came back and the score dropped until the next good scan.
+- A detached HEAD is no longer listed as a merged branch ("1 local branch already merged: (HEAD detached at …)") with a delete fix.
+- When git cannot list a repo's files (a damaged index, a timeout on a huge repo), the clutter, code-quality and tests scans report the repo as failed. They used to carry on with an empty list, so committed files such as `notes.bak` were offered as removable clutter and the quality scan reported no secrets.
+- A folder with one unreadable or vanishing entry keeps its real size in the clutter list. `du` exits with an error for it but still prints the total; GutCheck threw that away and counted at most 20,000 files itself.
+- A cached copy of an uncloned repo is no longer thrown away and cloned again on every scan when your git uses the reftable format (`init.defaultRefFormat`).
+- The large-blob check in a deep scan no longer vanishes on repos with more than about 320,000 objects.
+- The list of uncloned repos no longer fails when GitHub leaves one out (an organisation's SAML or IP rule).
+- Closing a pull request and deleting its branch (on a repo not cloned here) is rated danger, like deleting an unmerged branch on its own, and the undo command quotes the branch name.
+- `npm run bump` moves a changelog entry that contains `$&`, `$'` or `$$` as written.
 - Clutter sizes no longer promise more space than a clean-up frees on a disk that compresses files. On btrfs (`compress=`) or bcachefs, `du` gives sizes before compression, so 60 GB of `target/` folders freed 24 GB. GutCheck now says those sizes are before compression (in the app, the plan, the MCP and CLI result's `compressed`), and a clean-up ends with the free space it actually gained, measured on the disk.
 
 ## [0.28.1] - 2026-11-15

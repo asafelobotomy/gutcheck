@@ -105,7 +105,8 @@ async function collectGit(dir) {
 
 async function mergedInto(dir, base, g) {
   if (!base || !g.branches.some((b) => b.name === base)) return [];
-  const r = await git(['branch', '--merged', base, '--format=%(refname:short)'], { cwd: dir });
+  // for-each-ref, not `git branch --merged`: that also prints "(HEAD detached at …)" as if it were a branch.
+  const r = await git(['for-each-ref', `--merged=${base}`, '--format=%(refname:lstrip=2)', 'refs/heads'], { cwd: dir });
   return r.stdout
     .split('\n')
     .filter(Boolean)

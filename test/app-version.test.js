@@ -65,6 +65,7 @@ test('plans made for an agent last 30 minutes; the app and CLI keep 5', async ()
   assert.equal(AGENT_PLAN_TTL, 30 * 60 * 1000);
   const dir = tmp();
   try {
+    require('node:child_process').execFileSync('git', ['init', '-q', dir]); // clutter needs a repo: a failed file listing is an error
     put(path.join(dir, 'x.tmp'));
     const known = new Map([[dir, { path: dir, name: 'r', findings: [] }]]);
     const mk = (planTtl) => createService({ known, settings: () => ({ readOnly: false }), audit() {}, trash: async () => {}, planTtl });

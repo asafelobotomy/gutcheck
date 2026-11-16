@@ -92,7 +92,7 @@ async function collectHygiene(dir, { names, rawOrigin, deep, branch }) {
   if (deep && !h.noCommits && h.storage.packKiB >= HISTORY_ANALYSE_KIB) h.history = await analyzeHistory(dir);
   if (deep && !h.noCommits) {
     // Every object in the object store, including history: blobs at or over GitHub's 50 MiB warning size.
-    const all = await git(['cat-file', '--batch-all-objects', '--batch-check=%(objecttype) %(objectsize) %(objectname)'], { cwd: dir, timeout: HISTORY_TIMEOUT_MS });
+    const all = await git(['cat-file', '--batch-all-objects', '--batch-check=%(objecttype) %(objectsize) %(objectname)'], { cwd: dir, timeout: HISTORY_TIMEOUT_MS, maxBuffer: 512 * 1024 * 1024 }); // about 50 bytes an object: the default 16 MB stops at 320k
     if (all.ok) h.historyBlobs = lines(all.stdout).map((l) => l.split(' ')).filter(([t, s]) => t === 'blob' && Number(s) >= HISTORY_BLOB_MIN).map(([, s, id]) => ({ id, size: Number(s) })).sort((a, b) => b.size - a.size).slice(0, 10);
   }
   return h;

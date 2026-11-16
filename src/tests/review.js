@@ -114,6 +114,7 @@ const NOT_A_MODULE = /(^|\/)(main|index|__init__|mod|lib|setup|conftest|build)\.
 
 async function listFiles(dir) {
   const r = await git(['ls-files', '-co', '--exclude-standard', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
+  if (!r.ok) throw new Error(`could not list this repo's files (${String(r.stderr || '').trim().split('\n').pop().slice(0, 160) || 'git ls-files failed'})`); // never "no files, so nothing found"
   return r.stdout.split('\0').filter(Boolean).filter((rel) => !rel.split('/').slice(0, -1).some((s) => R.SKIP_SEGMENTS.has(s)) && !R.SKIP_FILE_RE.test(rel));
 }
 
