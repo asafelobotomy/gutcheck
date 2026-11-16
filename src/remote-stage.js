@@ -29,6 +29,8 @@ async function scanOne(l, ctx) {
   const base = { ghRes: ctx.ghRes, policy: ctx.policy };
   if (l.diskKB > settings.maxSizeMB * 1024) return { res: await scanRemote(l, { ...base, emptyDir: await ctx.emptyDir(), reason: 'too-large' }), fetched: false };
   cache.evictFor(l.diskKB * 1024, settings.cacheMaxGB * GB, ctx.keep);
+  // Still no room (everything left is in this scan): a new copy would push the cache past its limit.
+  if (cache.has && !cache.has(l) && cache.sizeBytes() + l.diskKB * 1024 > settings.cacheMaxGB * GB) return { res: await scanRemote(l, { ...base, emptyDir: await ctx.emptyDir(), reason: 'cache-full' }), fetched: false };
   const s = await cache.sync(l);
   if (!s.ok) return { res: await scanRemote(l, { ...base, emptyDir: await ctx.emptyDir(), reason: `clone-failed: ${s.error}` }), fetched: false };
   return { res: await scanRemote(l, { ...base, cacheDir: s.dir }), fetched: !!s.fetched };

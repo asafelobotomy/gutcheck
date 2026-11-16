@@ -30,7 +30,9 @@ function inventory(home, repos = []) {
     const dir = (v[0] && v[0].installPath) || '';
     const manifest = readJson(path.join(dir, '.claude-plugin', 'plugin.json')) || {};
     const mcp = { ...(manifest.mcpServers && typeof manifest.mcpServers === 'object' ? manifest.mcpServers : {}), ...((readJson(path.join(dir, '.mcp.json')) || {}).mcpServers || {}) };
-    return { id, name: id.split('@')[0], enabled: ep[id] === true, servers: Object.keys(mcp), skills: dirs(path.join(dir, 'skills')), lsp: !!manifest.lspServers };
+    return { id, name: id.split('@')[0], enabled: ep[id] === true, servers: Object.keys(mcp), skills: dirs(path.join(dir, 'skills')), lsp: !!manifest.lspServers,
+      // Hooks and output styles work without ever being called, so their use cannot be counted.
+      passive: !!manifest.hooks || !!manifest.outputStyles || ['hooks', 'output-styles'].some((d) => { try { return fs.readdirSync(path.join(dir, d)).length > 0; } catch { return false; } }) };
   });
   const claude = readJson(path.join(home, '.claude.json')) || {};
   const servers = Object.keys(claude.mcpServers || {}).map((name) => ({ name, scope: 'user', cwd: home }));
@@ -53,7 +55,7 @@ const ruleMatches = (inner, cmd) => (/(:\*|\*)$/.test(inner) ? cmd.startsWith(in
 async function usage(home, repos = [], { now = Date.now(), days = WINDOW_DAYS, permRules = {}, onProgress } = {}) {
   const root = path.join(home, '.claude', 'projects');
   const keyToRepo = new Map(repos.map((r) => [projectKey(r.path), r]));
-  const out = { sessions: 0, tools: new Map(), servers: new Map(), skills: new Map(), commands: new Map(), perRepo: new Map(), ruleHits: new Map() };
+  const out = { sessions: 0, tools: new Map(), servers: new Map(), skills: new Map(), commands: new Map(), agents: new Map(), perRepo: new Map(), ruleHits: new Map() };
   const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
   const files = [];
   for (const key of dirs(root)) {
@@ -81,6 +83,7 @@ async function usage(home, repos = [], { now = Date.now(), days = WINDOW_DAYS, p
         const mm = /^mcp__(.+?)__/.exec(b.name);
         if (mm) bump(out.servers, mm[1]);
         if (b.name === 'Skill' && b.input && typeof b.input.skill === 'string') bump(out.skills, b.input.skill);
+        if ((b.name === 'Agent' || b.name === 'Task') && b.input && typeof b.input.subagent_type === 'string') bump(out.agents, b.input.subagent_type);
         if (repo) bump(out.perRepo, repo.path);
         if (b.name === 'Bash' && rules.length && b.input && typeof b.input.command === 'string') for (const x of rules) if (ruleMatches(x.inner, b.input.command)) bump(out.ruleHits, `${repo.path}|${classifyRule(x.r).hash}`);
       }
@@ -131,8 +134,10 @@ function verdicts(inv, used, live = null, { home = os.homedir() } = {}) {
   const out = [];
   const add = (id, severity, title, detail, fix) => out.push({ id, category: 'AI agents', severity, title, detail, fix });
   const n = (m, k) => (m && m.get(k)) || 0;
-  for (const p of inv.plugins.filter((x) => x.enabled && !x.lsp)) {
-    const calls = p.servers.reduce((t, s) => t + n(used.servers, tooled(`plugin:${p.name}:${s}`)) + n(used.servers, tooled(s)), 0) + p.skills.reduce((t, s) => t + n(used.skills, `${p.name}:${s}`) + n(used.skills, s), 0) + n(used.commands, p.name);
+  // A plugin's commands, skills and subagents are named <plugin>:<name> when called (audit 2026-11-16, K5).
+  const prefixed = (m, p) => [...(m || [])].reduce((t, [k, c]) => t + (k.startsWith(`${p}:`) ? c : 0), 0);
+  for (const p of inv.plugins.filter((x) => x.enabled && !x.lsp && !x.passive)) {
+    const calls = prefixed(used.commands, p.name) + prefixed(used.skills, p.name) + prefixed(used.agents, p.name) + p.servers.reduce((t, s) => t + n(used.servers, tooled(`plugin:${p.name}:${s}`)) + n(used.servers, tooled(s)), 0) + p.skills.reduce((t, s) => t + n(used.skills, `${p.name}:${s}`) + n(used.skills, s), 0) + n(used.commands, p.name);
     if (!calls) add(`usage-plugin-${p.name}`, 'info', `Plugin ${p.name} was not used in ${WINDOW_DAYS} days`, `${used.sessions} sessions checked: none called its ${[p.servers.length ? `${p.servers.length} MCP server${p.servers.length === 1 ? '' : 's'}` : '', p.skills.length ? `${p.skills.length} skill${p.skills.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' or ') || 'tools'}. Each enabled plugin loads into every session.`, { type: 'plugin-disable', label: 'Turn off…', plugin: p.id });
   }
   for (const s of inv.skills) {

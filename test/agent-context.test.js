@@ -200,3 +200,10 @@ test('split-instructions keeps imports of the other agents\' files, and offers g
     assert.match(fs.readFileSync(path.join(d, 'CLAUDE.md'), 'utf8'), /^@AGENTS\.md$/m, 'still an import');
   } finally { rm(d); }
 });
+
+test('a plugin used through its commands, skills or subagents is not "unused"; one that ships hooks is never judged (audit 2026-11-16, K5)', () => {
+  const plugin = (name, o = {}) => ({ id: `${name}@m`, name, enabled: true, servers: [], skills: [], lsp: false, passive: false, ...o });
+  const inv = { plugins: [plugin('demo'), plugin('agents-only'), plugin('hooky', { passive: true }), plugin('idle', { skills: ['x'] })], servers: [], skills: [] };
+  const used = { sessions: 9, tools: new Map(), servers: new Map(), skills: new Map(), commands: new Map([['demo:run', 2]]), agents: new Map([['agents-only:reviewer', 1]]), perRepo: new Map(), ruleHits: new Map() };
+  assert.deepEqual(U.verdicts(inv, used, null, { home: '/h' }).map((v) => v.id), ['usage-plugin-idle']);
+});

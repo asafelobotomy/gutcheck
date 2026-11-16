@@ -172,7 +172,9 @@ function createRemoteCache({ root, run = execRun, urlFor = defaultUrlFor, now = 
 
   const clear = () => { for (const x of entries()) drop(x); };
 
-  return { sync, sizeBytes, evictFor, cleanup, clear, root };
+  const has = (ref) => entries().some((x) => x.key.toLowerCase() === keyOf(ref).toLowerCase());
+
+  return { sync, sizeBytes, evictFor, cleanup, clear, has, root };
 }
 
 module.exports = { createRemoteCache, defaultUrlFor, CLONE_CONFIG, cleanError };

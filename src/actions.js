@@ -13,7 +13,7 @@ const { detectStacks } = require('./tests/stack');
 const { IGNORE_OK } = require('./clutter');
 const { looksSecret } = require('./secret-patterns');
 const { planTestRun } = require('./tests/runs');
-const { validBranch, validRemote, inspect } = require('./git-safety');
+const { validBranch, validRemote, inspect, atCommit, unfinishedOp } = require('./git-safety');
 const { API_ACTIONS, REMOTE_FILE_FIX } = require('./renderer/fix-all');
 const { compressionOf, COMPRESSED_NOTE } = require('./disk-space');
 
@@ -182,8 +182,8 @@ const ACTIONS = {
       const name = safeName(b.name);
       const force = !!p.force;
       if (!force && !(r.git.mergedBranches || []).includes(name)) fail(`"${name}" is not merged into the default branch. Use force delete if you are sure.`);
-      const sha = (await readGit(ctx, ['rev-parse', '--verify', '--quiet', '--short', `refs/heads/${name}`], r.path)).stdout.trim();
-      return { risk: force ? 'danger' : 'caution', title: `${force ? 'FORCE ' : ''}delete local branch ${name}`, uses: ['ref-update'], steps: [git(['branch', force ? '-D' : '-d', '--', name], r.path)], undo: sha ? `git branch ${name} ${sha}` : undefined };
+      const sha = (await readGit(ctx, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`], r.path)).stdout.trim();
+      return { risk: force ? 'danger' : 'caution', title: `${force ? 'FORCE ' : ''}delete local branch ${name}`, uses: ['ref-update'], steps: [...(sha ? [atCommit(r.path, `refs/heads/${name}`, sha)] : []), git(['branch', force ? '-D' : '-d', '--', name], r.path)], undo: sha ? `git branch ${name} ${sha.slice(0, 7)}` : undefined };
     },
   },
 
@@ -207,7 +207,8 @@ const ACTIONS = {
       const pr = (r.prs || []).find((x) => x.headRefName === name);
       if (pr) fail(`PR #${pr.number} is open from this branch. Close or merge it first.`);
       // An explicit delete refspec, and nothing else: no mirror, tags or submodules from config.
-      const args = ['push', '--no-follow-tags', '--recurse-submodules=no', '--', 'origin', `:refs/heads/${name}`];
+      // The lease: only if origin's branch is still where this clone last saw it (a delete, never a forced update).
+      const args = ['push', '--no-follow-tags', '--recurse-submodules=no', `--force-with-lease=refs/heads/${name}`, '--', 'origin', `:refs/heads/${name}`];
       return { risk: 'danger', title: `Delete remote branch origin/${name}`, uses: ['push'], remotes: ['origin'], pushes: true, steps: [git(args, r.path, undefined, ['-c', 'remote.origin.mirror=false'])], undo: `git push origin <sha>:refs/heads/${rb.name}   (find the sha with git reflog)` };
     },
   },
@@ -322,7 +323,6 @@ const ACTIONS = {
   },
 };
 
-
 // GitHub-side actions live in actions-github.js, built with this file's step builders.
 const GH = require('./actions-github')({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh: (ctx, args, cwd) => ctx.run('gh', args, { cwd }) });
 Object.assign(ACTIONS, GH.actions);
@@ -351,7 +351,7 @@ async function plan(repo, action, ctx = {}) {
     const remote = repo.source === 'remote';
     if (remote && !API_ACTIONS.has(action.type)) fail(REMOTE_FILE_FIX);
     const out = await ACTIONS[action.type].plan(repo, action, ctx);
-    if (remote) onlyApi(out);
+    if (remote) onlyApi(out); else if (unfinishedOp(repo, out)) fail(unfinishedOp(repo, out));
     // The repo's own network programs and non-network remotes refuse the plan; its hooks and
     // drivers make it caution (B9, B10).
     const runsGit = !remote && out.steps.some((s) => s.cmd === 'git');

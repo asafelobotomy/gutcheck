@@ -249,7 +249,8 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
   }
 
   const forgetPlans = () => plans.clear();
-  const hasPlans = () => [...plans.values()].some((v) => v.expires >= Date.now()); // a review may be open
+  // A review may be open, or a plan may be running right now (its token is already used up).
+  const hasPlans = () => busy.size > 0 || [...plans.values()].some((v) => v.expires >= Date.now());
 
   return { planActions, applyActions, forgetPlans, hasPlans, clutterScan, qualityScan, testsScan, secretsScan, secrets, qualitySettings, setQualitySettings, reportText, copyReport, wsAdvice, recordScan, trend };
 }

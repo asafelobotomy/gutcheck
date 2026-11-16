@@ -24,6 +24,10 @@ const QUERY = `query($o:String!,$n:String!,$d:String!){ repository(owner:$o, nam
   } } }`;
 
 const isMerged = (b) => b.unique === 0 || b.mergedPr != null;
+// Branches that are kept on purpose: level with the default branch, or without a pull request, is
+// their normal state, so they are never offered for deletion or "open a PR" (audit 2026-11-16, K9).
+const LONG_LIVED = /^(main|master|trunk|develop|development|dev|staging|stage|production|prod|preview|next|stable|beta|alpha|canary|nightly|gh-pages|pages|docs|website)$|^(release|releases|hotfix|support|maint|maintenance|stable|lts|version|backport)[-/_.]?v?\d|^(release|releases|support|maint|maintenance|stable|lts)\/|^v?\d+(\.(\d+|x))*(\.x|-stable|-maint|-lts)?$/i;
+const longLived = (name) => LONG_LIVED.test(name);
 
 // GraphQL payload -> [{ name, oid, date, unique, mergedPr }], without the default branch or names
 // that could be read as an option.
@@ -62,7 +66,7 @@ function branchFindings(branches, gh) {
   const can = PUSH.has(gh.remote.viewerPermission);
   const open = new Set((gh.prs || []).map((p) => p.headRefName));
   const def = gh.remote.defaultBranch || 'the default branch';
-  const free = branches.filter((b) => !open.has(b.name));
+  const free = branches.filter((b) => !open.has(b.name) && !longLived(b.name));
   const out = [];
   const merged = free.filter(isMerged);
   if (merged.length) {
@@ -75,4 +79,4 @@ function branchFindings(branches, gh) {
   return out;
 }
 
-module.exports = { QUERY, parseBranches, isMerged, fetchBranches, fetchRemoteData, branchFindings };
+module.exports = { QUERY, parseBranches, isMerged, longLived, fetchBranches, fetchRemoteData, branchFindings };

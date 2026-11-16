@@ -256,4 +256,16 @@ async function inspect(ctx, dir, out, refuse) {
   return { warnings, note: [note, fetches].filter(Boolean).join(' ') || null, runsRepoCode: warnings.length > 0, lazyFetch: !!promisors };
 }
 
-module.exports = { validBranch, validRemote, networkPrograms, networkSettings, inspect, PLAIN_URL, USES, NETWORK_KEYS, CODE_KEYS };
+// A check step: the ref must still be at the commit the preview named (audit 2026-11-16, F6).
+const atCommit = (dir, ref, sha) => ({ kind: 'check', safeGit: true, cmd: 'git', args: ['rev-parse', '--verify', '--quiet', ref], cwd: dir, expect: sha, changed: 'The branch moved since the preview. Rescan and review it again.', display: `check ${ref.replace(/^refs\/heads\//, '')} is still at ${sha.slice(0, 7)}` });
+
+// Steps that commit, merge or check out files must not run in the middle of a merge, rebase,
+// cherry-pick or revert: a commit would conclude it, conflict markers and all (F7).
+const MID_OP = new Set(['commit', 'merge', 'pull', 'switch']);
+function unfinishedOp(repo, out) {
+  const ops = ((repo.gitState && repo.gitState.ops) || []).map((o) => o && o.kind).filter((k) => k && k !== 'bisect'); // a bisect has nothing to conclude
+  if (!ops.length || !(out.uses || []).some((u) => MID_OP.has(u))) return null;
+  return `This repo has an unfinished ${ops.join(' and ')}. Finish or abort it first.`;
+}
+
+module.exports = { atCommit, unfinishedOp, validBranch, validRemote, networkPrograms, networkSettings, inspect, PLAIN_URL, USES, NETWORK_KEYS, CODE_KEYS };

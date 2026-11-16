@@ -137,7 +137,7 @@ test('remote branch deletion is guarded', async () => {
   const ok = await plan(repo, { type: 'delete-remote', branch: 'old' }, ctx);
   assert.equal(ok.risk, 'danger');
   assert.equal(ok.confirmName, 'demo');
-  assert.deepEqual(ok.steps[0].args.slice(-6), ['push', '--no-follow-tags', '--recurse-submodules=no', '--', 'origin', ':refs/heads/old']);
+  assert.deepEqual(ok.steps[0].args.slice(-7), ['push', '--no-follow-tags', '--recurse-submodules=no', '--force-with-lease=refs/heads/old', '--', 'origin', ':refs/heads/old']);
   assert.equal((await plan(repo, { type: 'delete-remote', branch: 'main' }, ctx)).ok, false); // default
   assert.equal((await plan(repo, { type: 'delete-remote', branch: 'topic' }, ctx)).ok, false); // has open PR
   assert.equal((await plan(repo, { type: 'delete-remote', branch: 'nope' }, ctx)).ok, false);

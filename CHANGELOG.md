@@ -28,6 +28,14 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 - The list of uncloned repos no longer fails when GitHub leaves one out (an organisation's SAML or IP rule).
 - Closing a pull request and deleting its branch (on a repo not cloned here) is rated danger, like deleting an unmerged branch on its own, and the undo command quotes the branch name.
 - `npm run bump` moves a changelog entry that contains `$&`, `$'` or `$$` as written.
+- A plugin you use through its own commands, skills or subagents (`/name:command`, `name:agent`) is no longer reported as unused with a fix that turns it off. Plugins that ship hooks or output styles are never judged, since those work without being called.
+- Long-lived branches on GitHub (`develop`, `staging`, `gh-pages`, `release-1.x`, `release/2.4`, `1.x` and the like) are no longer listed as "merged branch still on GitHub" or "has work and no pull request".
+- Commits GitHub made under your `users.noreply.github.com` address (squash merges) no longer count as "commits by you used another email".
+- The cache limit for copies of uncloned repos is now a limit. When everything in the cache belongs to the current scan and there is no room for another copy, that repo gets GitHub checks only and a note saying so ("No room left to check its files").
+- Deleting a remote branch only goes ahead if the branch on GitHub is still where your clone last saw it, and deleting a local branch is held if it moved after the preview.
+- Commit, merge, pull and switch fixes are refused while the repo has an unfinished merge, rebase, cherry-pick or revert. A commit would have concluded it, conflict markers included.
+- A scheduled scan no longer starts while the last fix of a batch is still running.
+- `gutcheck fix <repo> all` and the MCP's Fix all stop offering a repo's later fixes once one is refused (a refused pull is no longer followed by a commit and push).
 - Clutter sizes no longer promise more space than a clean-up frees on a disk that compresses files. On btrfs (`compress=`) or bcachefs, `du` gives sizes before compression, so 60 GB of `target/` folders freed 24 GB. GutCheck now says those sizes are before compression (in the app, the plan, the MCP and CLI result's `compressed`), and a clean-up ends with the free space it actually gained, measured on the disk.
 
 ## [0.28.1] - 2026-11-15

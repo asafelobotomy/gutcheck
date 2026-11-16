@@ -23,6 +23,7 @@ const FILE_GATED_IDS = Object.freeze(['ci-none', 'no-pr-template', 'no-issue-tem
 const isWorkingCopy = (id) => WORKING.has(id) || /^local-only/.test(id);
 
 const REASONS = {
+  'cache-full': (detail) => ({ id: 'uncloned-cache-full', title: 'No room left to check its files', detail: `Only GitHub settings, CI, pull requests and alerts were checked. ${detail}` }),
   'too-large': (detail) => ({ id: 'uncloned-too-large', title: 'Too large to check its files', detail: `Only GitHub settings, CI, pull requests and alerts were checked. ${detail}` }),
   'clone-failed': (detail) => ({ id: 'uncloned-clone-failed', title: 'Could not download a copy to check its files', detail: `Only GitHub settings, CI, pull requests and alerts were checked. ${detail}` }),
 };
@@ -72,7 +73,7 @@ async function scanRemote(listing, { cacheDir = null, emptyDir = null, ghRes = n
     omit = (id) => isWorkingCopy(id) || fileOnly.has(id) || FILE_GATED_IDS.includes(id);
     const [kind, ...rest] = String(reason || 'clone-failed').split(':');
     const make = REASONS[kind] || REASONS['clone-failed'];
-    const detail = kind === 'too-large' ? `It is ${Math.round((listing.diskKB || 0) / 1024)} MB on GitHub, over the size limit in Settings.` : rest.join(':').trim();
+    const detail = kind === 'cache-full' ? 'GutCheck\'s copies of your uncloned repos have reached the cache limit in Settings. Raise it, or leave some repos out.' : kind === 'too-large' ? `It is ${Math.round((listing.diskKB || 0) / 1024)} MB on GitHub, over the size limit in Settings.` : rest.join(':').trim();
     extra.push({ category: 'Repo', severity: 'info', ...make(detail) });
   }
   // Branches come from GitHub (ghRes.branches, remote-branches.js): the copy has no refs of its own.

@@ -290,6 +290,14 @@ function createEngine(opts = {}) {
       resolved.push({ dir: x.repo.path, action });
     }
     const plans = resolved.length ? await service.planActions(resolved.map(({ dir, action }) => ({ dir, action }))) : [];
+    // Fix all runs in order: once a step is refused (not just "nothing to do"), the later steps for that
+    // repo are not offered, since a commit or push after a refused pull is not what was planned (F9).
+    const stopped = new Set();
+    plans.forEach((p, k) => {
+      if (!resolved[k].all) return;
+      if (stopped.has(resolved[k].dir)) plans[k] = { ok: false, repoName: p.repoName, error: `Not planned: an earlier fix for ${p.repoName || 'this repo'} was refused. Sort that out, then plan again.` };
+      else if (!p.ok && !p.nothing) stopped.add(resolved[k].dir);
+    });
     const pub = (p) => (p.ok ? { ok: true, token: p.token, repo: p.repoName, title: p.title, risk: p.risk, commands: p.display.map((d) => d.text), warnings: p.warnings, undo: p.undo, note: p.note, confirmName: p.confirmName, ...(p.runsRepoCode ? { runsRepoCode: true } : {}) } : p);
     // Fix all never runs the repo's own hooks or drivers on its own: those plans come back in `held`,
     // without a token, so a caller cannot apply them from this answer. Planning the one action

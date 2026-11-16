@@ -229,3 +229,14 @@ test('pr-close with deleteBranch is danger: the PR\'s unmerged commits go with t
   assert.equal(p.confirmName, remoteResult().name);
   assert.equal((await actions.plan(remoteResult(), { type: 'pr-close', number: 7 })).risk, 'caution');
 });
+
+test('long-lived branches are never offered for deletion or a pull request (audit 2026-11-16, K9)', () => {
+  for (const n of ['develop', 'staging', 'gh-pages', 'release-1.x', 'release/2.4', 'releases/2026.1', '1.x', 'v2', '3.2-stable', 'hotfix/1.2.1', 'stable']) assert.equal(rb.longLived(n), true, n);
+  for (const n of ['feat', 'fix-login', 'release-notes-typo', 'dependabot/npm/x-1.2.3', 'docs-update', 'v2-rewrite-idea']) assert.equal(rb.longLived(n), false, n);
+  const b = (name, unique) => ({ name, oid: 'e'.repeat(40), date: '2026-11-01T00:00:00Z', unique, mergedPr: null });
+  const gh = { remote: { owner: 'octo', name: 'app', defaultBranch: 'main', viewerPermission: 'ADMIN' }, prs: [] };
+  const f = rb.branchFindings([b('develop', 0), b('release-1.x', 0), b('gh-pages', 40), b('old-feature', 0), b('idea', 3)], gh);
+  assert.deepEqual(f.map((x) => x.id), ['gh-merged-branches', 'gh-branch-no-pr-idea']);
+  assert.match(f[0].title, /^1 merged branch /);
+  assert.ok(!JSON.stringify(f).includes('develop') && !JSON.stringify(f).includes('gh-pages'));
+});

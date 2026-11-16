@@ -248,3 +248,13 @@ test('report steps for the new findings', () => {
   assert.match(out, /git maintenance register/); assert.match(out, /includeIf/); assert.match(out, /useConfigOnly/);
   assert.match(out, /git-prompt\.sh/);
 });
+
+test('identity: commits GitHub made under your noreply address are not "another email" (audit 2026-11-16, K10)', async () => {
+  const d = repo({ 'a.txt': '1\n' });
+  sh(d, 'config', 'user.name', 'Ann'); sh(d, 'config', 'user.email', 'ann@home.example');
+  for (const e of ['12345+ann@users.noreply.github.com', 'ann@users.noreply.github.com']) { put(d, 'a.txt', `${e}\n`); sh(d, '-c', `user.email=${e}`, 'commit', '-qam', 'squash merge'); }
+  const id = (await state(d)).identity;
+  assert.equal(id.mine, 2);
+  assert.deepEqual(id.other, []);
+  assert.deepEqual(checkGitState(snap({ gitState: GS({ identity: id }) })), []);
+});
