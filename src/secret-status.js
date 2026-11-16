@@ -18,9 +18,9 @@ function createRecord(file, io = fs) {
   }
   function save(rec) {
     io.mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = file + '.tmp';
-    io.writeFileSync(tmp, JSON.stringify(rec, null, 2), { mode: 0o600 });
-    io.chmodSync(tmp, 0o600); // an old temp file keeps its mode; rename keeps the temp's
+    // Its own new temp file: the app and the CLI can save at once, and a planted link is never followed.
+    const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 10)}.tmp`;
+    io.writeFileSync(tmp, JSON.stringify(rec, null, 2), { mode: 0o600, flag: 'wx' });
     io.renameSync(tmp, file);
     try { io.chmodSync(file, 0o600); } catch {}
   }

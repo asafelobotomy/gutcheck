@@ -248,7 +248,9 @@ test('record file is 0600, atomic and survives a corrupt file', () => {
     const r = store.update((x) => { x.entries['/r/.env'] = { sha256: 'a'.repeat(64) }; });
     assert.ok(r.entries['/r/.env']);
     assert.equal(fs.statSync(file).mode & 0o777, 0o600);
-    assert.ok(!fs.existsSync(file + '.tmp'));
+    // A leftover or planted fixed-name temp file is never written through, and no temp file is left behind.
+    assert.equal(fs.readFileSync(file + '.tmp', 'utf8'), 'old');
+    assert.deepEqual(fs.readdirSync(path.dirname(file)).sort(), ['secret-backups.json', 'secret-backups.json.tmp']);
     assert.equal(store.load().entries['/r/.env'].sha256, 'a'.repeat(64));
     fs.writeFileSync(file, 'nope');
     assert.deepEqual(store.load(), emptyRec());

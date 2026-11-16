@@ -20,7 +20,10 @@ function scrub(text, ...sources) {
   const short = new Set();
   for (const src of sources) {
     const s = Buffer.isBuffer(src) ? src.toString('utf8') : String(src == null ? '' : src);
-    for (let i = 0; i + 8 <= s.length; i++) grams.add(s.slice(i, i + 8));
+    // Also as a CLI might echo it back: JSON-escaped (with \uXXXX for non-ASCII) and percent-encoded.
+    const json = JSON.stringify(s).slice(1, -1);
+    let pct = ''; try { pct = encodeURIComponent(s); } catch { /* a lone surrogate */ }
+    for (const v of [s, json, json.replace(/[\u0080-\uffff]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')), pct]) for (let i = 0; i + 8 <= v.length; i++) grams.add(v.slice(i, i + 8));
     for (const l of s.split(/\r?\n/)) { const t = l.trim(); if (t && t.length < 8) short.add(t); }
   }
   const leaks = (line) => {

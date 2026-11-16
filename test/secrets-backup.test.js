@@ -153,7 +153,7 @@ test('Bitwarden verify syncs first; a failed sync changes nothing', async () => 
   assert.ok((await ctl.apply(p.token, { via: 'app' })).ok);
   seq.length = 0;
   assert.deepEqual(await ctl.verify({ via: 'app', ...ws }), { ok: true, checked: 1, missing: 1, mismatch: 0 });
-  assert.deepEqual(seq, ['status', 'sync', 'list items']);
+  assert.deepEqual(seq, ['status', 'sync', 'list items --search gutcheck:']);
   const before = record();
   syncOk = false;
   const r = await ctl.verify({ via: 'app', ...ws });

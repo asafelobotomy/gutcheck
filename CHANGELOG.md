@@ -24,6 +24,13 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 - Over MCP, an AI agent can only scan the workspace folder you chose (in the app or with `gutcheck scan <folder>`) or a folder inside it. It used to accept any folder, `/` and your home folder included, and remembered it as the CLI's workspace. An agent's scan is no longer remembered, and with no workspace set the agent is told to ask you to choose one. **If you use GutCheck only through an agent, run `gutcheck scan <folder>` once, or pick the folder in the app.**
 - MCP results write your home folder as `~` (paths, and the report's text), so your user name no longer goes to the model provider, and the email addresses in the git identity findings are masked (`a***@example.com`). Agents can pass `~` paths back.
 - Plan previews escape control and bidi characters in clutter paths, `gutcheck new --notify` escapes markup in the notification text, and agent config files are written through a new, unguessable temp file.
+- Secrets backup, hardening:
+  - A committed link such as `.env -> .git/config` no longer makes git's own config (which can hold a token) a file to back up, and at most 500 secret-looking files per repo are read and hashed on a scan (the repo says so when there are more).
+  - Error text from a password manager is also cleared of the file's contents when the tool echoes them JSON-escaped or percent-encoded.
+  - An item ID a tool returns is refused, and nothing is recorded, when it is longer than 128 characters or is part of the file's own contents.
+  - A file whose name starts with `-` is attached to KeePassXC with the dashes replaced by `_`, so it cannot be read as an option.
+  - Verifying Bitwarden backups asks only for GutCheck's own items (`bw list items --search gutcheck:`), not every item in the vault.
+  - The backup record is written through its own new temp file, so the app and the CLI can save at the same moment.
 - GitHub steps (`gh`) no longer run inside the repo's folder, where `gh` runs plain git and so the repo's hooks and config; they run in your home folder and name the repo themselves. Two things change as a result: merging a PR with "delete its branch" no longer deletes your local copy of the branch (the next scan lists it as merged), and Open a PR takes its title from the branch's last commit instead of `gh --fill`, with an empty description.
 - Planning a test run probes for tools in a new private folder, not the shared temp folder, where another user of the machine could plant a config file that runs code.
 - Planning to split an instruction file or prune permission rules refuses a file that is a link leading out of the repo, instead of showing its contents in the preview.
@@ -48,6 +55,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 - Commit, merge, pull and switch fixes are refused while the repo has an unfinished merge, rebase, cherry-pick or revert. A commit would have concluded it, conflict markers included.
 - A scheduled scan no longer starts while the last fix of a batch is still running.
 - `gutcheck fix <repo> all` and the MCP's Fix all stop offering a repo's later fixes once one is refused (a refused pull is no longer followed by a commit and push).
+- Secrets backup: one file a password manager cannot take (over Bitwarden's 10,000-character note limit) is left out with a note instead of stopping the whole backup, and one failed save no longer stops the files after it (three failures in a row still stop the run).
+- Secrets backup: a credentials file under an `XDG_CONFIG_HOME` outside your home folder is named `xdg-config/…`. It used to be named `~/../…`, which `pass` refuses, so it could never be saved.
 - Clutter sizes no longer promise more space than a clean-up frees on a disk that compresses files. On btrfs (`compress=`) or bcachefs, `du` gives sizes before compression, so 60 GB of `target/` folders freed 24 GB. GutCheck now says those sizes are before compression (in the app, the plan, the MCP and CLI result's `compressed`), and a clean-up ends with the free space it actually gained, measured on the disk.
 
 ## [0.28.1] - 2026-11-15
