@@ -24,6 +24,7 @@ const NO_DESCEND = new Set([...HEAVY_DIRS, '.git', '.venv', 'venv', '.next', '.n
 const { CACHE_DIRS, FILE_RULES, VENV_NAMES, buildOutput, bigDirSize, dirSize, STALE_LOG_DAYS, STALE_BACKUP_DAYS, SCRATCH_DIR_RE, envIsConfigOnly, gitCommonDir, isAppDataDir } = require('./clutter-rules');
 
 const { scratchAdvice } = require('./clutter-scratch');
+const { compressionOf } = require('./disk-space');
 
 const COPY_RE = /^(.+?)(?: \(\d+\)| copy(?: \d+)?| - Copy(?: \(\d+\))?|[_-]copy\d*|\.copy)(\.[^.]+)?$/i;
 
@@ -258,7 +259,8 @@ async function scanClutter(dir) {
   const trackedEnv = [];
   for (const f of tracked.files) if (ENV_RE.test(path.posix.basename(f)) && !ENV_TEMPLATE_RE.test(path.posix.basename(f)) && !(await envIsConfigOnly(path.join(dir, f)))) trackedEnv.push(f);
   const advice = [...buildAdvice({ items, trackedClutter, trackedEnv, liveEnv, envUnignored, root, nested: strays, templateSeen }), ...await scratchAdvice(dir, items)];
-  return { items, advice, count: items.length, totalSize: items.reduce((n, i) => n + i.size, 0), truncated };
+  const compressed = compressionOf(dir);
+  return { items, advice, count: items.length, totalSize: items.reduce((n, i) => n + i.size, 0), truncated, ...(compressed ? { compressed } : {}) };
 }
 
 

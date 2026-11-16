@@ -14,6 +14,7 @@ const { looksSecret } = require('./secret-patterns');
 const { planTestRun } = require('./tests/runs');
 const { validBranch, validRemote, inspect } = require('./git-safety');
 const { API_ACTIONS, REMOTE_FILE_FIX } = require('./renderer/fix-all');
+const { compressionOf, COMPRESSED_NOTE } = require('./disk-space');
 
 class PlanError extends Error {}
 const fail = (msg) => { throw new PlanError(msg); };
@@ -279,6 +280,8 @@ const ACTIONS = {
       const env = picked.filter((it) => it.category === 'env');
       const trashed = picked.filter((it) => it.mode === 'trash').length;
       const warnings = [];
+      const comp = compressionOf(r.path);
+      if (comp) warnings.push(`This disk compresses files (${comp}): the ${COMPRESSED_NOTE}. GutCheck measures what was freed.`);
       if (env.length) warnings.push(`Env files can hold secrets that exist nowhere else:\n${env.map((e) => e.path).join('\n')}\nThey go to your trash, so you can restore them.`);
       return {
         risk: env.length ? 'danger' : 'caution',

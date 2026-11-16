@@ -86,7 +86,7 @@
     if (clutter && clutter.size) {
       const rows = [...clutter.values()].filter((c) => c.count).map((c) => ({ name: c.name, path: c.path, size: c.totalSize, count: c.count })).sort((a, b) => b.size - a.size);
       const hi = [...clutter.values()].reduce((n, c) => n + (c.items || []).filter((i) => i.confidence === 'high').reduce((m, i) => m + i.size, 0), 0);
-      cl = { scannedRepos: clutter.size, items: rows.reduce((n, x) => n + x.count, 0), totalSize: rows.reduce((n, x) => n + x.size, 0), safeSize: hi, byRepo: rows };
+      cl = { scannedRepos: clutter.size, items: rows.reduce((n, x) => n + x.count, 0), totalSize: rows.reduce((n, x) => n + x.size, 0), safeSize: hi, byRepo: rows, compressed: [...clutter.values()].some((c) => c.compressed) };
     }
 
     return {

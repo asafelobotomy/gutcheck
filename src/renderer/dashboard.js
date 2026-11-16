@@ -166,7 +166,7 @@ function renderDashboard() {
 
   const cl = m.clutter;
   const clutterCard = cl
-    ? card('Clutter found', fmtSize(cl.totalSize), { cls: kind(cl.items), sub: `${cl.items} items, ${fmtSize(cl.safeSize)} safe to remove`, go: () => openClutter() })
+    ? card('Clutter found', fmtSize(cl.totalSize), { cls: kind(cl.items), sub: `${cl.items} items, ${fmtSize(cl.safeSize)} safe to remove${cl.compressed ? ' (before compression: frees less)' : ''}`, go: () => openClutter() })
     : card('Clutter', 'Scan', { cls: '', sub: state.scanError.clutter || 'find stale env files, caches, copies', go: async () => { await scanClutterNow(); await loadTrend(); } });
 
   const rescanQuality = async () => { await scanQualityNow(); await loadTrend(); };

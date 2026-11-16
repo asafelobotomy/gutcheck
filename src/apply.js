@@ -7,6 +7,9 @@ const exec = require('./exec');
 const { run, READONLY_GIT, SAFE_GIT_ENV } = exec;
 const { COMMAND_TIMEOUT_MS } = require('./util');
 const { scanClutter } = require('./clutter');
+const { freeBytes, freeBytesSettled } = require('./disk-space');
+
+const gb = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(1)} GB` : `${Math.round(n / 1048576)} MB`);
 
 const defaultCtx = (over = {}) => {
   const ctx = { run, fs, readOnly: false, clutter: scanClutter, ...over };
@@ -59,8 +62,16 @@ function assertInside(io, root, file) {
 // Whatever happens, the repo's cached git drivers are dropped: the action may have changed its
 // config or branch (includeIf onbranch:), and the rescan after it must read them afresh.
 async function apply(p, ctx = {}) {
+  // A clean-up reports what it really freed: du's sizes overstate it on a compressing disk.
+  const removes = (p.steps || []).filter((s) => s.kind === 'remove' && s.root);
+  const before = removes.length ? freeBytes(removes[0].root) : null;
   try {
-    return await applySteps(p, ctx);
+    const res = await applySteps(p, ctx);
+    if (before !== null && res.results.some((x) => x.ok)) {
+      const after = await freeBytesSettled(removes[0].root);
+      if (after !== null) res.results.push({ text: `Free space on this disk: ${after >= before ? '+' : '−'}${gb(Math.abs(after - before))} (measured)`, ok: true, out: '' });
+    }
+    return res;
   } finally {
     // A remote repo's key ("remote:owner/name") is not a folder and has no drivers to forget.
     for (const d of new Set([p.repoPath, ...(p.steps || []).map((s) => s.cwd || s.root)].filter((d) => d && !String(d).startsWith('remote:')))) exec.forgetGitDrivers(d);

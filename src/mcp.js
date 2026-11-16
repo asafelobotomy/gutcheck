@@ -35,7 +35,7 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: repoArg },
     annotations: RO, run: (e, a) => e.report(a) },
   { name: 'gutcheck_clutter', title: 'Clutter scan',
-    description: 'Read-only scan for caches, temp and backup files, duplicate or stray env files (compared by checksum, never read), and .gitignore gaps. The item paths are what clean-clutter accepts.',
+    description: 'Read-only scan for caches, temp and backup files, duplicate or stray env files (compared by checksum, never read), and .gitignore gaps. The item paths are what clean-clutter accepts. Sizes are du\'s: a repo on a disk that compresses files (btrfs, bcachefs) has compressed set, and then they are before compression and removing them frees less; clean-clutter reports the free space it really gained.',
     inputSchema: { type: 'object', properties: repoList }, annotations: RO, run: (e, a) => e.clutter(a) },
   { name: 'gutcheck_quality', title: 'Code quality scan',
     description: 'Read-only code checks: long files, magic numbers, constants, possible hardcoded secrets (location and kind only, never values), TODO markers, debug leftovers, large files, missing tests.',

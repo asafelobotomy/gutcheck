@@ -73,7 +73,7 @@ function clutterRepoEl(res) {
         h('div', { class: 'muted' }, `${i.reason} · ${fmtSize(i.size)} · ${i.ageDays ? `${i.ageDays}d old` : 'today'}${i.keep ? ` · keeps ${i.keep}` : ''}`)));
   });
   return h('div', { class: 'cblock' },
-    h('h3', {}, `${res.name}`, h('span', { class: 'pill' }, `${plural(res.count, 'item')} · ${fmtSize(res.totalSize)}`)),
+    h('h3', {}, `${res.name}`, h('span', { class: 'pill', title: res.compressed ? `This disk compresses files (${res.compressed}): these sizes are before compression, so removing them frees less. The result shows what was really freed.` : '' }, `${plural(res.count, 'item')} · ${fmtSize(res.totalSize)}${res.compressed ? ' before compression' : ''}`)),
     res.error ? h('p', { class: 'b-err' }, res.error) : null,
     res.truncated ? h('p', { class: 'muted' }, 'Very large repo: only part of it was scanned.') : null,
     res.items.length ? h('div', { class: 'toolbar' }, removeBtn, btn('Select all likely', () => setAll(true)), btn('Select none', () => setAll(false))) : null,

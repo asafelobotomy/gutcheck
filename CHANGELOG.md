@@ -4,6 +4,10 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Fixed
+
+- Clutter sizes no longer promise more space than a clean-up frees on a disk that compresses files. On btrfs (`compress=`) or bcachefs, `du` gives sizes before compression, so 60 GB of `target/` folders freed 24 GB. GutCheck now says those sizes are before compression (in the app, the plan, the MCP and CLI result's `compressed`), and a clean-up ends with the free space it actually gained, measured on the disk.
+
 ## [0.28.1] - 2026-11-15
 
 ### Fixed
