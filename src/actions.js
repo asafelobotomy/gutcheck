@@ -324,7 +324,7 @@ const ACTIONS = {
 };
 
 // GitHub-side actions live in actions-github.js, built with this file's step builders.
-const GH = require('./actions-github')({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh: (ctx, args, cwd) => ctx.run('gh', args, { cwd }) });
+const GH = require('./actions-github')({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGit, readGh: (ctx, args) => ctx.run('gh', args, { cwd: os.homedir() }) });
 Object.assign(ACTIONS, GH.actions);
 
 // AI agent actions live in actions-agent.js; their plan errors read like this file's.
@@ -336,10 +336,9 @@ const AGENT = require('./actions-agent');
 for (const t of ['permissions-prune', 'split-instructions', 'lsp-setup']) ACTIONS[t] = AGENT[t];
 
 // A repo that is not cloned here has no folder ("remote:owner/name" is a key): its plan may hold only
-// gh steps, which name the repo themselves, and they run in the temp folder instead.
+// gh steps, which name the repo themselves.
 function onlyApi(out) {
   if (!out.steps.every((s) => s.cmd === 'gh' && (s.kind === 'cmd' || s.kind === 'check') && !s.safeGit)) fail('Only GitHub API steps can run on a repo that is not cloned here.');
-  for (const s of out.steps) s.cwd = os.tmpdir();
 }
 
 async function plan(repo, action, ctx = {}) {
@@ -352,6 +351,7 @@ async function plan(repo, action, ctx = {}) {
     if (remote && !API_ACTIONS.has(action.type)) fail(REMOTE_FILE_FIX);
     const out = await ACTIONS[action.type].plan(repo, action, ctx);
     if (remote) onlyApi(out); else if (unfinishedOp(repo, out)) fail(unfinishedOp(repo, out));
+    for (const s of out.steps) if (s.cmd === 'gh') s.cwd = os.homedir(); // never in the repo (gh would run plain git there) or the shared /tmp: every gh step names its repo
     // The repo's own network programs and non-network remotes refuse the plan; its hooks and
     // drivers make it caution (B9, B10).
     const runsGit = !remote && out.steps.some((s) => s.cmd === 'git');

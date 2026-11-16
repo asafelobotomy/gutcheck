@@ -100,6 +100,7 @@ test('MCP: protected findings and short wildcards are refused; agent ignores are
   const data = tmp('gutcheck-guard2data-');
   try {
     const env = isolatedEnv({ GUTCHECK_DATA_DIR: data });
+    require('./helpers/env').chooseWorkspace(data, root);
     const e = createEngine({ env, via: 'mcp', allowActions: true });
     await e.scan({ root });
     assert.ok((await e.repoDetail({ repo: 'alpha' })).findings.some((f) => f.id === 'wf-injection'));

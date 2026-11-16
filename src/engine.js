@@ -21,7 +21,7 @@ const { engineSecrets, SECRET_TYPES, MCP_REFUSAL } = require('./secrets-glue');
 const DANGER_OFF = 'This is a dangerous action. An agent can run it only when GutCheck\'s MCP server was started with --allow-danger as well as --allow-actions; otherwise ask the user to run it in the GutCheck app or with the gutcheck command.';
 const OFF = 'Actions are turned off: start GutCheck with --allow-actions to plan and apply changes. Everything else works read-only.';
 
-const { dataDir } = require('./paths');
+const { dataDir, agentRootRefusal } = require('./paths');
 
 // Catalogue of every action an agent can plan: parameters and allowed values. Planning still
 // validates everything; this only saves the caller from guessing.
@@ -122,8 +122,10 @@ function createEngine(opts = {}) {
   // must not use up the "new since last scan" baseline).
   async function scan({ root: r, deep = false, recordSeen = false, onProgress, remote } = {}) {
     const s = store.load();
+    if (via === 'mcp') { const no = agentRootRefusal(r, s); if (no) return { ok: false, error: no }; }
     const out = await ws.scan({ root: r || s.cliRoot || s.root || '', deep, recordSeen, onProgress, remote });
-    if (out.ok && out.root !== s.cliRoot) store.update({ cliRoot: out.root }); // never replaces the app's own folder
+    // Never replaces the app's own folder, and an agent's choice is never remembered.
+    if (out.ok && via !== 'mcp' && out.root !== s.cliRoot) store.update({ cliRoot: out.root });
     return out;
   }
 

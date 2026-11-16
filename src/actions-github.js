@@ -8,7 +8,7 @@ const MAX_DELETE = 30;
 // A branch name in an API path: each segment URL-encoded ("fix#1" -> "fix%231"), slashes kept.
 const enc = (b) => b.split('/').map(encodeURIComponent).join('/');
 
-module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh }) => {
+module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh, readGit }) => {
   // Branches of a repo that is not cloned here come from GitHub (remote-branches.js), not from git.
   const ghBranch = (r, name) => {
     if (!Array.isArray(r.ghBranches)) fail('GutCheck could not read this repository\'s branches from GitHub. Rescan and try again.');
@@ -88,7 +88,7 @@ module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText,
   },
 
   'pr-create': {
-    plan(r, p) {
+    async plan(r, p, ctx) {
       const slug = needRemote(r);
       const base = defaultBranch(r) || fail('Unknown default branch.');
       if (p.branch === base) fail('The branch is the default branch.');
@@ -101,9 +101,11 @@ module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText,
         if (!(r.git.remoteBranches || []).some((x) => x.name === p.branch)) fail('Push the branch first: it does not exist on the remote.');
       }
       if ((r.prs || []).some((x) => x.headRefName === p.branch)) fail('A PR from this branch is already open.');
-      // --fill reads the local commits, so a repo that is not cloned here gets the branch name as title.
-      const title = cleanText(p.title, 200) || (remote ? p.branch : '');
-      const args = ['pr', 'create', '-R', slug, '--head', p.branch, '--base', base, ...(title ? ['--title', title, '--body', ''] : ['--fill'])];
+      // No --fill: it reads local commits, and gh no longer runs inside the repo (audit B12). The title
+      // is the branch's last commit subject, read here; a repo that is not cloned gets the branch name.
+      const subject = remote || cleanText(p.title, 200) ? '' : cleanText((await readGit(ctx, ['log', '-1', '--format=%s', `refs/heads/${p.branch}`], r.path)).stdout, 200);
+      const title = cleanText(p.title, 200) || subject || p.branch;
+      const args = ['pr', 'create', '-R', slug, '--head', p.branch, '--base', base, '--title', title, '--body', ''];
       return { risk: 'caution', title: `Open a PR from ${p.branch} into ${base}`, steps: [gh(args, r.path)] };
     },
   },

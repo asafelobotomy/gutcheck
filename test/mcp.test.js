@@ -107,6 +107,7 @@ test('with --allow-actions: plan from a finding or an action, apply exactly once
   const root = workspace();
   const dataD = tmp('gutcheck-data-');
   try {
+    require('./helpers/env').chooseWorkspace(dataD, root);
     let c = client(createEngine({ env: envFor(dataD), allowActions: true, via: 'mcp' }));
     await c.req('initialize', {});
     await c.call('gutcheck_overview', { root });
@@ -229,6 +230,7 @@ test('secrets over MCP: read-only list with titles and statuses only; backing up
     fs.writeFileSync(path.join(root, 'alpha', '.env'), 'API_TOKEN=mcp-hunter2\n');
     fs.mkdirSync(path.join(home, '.aws'));
     fs.writeFileSync(path.join(home, '.aws', 'credentials'), '[default]\naws_secret_access_key=mcp-hunter3\n');
+    require('./helpers/env').chooseWorkspace(dataD, root);
     const c = client(createEngine({ env: { ...envFor(dataD), HOME: home, XDG_CONFIG_HOME: path.join(home, '.config') }, allowActions: true, via: 'mcp' }));
     await c.req('initialize', { protocolVersion: PROTOCOLS[0] });
     const tool = (await c.req('tools/list')).result.tools.find((t) => t.name === 'gutcheck_secrets');

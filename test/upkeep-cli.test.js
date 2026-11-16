@@ -63,6 +63,7 @@ test('mcp engine: ignoring needs --allow-actions on the server; drift and new ar
   const root = workspace();
   const data = tmp('gutcheck-updata-');
   try {
+    require('./helpers/env').chooseWorkspace(data, root);
     const ro = createEngine({ env: isolatedEnv({ GUTCHECK_DATA_DIR: data }), via: 'mcp' });
     await ro.scan({ root });
     const { TOOLS } = require('../src/mcp');

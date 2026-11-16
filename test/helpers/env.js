@@ -13,4 +13,14 @@ function isolatedEnv(extra = {}) {
   return { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'), ...extra };
 }
 
-module.exports = { isolatedEnv };
+// The user's own choice of workspace (as the app or "gutcheck scan <folder>" stores it): an agent
+// over MCP may only scan that folder or one inside it.
+function chooseWorkspace(dataDir, root) {
+  const f = path.join(dataDir, 'settings.json');
+  let s = {};
+  try { s = JSON.parse(fs.readFileSync(f, 'utf8')); } catch {}
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ ...s, root }));
+}
+
+module.exports = { isolatedEnv, chooseWorkspace };

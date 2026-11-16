@@ -1,9 +1,11 @@
 // Where GutCheck keeps its own files. Matches Electron's app.getPath('userData') for this app, so the
 // app, the CLI and the MCP server share settings, History, trends and test-run output.
 
+const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { validRef } = require('./remote-settings');
+const { expandHome } = require('./util');
 
 const APP_NAME = 'GutCheck'; // Electron names the data folder after productName
 
@@ -31,4 +33,16 @@ function remoteKeyFromDir(base) {
   return validRef(ref) ? ref : null;
 }
 
-module.exports = { dataDir, runDir, remoteCacheRoot, remoteDir, remoteKeyFromDir, APP_NAME };
+// Over MCP the workspace is the user's choice, not the agent's: the folder set in the app or with
+// "gutcheck scan", or one inside it (audit 2026-11-16, C6). Returns why not, or null.
+function agentRootRefusal(want, s) {
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const own = [s.root, s.cliRoot].filter((x) => typeof x === 'string' && x).map(real);
+  if (!own.length) return 'No workspace folder is set yet. Ask the user to choose one in the GutCheck app, or to run "gutcheck scan <folder>" once; an agent cannot choose it.';
+  if (typeof want !== 'string' || !want.trim()) return null;
+  const abs = real(expandHome(want.trim(), os.homedir()));
+  if (own.some((o) => abs === o || abs.startsWith(o.endsWith(path.sep) ? o : o + path.sep))) return null;
+  return 'That folder is outside the workspace the user chose in GutCheck. An agent can scan that workspace or a folder inside it; ask the user to change the workspace in the app or with "gutcheck scan <folder>".';
+}
+
+module.exports = { dataDir, runDir, remoteCacheRoot, remoteDir, remoteKeyFromDir, APP_NAME, agentRootRefusal };

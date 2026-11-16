@@ -21,7 +21,12 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 - Registering a repo for git maintenance gets the same checks as Fetch, since background maintenance fetches with plain git: it is refused when the repo's config names network programs or connection settings, or its remote is a local folder.
 - GutCheck no longer inherits `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and similar variables. Started from a git hook or alias, every scan and fix would have acted on that other repo.
 - An MCP result that is cut at 100,000 characters no longer carries the full, uncut data beside the text.
+- Over MCP, an AI agent can only scan the workspace folder you chose (in the app or with `gutcheck scan <folder>`) or a folder inside it. It used to accept any folder, `/` and your home folder included, and remembered it as the CLI's workspace. An agent's scan is no longer remembered, and with no workspace set the agent is told to ask you to choose one. **If you use GutCheck only through an agent, run `gutcheck scan <folder>` once, or pick the folder in the app.**
+- MCP results write your home folder as `~` (paths, and the report's text), so your user name no longer goes to the model provider, and the email addresses in the git identity findings are masked (`a***@example.com`). Agents can pass `~` paths back.
 - Plan previews escape control and bidi characters in clutter paths, `gutcheck new --notify` escapes markup in the notification text, and agent config files are written through a new, unguessable temp file.
+- GitHub steps (`gh`) no longer run inside the repo's folder, where `gh` runs plain git and so the repo's hooks and config; they run in your home folder and name the repo themselves. Two things change as a result: merging a PR with "delete its branch" no longer deletes your local copy of the branch (the next scan lists it as merged), and Open a PR takes its title from the branch's last commit instead of `gh --fill`, with an empty description.
+- Planning a test run probes for tools in a new private folder, not the shared temp folder, where another user of the machine could plant a config file that runs code.
+- Planning to split an instruction file or prune permission rules refuses a file that is a link leading out of the repo, instead of showing its contents in the preview.
 
 ### Fixed
 

@@ -38,7 +38,7 @@ test('repo-archive on a remote repo: gh repo archive, danger, confirm by owner/n
   const p = await actions.plan(remoteResult(), { type: 'repo-archive' });
   assert.ok(p.ok, p.error);
   assert.deepEqual(args(p), ['gh repo archive octo/app --yes']);
-  assert.equal(p.steps[0].cwd, os.tmpdir());
+  assert.equal(p.steps[0].cwd, os.homedir());
   assert.equal(p.risk, 'danger');
   assert.equal(p.confirmName, 'octo/app');
   assert.ok(p.warnings.some((w) => /unarchive/i.test(w)));
@@ -140,7 +140,7 @@ test('delete-remote on a remote repo: a commit check, then an API delete, per br
     'gh api repos/octo/app/git/ref/heads/squashed --jq .object.sha', 'gh api -X DELETE repos/octo/app/git/refs/heads/squashed',
   ]);
   assert.deepEqual(p.steps.filter((s) => s.kind === 'check').map((s) => s.expect), [OID('a'), OID('b')]);
-  assert.ok(p.steps.every((s) => s.cwd === os.tmpdir()));
+  assert.ok(p.steps.every((s) => s.cwd === os.homedir()));
   assert.equal(p.risk, 'caution');
   assert.equal(p.undo, `gh api -X POST repos/octo/app/git/refs -f ref=refs/heads/old/done -f sha=${OID('a')}\ngh api -X POST repos/octo/app/git/refs -f ref=refs/heads/squashed -f sha=${OID('b')}`);
 });

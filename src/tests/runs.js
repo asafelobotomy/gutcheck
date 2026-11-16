@@ -17,7 +17,11 @@ const MUTATION_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 // only the user's own binaries, from a neutral folder: cargo then reads no repo .cargo/config, and
 // python puts no repo module (a planted pytest.py) on sys.path. Repo-supplied binaries (a virtualenv's
 // python, node_modules/.bin) are looked up on disk, never run.
-const ok = async (ctx, cmd, args) => (await ctx.run(cmd, args, { cwd: os.tmpdir(), timeout: 60000 })).ok;
+// The neutral folder is a new private one, not the shared /tmp, where another user could plant a
+// .cargo/config.toml or a pytest.py (audit B11).
+let probeDir = null;
+const neutral = () => (probeDir = probeDir && fs.existsSync(probeDir) ? probeDir : fs.mkdtempSync(path.join(os.tmpdir(), 'gutcheck-probe-')));
+const ok = async (ctx, cmd, args) => (await ctx.run(cmd, args, { cwd: neutral(), timeout: 60000 })).ok;
 const FIND_SPEC = 'import importlib.util as u, sys; sys.exit(0 if all(u.find_spec(m) for m in sys.argv[1:]) else 1)';
 // Python modules: in a virtualenv, by their folder or file in site-packages; else ask the user's python3.
 async function hasPyModules(ctx, dir, s, mods) {

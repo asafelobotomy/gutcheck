@@ -5,6 +5,7 @@
 // list, and only for repos that actually have workflows. Results are cached in memory (never on
 // disk) so repeated scans don't re-spend quota.
 
+const os = require('node:os');
 const { run, json } = require('./exec');
 const { COMMAND_TIMEOUT_MS } = require('./util');
 
@@ -215,7 +216,7 @@ async function fetchFailedRunsUncached(ref, defaultBranch, cwd) {
   if (rate.core && rate.core.remaining < MIN_CORE) return { failed: [], error: 'Skipped: GitHub REST rate limit nearly exhausted' };
   const args = ['run', 'list', '-R', `${ref.owner}/${ref.name}`, '--limit', '20', '--json', 'databaseId,workflowName,conclusion,status,headBranch,displayTitle,createdAt,url'];
   if (defaultBranch) args.push('--branch', defaultBranch);
-  const r = await json('gh', args, { cwd });
+  const r = await json('gh', args, { cwd: os.homedir() }); // -R names the repo; in its folder gh would run plain git (audit B12)
   noteCall('core');
   if (!r.ok) {
     if (looksRateLimited(r.error)) { rate.limited = true; if (rate.core) rate.core.remaining = 0; }

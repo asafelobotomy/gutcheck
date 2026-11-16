@@ -42,7 +42,7 @@ for (const a of API) {
     assert.ok(p.steps.length);
     for (const s of p.steps) {
       assert.equal(s.cmd, 'gh');
-      assert.equal(s.cwd, os.tmpdir());
+      assert.equal(s.cwd, os.homedir());
       assert.ok(!s.safeGit);
     }
     assert.match(p.steps.map((s) => s.args.join(' ')).join('\n'), /octo\/app/);
@@ -69,7 +69,7 @@ test('the repo-edit plan runs gh repo edit octo/app in the temp folder', async (
   const calls = [];
   const r = await actions.apply(p, { run: async (cmd, args, o) => { calls.push({ cmd, args, cwd: o.cwd }); return { ok: true, code: 0, stdout: '', stderr: '' }; } });
   assert.ok(r.ok);
-  assert.deepEqual(calls, [{ cmd: 'gh', args: ['repo', 'edit', 'octo/app', '--description', 'A tool'], cwd: os.tmpdir() }]);
+  assert.deepEqual(calls, [{ cmd: 'gh', args: ['repo', 'edit', 'octo/app', '--description', 'A tool'], cwd: os.homedir() }]);
 });
 
 test('service: a remote API plan is stored, and the file fix next to it is refused', async () => {

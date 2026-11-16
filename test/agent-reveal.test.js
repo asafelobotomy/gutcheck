@@ -52,6 +52,7 @@ test('mcp: agent usage needs --allow-actions to start servers, and agent fixes p
     fs.utimesSync(stale, t, t);
     const env = { ...process.env, HOME: home, GUTCHECK_DATA_DIR: data };
     const tool = (n) => TOOLS.find((x) => x.name === n);
+    require('./helpers/env').chooseWorkspace(data, root);
     const ro = createEngine({ env, via: 'mcp' });
     await ro.scan({ root });
     assert.match((await tool('gutcheck_agent_usage').run(ro, { live: true }, () => {})).error, /--allow-actions/);

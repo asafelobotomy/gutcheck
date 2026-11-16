@@ -79,3 +79,77 @@ test('A10: the data folder is private and its files are written 0600', async () 
   assert.ok(files.length >= 2, files.join(','));
   for (const f of files) assert.equal(fs.statSync(path.join(data, f)).mode & 0o077, 0, `${f} is readable by others`);
 });
+
+test('B12: gh steps never run inside the repo, and a local PR takes its title from the last commit, not --fill', async () => {
+  const { plan } = require('../src/actions');
+  const { scanRepo } = require('../src/scanner');
+  const d = repo({ 'a.txt': 'a\n' });
+  sh(d, 'switch', '-q', '-c', 'feat');
+  fs.writeFileSync(path.join(d, 'b.txt'), 'b\n'); sh(d, 'add', '-A'); sh(d, 'commit', '-qm', 'Add the b file');
+  sh(d, 'switch', '-q', 'main');
+  const scanned = await scanRepo(d, {});
+  const r = { ...scanned, remote: { owner: 'o', name: 'n', defaultBranch: 'main', viewerPermission: 'ADMIN' }, prs: [], git: { ...scanned.git, remoteBranches: [{ name: 'feat' }] } };
+  const p = await plan(r, { type: 'pr-create', branch: 'feat' });
+  assert.ok(p.ok, p.error);
+  assert.deepEqual(p.steps[0].args, ['pr', 'create', '-R', 'o/n', '--head', 'feat', '--base', 'main', '--title', 'Add the b file', '--body', '']);
+  assert.equal(p.steps[0].cwd, os.homedir());
+  assert.notEqual(p.steps[0].cwd, d);
+});
+
+test('B14: planning refuses an instruction or settings file that is a link out of the repo', async () => {
+  const { plan } = require('../src/actions');
+  const d = repo({ 'a.txt': 'a\n' });
+  const outside = path.join(tmp('gutcheck-out-'), 'private.md');
+  fs.writeFileSync(outside, '# Private notes\n\nsecret plans\n'.repeat(200));
+  fs.symlinkSync(outside, path.join(d, 'CLAUDE.md'));
+  const stub = { checkRepo: async () => {}, gitConfig: async () => ({ all: [], untrusted: [] }) };
+  const p = await plan({ path: d, name: 'r', git: { branch: 'main', branches: [] } }, { type: 'split-instructions', file: 'CLAUDE.md' }, stub);
+  assert.equal(p.ok, false);
+  assert.match(p.error, /link or leads outside the repo/);
+  assert.ok(!JSON.stringify(p).includes('secret plans'));
+});
+
+test('B11: tool probes run in a private folder, not the shared temp folder', async () => {
+  const { planTestRun } = require('../src/tests/runs');
+  const seen = [];
+  const ctx = { run: async (cmd, args, o) => { seen.push(o.cwd); return { ok: false, code: 1, stdout: '', stderr: '' }; }, fs };
+  const d = repo({ 'Cargo.toml': '[package]\nname = "x"\nversion = "0.1.0"\n', 'src/lib.rs': '#[test]\nfn t() {}\n' });
+  try { await planTestRun({ path: d, name: 'r' }, { kind: 'coverage' }, ctx); } catch { /* a refusal is fine: only the probe folder matters */ }
+  assert.ok(seen.length > 0, 'a probe ran');
+  for (const c of seen) { assert.notEqual(c, os.tmpdir()); assert.equal(fs.statSync(c).mode & 0o077, 0, 'private'); assert.deepEqual(fs.readdirSync(c), []); }
+});
+
+test('C6: over MCP an agent can only scan the workspace the user chose, or a folder inside it, and never changes it', async () => {
+  const { createEngine } = require('../src/engine');
+  const { chooseWorkspace } = require('./helpers/env');
+  const mk = (root, n) => { const d = path.join(root, n); fs.mkdirSync(d, { recursive: true }); sh(d, 'init', '-q', '-b', 'main'); sh(d, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'i'); };
+  const ws = tmp('gutcheck-c6ws-'); mk(ws, 'in1'); mk(path.join(ws, 'team'), 'in2');
+  const other = tmp('gutcheck-c6other-'); mk(other, 'out1');
+  const data = tmp('gutcheck-c6data-');
+  const env = isolatedEnv({ GUTCHECK_DATA_DIR: data });
+  const agent = () => createEngine({ env, via: 'mcp' });
+  assert.match((await agent().scan({ root: ws })).error, /No workspace folder is set/);
+  chooseWorkspace(data, ws);
+  for (const bad of [other, '/', os.homedir(), path.dirname(ws), `${ws}-evil`]) assert.match((await agent().scan({ root: bad })).error, /outside the workspace/, bad);
+  assert.equal((await agent().scan({})).ok, true);
+  const sub = await agent().scan({ root: path.join(ws, 'team') });
+  assert.equal(sub.ok, true, sub.error);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')), { root: ws }, 'an agent\'s scan is not remembered');
+  // The CLI is the user: it may scan anywhere, and its folder is remembered.
+  assert.equal((await createEngine({ env, via: 'cli' }).scan({ root: other })).ok, true);
+});
+
+test('C7: MCP output writes the home folder as ~ and masks the addresses of the identity findings only', () => {
+  const { outbound } = require('../src/mcp');
+  const home = '/home/ann';
+  const o = outbound({ root: '/home/ann/Projects', repos: [{ path: '/home/ann/Projects/app', name: 'app', findings: [
+    { id: 'git-identity', title: '2 recent commits by you used another email than ann@home.example', detail: 'Of your last 5 commits here: ann.work@corp.example (2).' },
+    { id: 'pr-stale-3', title: 'PR by bob@other.example in /home/annex is stale' }] }] }, home);
+  assert.equal(o.root, '~/Projects');
+  assert.equal(o.repos[0].path, '~/Projects/app');
+  assert.equal(o.repos[0].findings[0].title, '2 recent commits by you used another email than a***@home.example');
+  assert.equal(o.repos[0].findings[0].detail, 'Of your last 5 commits here: a***@corp.example (2).');
+  assert.equal(o.repos[0].findings[1].title, 'PR by bob@other.example in ~ex is stale'.replace('~ex', '/home/annex'), 'other text and look-alike paths are left alone');
+  const md = outbound('- Path: `/home/ann/Projects/app`\n- 2 recent commits by you used another email than ann@home.example\n- Author bob@other.example', home);
+  assert.equal(md, '- Path: `~/Projects/app`\n- 2 recent commits by you used another email than a***@home.example\n- Author bob@other.example');
+});

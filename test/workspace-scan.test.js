@@ -25,7 +25,7 @@ function workspace(names) {
   }
   return root;
 }
-const engineFor = (data, o = {}) => createEngine({ env: isolatedEnv({ GUTCHECK_DATA_DIR: data }), via: 'mcp', ...o });
+const engineFor = (data, o = {}) => createEngine({ env: isolatedEnv({ GUTCHECK_DATA_DIR: data }), via: 'cli', ...o }); // cli: these tests scan several folders, which an agent may not choose
 
 test('parallel calls during a scan wait for all of it; a scan of another folder runs after, not instead', async () => {
   const a = workspace(['a1', 'a2', 'a3', 'a4', 'a5', 'a6']);
