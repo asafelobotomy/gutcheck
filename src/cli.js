@@ -4,7 +4,7 @@
 // (`GutCheck.AppImage --cli ...`, `GutCheck.AppImage --mcp`).
 
 const { createEngine } = require('./engine');
-const { printable: P } = require('./util');
+const { printable: P, termSafe, jsonSafe } = require('./util');
 const { summarizeLocalOnly } = require('./local-only');
 const { version } = require('../package.json');
 
@@ -53,9 +53,12 @@ Usage: gutcheck <command> [options]
                                 names from Claude Code's transcripts); --live --yes also starts each
                                 MCP server once to see whether it works
   history                       changes GutCheck has made
-  mcp [--allow-actions]         run as an MCP server on stdio (read-only unless --allow-actions)
+  mcp [--allow-actions [--allow-danger]]
+                                run as an MCP server on stdio (read-only unless --allow-actions;
+                                dangerous fixes also need --allow-danger)
 
 Options: --root <folder>  --deep  --json  --yes  --confirm <name>  --help  --version
+--yes plans and runs in one go, without stopping at the preview: leave it off to read the commands first.
          --remote / --no-remote  include or leave out GitHub repos not cloned here, for this run
 `;
 
@@ -66,6 +69,21 @@ function parseValue(k, v) {
   if (v === 'true' || v === 'false') return v === 'true';
   if (/^\d+$/.test(v)) return Number(v);
   return v;
+}
+
+// Everything the command line takes. A typo (--yess, "findigs") is an error before anything is scanned
+// or run, never a silent preview or a full scan followed by "unknown command".
+const COMMANDS = new Set(['help', 'mcp', 'scan', 'new', 'findings', 'repo', 'report', 'clutter', 'quality', 'tests', 'workspace', 'local-only', 'remote', 'secrets', 'actions', 'fix', 'ignore', 'unignore', 'ignored', 'drift', 'baseline', 'history', 'agents']);
+const FLAGS = new Set(['root', 'repo', 'severity', 'category', 'confirm', 'limit', 'skip', 'json', 'deep', 'yes', 'all', 'notify', 'help', 'version', 'remote', 'no-remote', 'clear-cache', 'backup', 'verify', 'live', 'allow-actions', 'allow-danger']);
+const VALUE_FLAGS = ['root', 'repo', 'severity', 'category', 'confirm', 'limit', 'skip'];
+function usageError(cmd, f) {
+  const bad = Object.keys(f).find((k) => !FLAGS.has(k));
+  if (bad != null) return `unknown option --${P(bad)}`;
+  const empty = VALUE_FLAGS.find((k) => k in f && (typeof f[k] !== 'string' || !f[k] || f[k].startsWith('--')));
+  if (empty) return `--${empty} needs a value`;
+  if (f.severity && !['error', 'warn', 'info'].includes(f.severity)) return '--severity is error, warn or info';
+  if (cmd && !COMMANDS.has(cmd)) return `unknown command "${P(cmd)}"`;
+  return null;
 }
 
 function parseArgs(argv) {
@@ -188,17 +206,22 @@ async function secretsCmd(engine, f, rest, out, err, json) {
 }
 
 // engineOpts: extra createEngine options (tests stub GitHub and the remote cache through it).
-async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (s) => process.stderr.write(s + '\n'), env = process.env, engineOpts = {} } = {}) {
+async function main(argv, { out: rawOut = (s) => process.stdout.write(s + '\n'), err: rawErr = (s) => process.stderr.write(s + '\n'), env = process.env, engineOpts = {} } = {}) {
+  // Every line printed: repo, branch, file and PR names are someone else's text.
+  const out = (s) => rawOut(termSafe(s));
+  const err = (s) => rawErr(termSafe(s));
   const a = parseArgs(argv);
   const [cmd, ...rest] = a._;
   const f = a.flags;
+  const bad = usageError(cmd, f);
+  if (bad) { err(`gutcheck: ${bad}. Try gutcheck --help.`); return 1; }
   if (f.version) { out(version); return 0; }
   if (!cmd || f.help || cmd === 'help') { out(HELP); return cmd || f.help ? 0 : 1; }
-  if (cmd === 'mcp') { await require('./mcp').start({ allowActions: !!f['allow-actions'] }); return 0; }
+  if (cmd === 'mcp') { await require('./mcp').start({ allowActions: !!f['allow-actions'], allowDanger: !!f['allow-danger'] }); return 0; }
 
   // fix is explicit, so the CLI may plan; it still runs nothing without --yes.
   const engine = createEngine({ allowActions: cmd === 'fix', env, via: 'cli', ...engineOpts });
-  const json = (v) => out(JSON.stringify(v, null, 2));
+  const json = (v) => rawOut(jsonSafe(JSON.stringify(v, null, 2)));
   const scanned = async () => {
     const s = await engine.scan({ root: f.root || (cmd === 'scan' ? rest[0] : undefined), deep: !!f.deep, recordSeen: cmd === 'new', remote: f.remote ? true : f['no-remote'] ? false : undefined, onProgress: (d, t) => { if (process.stderr.isTTY) process.stderr.write(`\rScanning ${d}/${t}…`); } });
     if (process.stderr.isTTY) process.stderr.write('\r\x1b[K');
@@ -234,7 +257,8 @@ async function main(argv, { out = (s) => process.stdout.write(s + '\n'), err = (
       r.findings.forEach((x) => out(`${icon[x.severity]} ${x.repo}: ${x.title}  [${x.id}]`));
       if (f.notify) {
         const n = require('./schedule').notification(r.findings); // warnings and errors only, as in the app
-        if (n) await require('./exec').run('notify-send', ['--app-name=GutCheck', n.title, n.body]);
+        // notify-send hands the body to the daemon as markup: workflow and branch names in it are others' text.
+        if (n) await require('./exec').run('notify-send', ['--app-name=GutCheck', '--', n.title, n.body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')]);
       }
       return 0;
     }

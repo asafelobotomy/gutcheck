@@ -260,3 +260,21 @@ test('a TODO that holds a credential is counted and located, but its text never 
     assert.equal(q.markers.items[1].text, 'TODO: tidy this up');
   } finally { cleanup(dir); }
 });
+
+test('a TODO with a short, unquoted or URL-embedded credential keeps its place but not its text (audit 2026-11-16, T1)', async () => {
+  const dir = repo();
+  try {
+    put(dir, 'a.js', [
+      '// TODO move to env: postgres://admin:hunter2pass@db.internal/prod',
+      '// FIXME token=abc123def is the staging token',
+      '// TODO: password is hunter2 for now',
+      '// TODO: call it with Bearer abc123xyz',
+      '// TODO: refresh the token when it expires',
+      'const a = 1;', ''].join('\n'));
+    const q = await scanQuality(dir);
+    assert.equal(q.markers.items.length, 5);
+    for (const leak of ['hunter2', 'abc123def', 'abc123xyz']) assert.ok(!JSON.stringify(q).includes(leak), `${leak} must not appear in the results`);
+    assert.deepEqual(q.markers.items.map((m) => /hidden/.test(m.text)), [true, true, true, true, false]);
+    assert.equal(q.markers.items[4].text, 'TODO: refresh the token when it expires', 'prose that only mentions a token is still shown');
+  } finally { cleanup(dir); }
+});

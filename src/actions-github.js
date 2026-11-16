@@ -8,7 +8,7 @@ const MAX_DELETE = 30;
 // A branch name in an API path: each segment URL-encoded ("fix#1" -> "fix%231"), slashes kept.
 const enc = (b) => b.split('/').map(encodeURIComponent).join('/');
 
-module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh }) => {
+module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh, readGit }) => {
   // Branches of a repo that is not cloned here come from GitHub (remote-branches.js), not from git.
   const ghBranch = (r, name) => {
     if (!Array.isArray(r.ghBranches)) fail('GutCheck could not read this repository\'s branches from GitHub. Rescan and try again.');
@@ -19,7 +19,9 @@ module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText,
     { kind: 'check', cmd: 'gh', args: ['api', `repos/${slug}/git/ref/heads/${enc(b.name)}`, '--jq', '.object.sha'], cwd: r.path, expect: b.oid, changed: 'The branch changed since the scan. Rescan and review it again.', display: `check ${b.name} is still at ${b.oid.slice(0, 7)}` },
     gh(['api', '-X', 'DELETE', `repos/${slug}/git/refs/heads/${enc(b.name)}`], r.path),
   ];
-  const restore = (slug, b) => `gh api -X POST repos/${slug}/git/refs -f ref=refs/heads/${b.name} -f sha=${b.oid}`;
+  // Shown as a command to paste: a branch name is GitHub's text, so it is quoted unless plain.
+  const arg = (a) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`);
+  const restore = (slug, b) => `gh api -X POST repos/${slug}/git/refs -f ${arg(`ref=refs/heads/${b.name}`)} -f ${arg(`sha=${b.oid}`)}`;
 
   // delete-remote on a repo that is not cloned here (actions.js hands it over): one or more branches.
   function deleteOnGitHub(r, p) {
@@ -71,7 +73,8 @@ module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText,
       // Only on a repo that is not cloned here: on a clone gh would also delete the local branch.
       if (r.source !== 'remote') fail('Close the PR, then delete its branch on its own.');
       const b = (r.ghBranches || []).find((x) => x.name === pr.headRefName && x.oid === pr.headRefOid) || fail(`Its branch is not in this repository at the PR's commit (a fork, or pushed to since the scan), so GutCheck will not delete it.`);
-      return { ...close, title: `Close PR #${pr.number} and delete its branch ${b.name}`, steps: [...close.steps, ...deleteSteps(r, slug, b)], undo: `${close.undo}\n${restore(slug, b)}` };
+      // Danger, like delete-remote of an unmerged branch: the PR is closed unmerged, so its commits go with it.
+      return { ...close, risk: 'danger', title: `Close PR #${pr.number} and delete its branch ${b.name}`, steps: [...close.steps, ...deleteSteps(r, slug, b)], undo: `${close.undo}\n${restore(slug, b)}` };
     },
   },
 
@@ -85,7 +88,7 @@ module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText,
   },
 
   'pr-create': {
-    plan(r, p) {
+    async plan(r, p, ctx) {
       const slug = needRemote(r);
       const base = defaultBranch(r) || fail('Unknown default branch.');
       if (p.branch === base) fail('The branch is the default branch.');
@@ -98,9 +101,11 @@ module.exports = ({ fail, gh, needRemote, defaultBranch, localBranch, cleanText,
         if (!(r.git.remoteBranches || []).some((x) => x.name === p.branch)) fail('Push the branch first: it does not exist on the remote.');
       }
       if ((r.prs || []).some((x) => x.headRefName === p.branch)) fail('A PR from this branch is already open.');
-      // --fill reads the local commits, so a repo that is not cloned here gets the branch name as title.
-      const title = cleanText(p.title, 200) || (remote ? p.branch : '');
-      const args = ['pr', 'create', '-R', slug, '--head', p.branch, '--base', base, ...(title ? ['--title', title, '--body', ''] : ['--fill'])];
+      // No --fill: it reads local commits, and gh no longer runs inside the repo (audit B12). The title
+      // is the branch's last commit subject, read here; a repo that is not cloned gets the branch name.
+      const subject = remote || cleanText(p.title, 200) ? '' : cleanText((await readGit(ctx, ['log', '-1', '--format=%s', `refs/heads/${p.branch}`], r.path)).stdout, 200);
+      const title = cleanText(p.title, 200) || subject || p.branch;
+      const args = ['pr', 'create', '-R', slug, '--head', p.branch, '--base', base, '--title', title, '--body', ''];
       return { risk: 'caution', title: `Open a PR from ${p.branch} into ${base}`, steps: [gh(args, r.path)] };
     },
   },

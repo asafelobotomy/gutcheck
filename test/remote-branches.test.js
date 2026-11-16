@@ -38,7 +38,7 @@ test('repo-archive on a remote repo: gh repo archive, danger, confirm by owner/n
   const p = await actions.plan(remoteResult(), { type: 'repo-archive' });
   assert.ok(p.ok, p.error);
   assert.deepEqual(args(p), ['gh repo archive octo/app --yes']);
-  assert.equal(p.steps[0].cwd, os.tmpdir());
+  assert.equal(p.steps[0].cwd, os.homedir());
   assert.equal(p.risk, 'danger');
   assert.equal(p.confirmName, 'octo/app');
   assert.ok(p.warnings.some((w) => /unarchive/i.test(w)));
@@ -140,7 +140,7 @@ test('delete-remote on a remote repo: a commit check, then an API delete, per br
     'gh api repos/octo/app/git/ref/heads/squashed --jq .object.sha', 'gh api -X DELETE repos/octo/app/git/refs/heads/squashed',
   ]);
   assert.deepEqual(p.steps.filter((s) => s.kind === 'check').map((s) => s.expect), [OID('a'), OID('b')]);
-  assert.ok(p.steps.every((s) => s.cwd === os.tmpdir()));
+  assert.ok(p.steps.every((s) => s.cwd === os.homedir()));
   assert.equal(p.risk, 'caution');
   assert.equal(p.undo, `gh api -X POST repos/octo/app/git/refs -f ref=refs/heads/old/done -f sha=${OID('a')}\ngh api -X POST repos/octo/app/git/refs -f ref=refs/heads/squashed -f sha=${OID('b')}`);
 });
@@ -173,7 +173,7 @@ test('branch names are URL-encoded in API paths', async () => {
   const p = await actions.plan(r, { type: 'delete-remote', branch: 'fix#1' });
   assert.ok(p.ok, p.error);
   assert.match(args(p)[1], /git\/refs\/heads\/fix%231$/);
-  assert.match(p.undo, /ref=refs\/heads\/fix#1 /);
+  assert.match(p.undo, /'ref=refs\/heads\/fix#1' /, 'quoted: an unquoted # starts a comment when pasted');
 });
 
 test('pr-create on a remote repo: from the GitHub branch, with a title, no --fill; refuses merged and PR branches', async () => {
@@ -221,4 +221,22 @@ test('Fix all: merged branches and no-PR branches are questions; close offers de
   assert.deepEqual(order, ['pr-close', 'delete-remote']);
   const local = FixAll.plan({ ...r, source: undefined, ghBranches: undefined });
   assert.ok(!local.decisions.find((d) => d.id === 'pr-superseded-7').choices.some((x) => x.action && x.action.deleteBranch), 'not on a cloned repo');
+});
+
+test('pr-close with deleteBranch is danger: the PR\'s unmerged commits go with the branch (audit 2026-11-16, F4, F5)', async () => {
+  const p = await actions.plan(remoteResult(), { type: 'pr-close', number: 7, deleteBranch: true });
+  assert.equal(p.risk, 'danger');
+  assert.equal(p.confirmName, remoteResult().name);
+  assert.equal((await actions.plan(remoteResult(), { type: 'pr-close', number: 7 })).risk, 'caution');
+});
+
+test('long-lived branches are never offered for deletion or a pull request (audit 2026-11-16, K9)', () => {
+  for (const n of ['develop', 'staging', 'gh-pages', 'release-1.x', 'release/2.4', 'releases/2026.1', '1.x', 'v2', '3.2-stable', 'hotfix/1.2.1', 'stable']) assert.equal(rb.longLived(n), true, n);
+  for (const n of ['feat', 'fix-login', 'release-notes-typo', 'dependabot/npm/x-1.2.3', 'docs-update', 'v2-rewrite-idea']) assert.equal(rb.longLived(n), false, n);
+  const b = (name, unique) => ({ name, oid: 'e'.repeat(40), date: '2026-11-01T00:00:00Z', unique, mergedPr: null });
+  const gh = { remote: { owner: 'octo', name: 'app', defaultBranch: 'main', viewerPermission: 'ADMIN' }, prs: [] };
+  const f = rb.branchFindings([b('develop', 0), b('release-1.x', 0), b('gh-pages', 40), b('old-feature', 0), b('idea', 3)], gh);
+  assert.deepEqual(f.map((x) => x.id), ['gh-merged-branches', 'gh-branch-no-pr-idea']);
+  assert.match(f[0].title, /^1 merged branch /);
+  assert.ok(!JSON.stringify(f).includes('develop') && !JSON.stringify(f).includes('gh-pages'));
 });

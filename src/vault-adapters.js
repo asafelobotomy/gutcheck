@@ -18,7 +18,8 @@ const TOOL_INFO = {
 
 const parseJson = (s) => { try { return JSON.parse(s); } catch { return null; } };
 const lines = (s) => String(s || '').split('\n').map((l) => l.trim()).filter(Boolean);
-const baseName = (rel) => path.basename(String(rel || 'file'));
+// Used as a bare argument (KeePassXC's attachment name): a leading "-" would be read as an option.
+const baseName = (rel) => path.basename(String(rel || 'file')).replace(/^-+/, (m) => '_'.repeat(m.length));
 
 // The title without "gutcheck: ", with every byte outside [A-Za-z0-9_./-] percent-encoded (UTF-8),
 // "%" and "~" included, and the scope word as an "@" folder: "gutcheck: repo my app/.env" ->
@@ -121,7 +122,8 @@ const bitwarden = make('bitwarden', 'bw', 'Folder ID (optional)', {
     };
   },
   syncCmd: () => ({ args: ['sync'] }),
-  listCmd: (folderId) => ({ args: folderId ? ['list', 'items', '--folderid', folderId] : ['list', 'items'] }),
+  // --search: only GutCheck's own items are decrypted and read, not the whole vault.
+  listCmd: (folderId) => ({ args: ['list', 'items', ...(folderId ? ['--folderid', folderId] : []), '--search', 'gutcheck:'] }),
   parseList: (o) => idsOf(parseJson(o)),
 });
 

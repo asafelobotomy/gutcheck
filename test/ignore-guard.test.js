@@ -107,6 +107,7 @@ test('C2: MCP output labels repo-local ignores and quotes their reasons as flat,
   const root = workspace();
   const data = tmp('gutcheck-guarddata-');
   try {
+    require('./helpers/env').chooseWorkspace(data, root);
     const e = createEngine({ env: isolatedEnv({ GUTCHECK_DATA_DIR: data }), via: 'mcp' });
     await e.scan({ root });
     const d = await e.repoDetail({ repo: 'alpha' });
@@ -123,7 +124,7 @@ test('C3: with Read-only on, gutcheck_ignore and baseline init are refused and n
   const root = workspace();
   const data = tmp('gutcheck-guarddata-');
   try {
-    fs.writeFileSync(path.join(data, 'settings.json'), JSON.stringify({ readOnly: true }));
+    fs.writeFileSync(path.join(data, 'settings.json'), JSON.stringify({ readOnly: true, root }));
     const e = createEngine({ env: isolatedEnv({ GUTCHECK_DATA_DIR: data }), via: 'mcp', allowActions: true });
     await e.scan({ root });
     const { TOOLS } = require('../src/mcp');

@@ -15,6 +15,7 @@ const flat = oneLine(INVISIBLE_RE);
 const flatProse = oneLine(PROSE_RE);
 // A file or branch name that is not safe in a command: such names are left out of commands, never
 // altered, since a changed name could point at a different branch or path.
-const unsafeName = (s) => String(s).includes('`') || hasInvisible(s);
+// Nor is one that starts with "-": quoted or not, git would read it as an option (--force, -D).
+const unsafeName = (s) => String(s).includes('`') || String(s).startsWith('-') || hasInvisible(s);
 
 module.exports = { INVISIBLE_SRC, INVISIBLE_RE, hasInvisible, flat, flatProse, unsafeName };

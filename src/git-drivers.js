@@ -18,7 +18,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const KEYS = '^((filter|diff)\\..+\\.(clean|smudge|process|textconv|command|required)|extensions\\.partialclone|remote\\..+\\.promisor|lfs\\.extension\\..+\\.(clean|smudge)|lfs\\.customtransfer\\..+\\.path|lfs\\.standalonetransferagent|lfs\\.storage|hook\\..+\\.(command|event)|include\\.path|includeif\\..+\\.path)$';
+const KEYS = '^(core\\.worktree|(filter|diff)\\..+\\.(clean|smudge|process|textconv|command|required)|extensions\\.partialclone|remote\\..+\\.promisor|lfs\\.extension\\..+\\.(clean|smudge)|lfs\\.customtransfer\\..+\\.path|lfs\\.standalonetransferagent|lfs\\.storage|hook\\..+\\.(command|event)|include\\.path|includeif\\..+\\.path)$';
 const DRIVER_RE = /^(filter|diff)\.(.+)\.(clean|smudge|process|textconv|command|required)$/;
 // git-lfs, run as a trusted global filter, reads the repo's config too and runs the programs these
 // name (an extension's clean/smudge, a custom transfer agent), and lfs.storage would make its
@@ -48,13 +48,13 @@ function repoFiles(cwd) {
     const dotgit = path.join(dir, '.git');
     let st = null;
     try { st = fs.statSync(dotgit); } catch {}
-    if (st && st.isDirectory()) return { top: dir, files: ['config', 'config.worktree', 'HEAD'].map((f) => path.join(dotgit, f)) };
+    if (st && st.isDirectory()) return { top: dir, gitdir: dotgit, files: ['config', 'config.worktree', 'HEAD'].map((f) => path.join(dotgit, f)) };
     if (st && st.isFile()) {
       try {
         const gitdir = path.resolve(dir, /^gitdir: (.*)$/m.exec(fs.readFileSync(dotgit, 'utf8'))[1].trim());
         let common = gitdir;
         try { common = path.resolve(gitdir, fs.readFileSync(path.join(gitdir, 'commondir'), 'utf8').trim()); } catch {}
-        return { top: dir, files: [path.join(common, 'config'), path.join(gitdir, 'config.worktree'), path.join(gitdir, 'HEAD'), dotgit] };
+        return { top: dir, gitdir, files: [path.join(common, 'config'), path.join(gitdir, 'config.worktree'), path.join(gitdir, 'HEAD'), dotgit] };
       } catch { return { top: dir, files: [dotgit] }; }
     }
     const up = path.dirname(dir);
@@ -105,12 +105,22 @@ function untrustedOf(all, trusted) {
   return all.filter((e) => e.origin !== 'command line:' && !ok.has(`${e.key}\n${e.value}`));
 }
 
+// core.worktree moves the work tree: git would then read, check out and commit files in another
+// folder (audit 2026-11-16, E3). A value that names the folder itself (a submodule's) is fine; a
+// relative one counts from the git dir.
+const sameFolder = (a, b) => { try { return fs.realpathSync(a) === fs.realpathSync(b); } catch { return false; } };
+function checkWorktree(e, repo) {
+  if (!e.value || (repo.gitdir && sameFolder(path.resolve(repo.gitdir, e.value), repo.top))) return;
+  throw new Error('this repo\'s git config points its work tree at another folder (core.worktree), so git would read and change files there');
+}
+
 // The -c options that blank every driver the user's own config does not also set to that value.
-function overridesFrom(all, trusted, gitVersion) {
+function overridesFrom(all, trusted, gitVersion, repo = {}) {
   const out = [];
   const required = new Set();
   const hooks = new Set();
   for (const e of untrustedOf(all, trusted)) {
+    if (e.key === 'core.worktree') { checkWorktree(e, repo); continue; }
     if (e.key === 'extensions.partialclone' || (/^remote\..+\.promisor$/.test(e.key) && !/^(false|no|off|0)$/i.test(e.value || ''))) {
       if (cmpVer(gitVersion, LAZY_FETCH_GIT) < 0) throw new Error(`this repo is a partial clone, and git ${gitVersion.join('.')} cannot stop it fetching (git 2.44 or newer can)`);
       continue;
@@ -157,9 +167,9 @@ module.exports = (run, READONLY_GIT, SAFE_ENV) => {
     throw new Error(`could not read its git config (${(r.stderr || '').trim().split('\n')[0].slice(0, 120)})`);
   }
 
-  async function lookup(cwd, top, env) {
+  async function lookup(cwd, repo, env) {
     const [all, global, system, ver] = await Promise.all([query(cwd, env, []), query(cwd, env, ['--global']), query(cwd, env, ['--system']), gitVersion()]);
-    return { overrides: overridesFrom(all, [...global, ...system], ver), watched: watchedFiles(top, all) };
+    return { overrides: overridesFrom(all, [...global, ...system], ver, repo), watched: watchedFiles(repo.top, all) };
   }
 
   // The -c options that blank this repo's own drivers. Rejects (never resolves to "no
@@ -173,7 +183,7 @@ module.exports = (run, READONLY_GIT, SAFE_ENV) => {
     if (hit && hit.sig === sig && now - hit.at < DRIVER_TTL_MS && (!hit.watched || statSig(hit.watched) === hit.watchedSig)) return hit.p;
     if (cache.size >= MAX_ENTRIES) for (const [k, v] of cache) if (now - v.at >= DRIVER_TTL_MS || cache.size >= MAX_ENTRIES) cache.delete(k);
     const entry = { at: now, sig, p: null, watched: null, watchedSig: null };
-    entry.p = lookup(cwd, repo.top, env).then((r) => { entry.watched = r.watched; entry.watchedSig = statSig(r.watched); return r.overrides; });
+    entry.p = lookup(cwd, repo, env).then((r) => { entry.watched = r.watched; entry.watchedSig = statSig(r.watched); return r.overrides; });
     cache.set(key, entry);
     entry.p.catch(() => { if (cache.get(key) === entry) cache.delete(key); });
     return entry.p;

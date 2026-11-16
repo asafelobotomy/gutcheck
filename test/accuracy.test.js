@@ -368,3 +368,25 @@ test('local-only: a pushed single-branch repo and a fresh repo raise no git-unpu
     try { assert.ok(!ids(await scanRepo(e, {})).includes('git-unpushed-branches')); } finally { rm(e); }
   } finally { rm(d); rm(bare); }
 });
+
+test('git: a detached HEAD is not offered as a merged branch to delete (audit 2026-11-16, K2)', async () => {
+  const d = repo();
+  try {
+    put(d, 'a', '1'); sh(d, 'add', '-A'); sh(d, 'commit', '-qm', 'one');
+    put(d, 'a', '2'); sh(d, 'commit', '-qam', 'two');
+    sh(d, 'branch', 'done', 'HEAD~1'); sh(d, 'checkout', '-q', 'HEAD~1');
+    assert.deepEqual((await scanRepo(d, {})).git.mergedBranches, ['done'], 'git branch --merged also lists "(HEAD detached at …)"');
+  } finally { rm(d); }
+});
+
+test('git: a branch and a tag with one name keep the plain branch name (audit 2026-11-07, A10)', async () => {
+  const d = repo();
+  try {
+    put(d, 'a', '1'); sh(d, 'add', '-A'); sh(d, 'commit', '-qm', 'one');
+    sh(d, 'branch', 'feature'); sh(d, 'tag', 'feature'); sh(d, 'tag', 'main');
+    put(d, 'a', '2'); sh(d, 'commit', '-qam', 'two');
+    const r = await scanRepo(d, {});
+    assert.deepEqual(r.git.branches.map((b) => b.name).sort(), ['feature', 'main'], 'not heads/feature');
+    assert.deepEqual(r.git.mergedBranches, ['feature']);
+  } finally { rm(d); }
+});

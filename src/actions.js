@@ -5,14 +5,15 @@
 const os = require('node:os');
 const path = require('node:path');
 const { apply, defaultCtx } = require('./apply');
-const { MAX_PLAN_ITEMS, sq } = require('./util');
+const { SAFE_GIT_ENV } = require('./exec');
+const { MAX_PLAN_ITEMS, sq, printable } = require('./util');
 const INSTALLERS = ['npm install', 'yarn install', 'pnpm install', 'bun install'];
 const { TEMPLATES, findEcosystems } = require('./templates');
 const { detectStacks } = require('./tests/stack');
 const { IGNORE_OK } = require('./clutter');
 const { looksSecret } = require('./secret-patterns');
 const { planTestRun } = require('./tests/runs');
-const { validBranch, validRemote, inspect } = require('./git-safety');
+const { validBranch, validRemote, inspect, atCommit, unfinishedOp } = require('./git-safety');
 const { API_ACTIONS, REMOTE_FILE_FIX } = require('./renderer/fix-all');
 const { compressionOf, COMPRESSED_NOTE } = require('./disk-space');
 
@@ -21,7 +22,7 @@ const fail = (msg) => { throw new PlanError(msg); };
 // Not an error: there is nothing for the action to do (the app shows it as a note, not a failure).
 const nothing = (msg) => { const e = new PlanError(msg); e.nothing = true; throw e; };
 
-const cleanText = (s, max) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) : '');
+const cleanText = (s, max) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, ' ').trim().slice(0, max) : ''); // controls, line separators, bidi
 
 // Read-only git for planning: the scans' guards (no hooks, fsmonitor, repo drivers or lazy fetch).
 const readGit = (ctx, args, cwd) => ctx.safeGit(args, cwd);
@@ -44,7 +45,9 @@ const GIT_STEP = [
   '-c', 'core.alternateRefsCommand=true', '-c', 'core.alternateRefsPrefixes=', // true: lists no refs (an empty command makes git print "cannot run")
   '-c', 'submodule.recurse=false', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false',
 ];
-const git = (args, dir, note, pre = []) => ({ kind: 'cmd', cmd: 'git', args: [...GIT_STEP, ...pre, ...args], cwd: dir, display: show('git', args), note });
+// No lazy fetch either (a partial clone fetching a missing object runs the repo's uploadpack or
+// sshCommand: audit 2026-11-16, E1); plan() lifts this once its remotes pass the network checks.
+const git = (args, dir, note, pre = []) => ({ kind: 'cmd', cmd: 'git', args: [...GIT_STEP, ...pre, ...args], cwd: dir, env: { ...SAFE_GIT_ENV }, display: show('git', args), note });
 const gh = (args, dir, input) => ({ kind: 'cmd', cmd: 'gh', args, cwd: dir, input, display: show('gh', args) + (input ? '   # with JSON body' : '') });
 
 const RISK = { safe: 0, caution: 1, danger: 2 };
@@ -179,8 +182,8 @@ const ACTIONS = {
       const name = safeName(b.name);
       const force = !!p.force;
       if (!force && !(r.git.mergedBranches || []).includes(name)) fail(`"${name}" is not merged into the default branch. Use force delete if you are sure.`);
-      const sha = (await readGit(ctx, ['rev-parse', '--verify', '--quiet', '--short', `refs/heads/${name}`], r.path)).stdout.trim();
-      return { risk: force ? 'danger' : 'caution', title: `${force ? 'FORCE ' : ''}delete local branch ${name}`, uses: ['ref-update'], steps: [git(['branch', force ? '-D' : '-d', '--', name], r.path)], undo: sha ? `git branch ${name} ${sha}` : undefined };
+      const sha = (await readGit(ctx, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`], r.path)).stdout.trim();
+      return { risk: force ? 'danger' : 'caution', title: `${force ? 'FORCE ' : ''}delete local branch ${name}`, uses: ['ref-update'], steps: [...(sha ? [atCommit(r.path, `refs/heads/${name}`, sha)] : []), git(['branch', force ? '-D' : '-d', '--', name], r.path)], undo: sha ? `git branch ${name} ${sha.slice(0, 7)}` : undefined };
     },
   },
 
@@ -204,7 +207,8 @@ const ACTIONS = {
       const pr = (r.prs || []).find((x) => x.headRefName === name);
       if (pr) fail(`PR #${pr.number} is open from this branch. Close or merge it first.`);
       // An explicit delete refspec, and nothing else: no mirror, tags or submodules from config.
-      const args = ['push', '--no-follow-tags', '--recurse-submodules=no', '--', 'origin', `:refs/heads/${name}`];
+      // The lease: only if origin's branch is still where this clone last saw it (a delete, never a forced update).
+      const args = ['push', '--no-follow-tags', '--recurse-submodules=no', `--force-with-lease=refs/heads/${name}`, '--', 'origin', `:refs/heads/${name}`];
       return { risk: 'danger', title: `Delete remote branch origin/${name}`, uses: ['push'], remotes: ['origin'], pushes: true, steps: [git(args, r.path, undefined, ['-c', 'remote.origin.mirror=false'])], undo: `git push origin <sha>:refs/heads/${rb.name}   (find the sha with git reflog)` };
     },
   },
@@ -259,7 +263,7 @@ const ACTIONS = {
     plan(r) {
       const want = ((r.deps && r.deps.installer) || []).join(' ');
       const [cmd, ...args] = (INSTALLERS.includes(want) ? want : 'npm install').split(' ');
-      return { risk: 'caution', title: `Run ${cmd} install`, steps: [{ kind: 'cmd', cmd, args, cwd: r.path, display: `${cmd} ${args.join(' ')}`, timeout: 300000 }], warnings: ["This executes the project's package install scripts."] };
+      return { risk: 'danger', runsRepoCode: true, title: `Run ${cmd} install`, steps: [{ kind: 'cmd', cmd, args, cwd: r.path, display: `${cmd} ${args.join(' ')}`, timeout: 300000 }], warnings: ["This executes the project's package install scripts."] };
     },
   },
   // Remove detected clutter. Paths from the UI are only looked up in a FRESH scan, so anything
@@ -274,7 +278,7 @@ const ACTIONS = {
       for (const it of picked) if (it.keep && chosen.has(it.keep)) fail(`"${it.path}" and the file it duplicates, "${it.keep}", are both selected. Keep one.`);
       const steps = picked.map((it) => ({
         kind: 'remove', root: r.path, rel: it.path, path: path.join(r.path, ...it.path.split('/')), mode: it.mode, fileStat: it.kind === 'file' ? { size: it.size, mtime: it.mtime } : null,
-        display: it.mode === 'trash' ? `move to trash: ${it.path}${it.kind === 'dir' ? '/' : ''}` : `delete (regenerable): ${it.path}${it.kind === 'dir' ? '/' : ''}`,
+        display: it.mode === 'trash' ? `move to trash: ${printable(it.path)}${it.kind === 'dir' ? '/' : ''}` : `delete (regenerable): ${printable(it.path)}${it.kind === 'dir' ? '/' : ''}`,
         note: it.reason,
       }));
       const env = picked.filter((it) => it.category === 'env');
@@ -319,9 +323,8 @@ const ACTIONS = {
   },
 };
 
-
 // GitHub-side actions live in actions-github.js, built with this file's step builders.
-const GH = require('./actions-github')({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGh: (ctx, args, cwd) => ctx.run('gh', args, { cwd }) });
+const GH = require('./actions-github')({ fail, gh, needRemote, defaultBranch, localBranch, cleanText, readGit, readGh: (ctx, args) => ctx.run('gh', args, { cwd: os.homedir() }) });
 Object.assign(ACTIONS, GH.actions);
 
 // AI agent actions live in actions-agent.js; their plan errors read like this file's.
@@ -333,10 +336,9 @@ const AGENT = require('./actions-agent');
 for (const t of ['permissions-prune', 'split-instructions', 'lsp-setup']) ACTIONS[t] = AGENT[t];
 
 // A repo that is not cloned here has no folder ("remote:owner/name" is a key): its plan may hold only
-// gh steps, which name the repo themselves, and they run in the temp folder instead.
+// gh steps, which name the repo themselves.
 function onlyApi(out) {
   if (!out.steps.every((s) => s.cmd === 'gh' && (s.kind === 'cmd' || s.kind === 'check') && !s.safeGit)) fail('Only GitHub API steps can run on a repo that is not cloned here.');
-  for (const s of out.steps) s.cwd = os.tmpdir();
 }
 
 async function plan(repo, action, ctx = {}) {
@@ -348,10 +350,13 @@ async function plan(repo, action, ctx = {}) {
     const remote = repo.source === 'remote';
     if (remote && !API_ACTIONS.has(action.type)) fail(REMOTE_FILE_FIX);
     const out = await ACTIONS[action.type].plan(repo, action, ctx);
-    if (remote) onlyApi(out);
+    if (remote) onlyApi(out); else if (unfinishedOp(repo, out)) fail(unfinishedOp(repo, out));
+    for (const s of out.steps) if (s.cmd === 'gh') s.cwd = os.homedir(); // never in the repo (gh would run plain git there) or the shared /tmp: every gh step names its repo
     // The repo's own network programs and non-network remotes refuse the plan; its hooks and
     // drivers make it caution (B9, B10).
-    const code = await inspect(ctx, repo.path, out, fail);
+    const runsGit = !remote && out.steps.some((s) => s.cmd === 'git');
+    const code = await inspect(ctx, repo.path, { ...out, runsGit }, fail);
+    if (code.lazyFetch) for (const s of out.steps) if (s.cmd === 'git' && s.env) delete s.env.GIT_NO_LAZY_FETCH;
     const risk = code.runsRepoCode && RISK[out.risk] < RISK.caution ? 'caution' : out.risk;
     return {
       ok: true,
@@ -364,9 +369,9 @@ async function plan(repo, action, ctx = {}) {
       display: out.steps.map((s) => ({ text: s.display, preview: s.preview, note: s.note })),
       warnings: [...(out.warnings || []), ...code.warnings],
       // Fix all leaves these out of what it runs on its own (renderer/fix-all.js).
-      runsRepoCode: code.runsRepoCode,
+      runsRepoCode: code.runsRepoCode || !!out.runsRepoCode, // npm-install says so itself
       // What recheck() inspects again just before the plan runs.
-      inspected: { uses: out.uses || [], remotes: out.remotes || [], pushes: !!out.pushes, target: out.target || null },
+      inspected: { uses: out.uses || [], remotes: out.remotes || [], pushes: !!out.pushes, target: out.target || null, runsGit },
       undo: out.undo || null,
       body: out.body || null,
       note: [out.note, code.note].filter(Boolean).join(' ') || null,

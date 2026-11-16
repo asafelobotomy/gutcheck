@@ -106,7 +106,7 @@ test('B7: delete-remote refuses a "-"-leading remote branch and deletes a normal
   assert.deepEqual(sh(bare, 'branch', '--format=%(refname:short)').split('\n').sort(), ['gone', 'keep', 'main']);
   const good = await act(d, { type: 'delete-remote', branch: 'gone' }, gh);
   assert.ok(good.p.ok, good.p.error);
-  assert.equal(good.p.display[0].text, 'git push --no-follow-tags --recurse-submodules=no -- origin :refs/heads/gone');
+  assert.equal(good.p.display[0].text, 'git push --no-follow-tags --recurse-submodules=no --force-with-lease=refs/heads/gone -- origin :refs/heads/gone');
   assert.ok(good.applied.ok, JSON.stringify(good.applied.results));
   assert.deepEqual(sh(bare, 'branch', '--format=%(refname:short)').split('\n').sort(), ['keep', 'main']);
 });
@@ -178,4 +178,43 @@ test('B8: pull refuses an upstream whose remote branch name is not safe', async 
   const { p } = await act(d, { type: 'pull' }, (r) => ({ ...r, git: { ...r.git, upstream: 'origin/-x' } }));
   assert.equal(p.ok, false);
   assert.match(p.error, /not a safe branch name/);
+});
+
+test('F6: delete-remote only deletes the branch where this clone last saw it', async () => {
+  const { bare, d } = cloned();
+  const gh = (r) => ({ ...r, remote: { owner: 'o', name: 'n', defaultBranch: 'main' }, prs: [] });
+  const p = await plan(gh(await scanRepo(d, {})), { type: 'delete-remote', branch: 'gone' });
+  assert.ok(p.ok, p.error);
+  const o = otherClone(bare); // someone pushes new work to the branch after the preview
+  sh(o, 'switch', '-q', 'gone'); commit(o, 'new.txt', 'work pushed after the preview\n'); sh(o, 'push', '-q', 'origin', 'gone');
+  const r = await apply(p);
+  assert.equal(r.ok, false, 'the delete went ahead over new commits');
+  assert.ok(sh(bare, 'branch', '--format=%(refname:short)').split('\n').includes('gone'));
+});
+
+test('F6: a force delete is held when the branch moved after the preview', async () => {
+  const { d } = cloned();
+  const p = await plan(await scanRepo(d, {}), { type: 'delete-local', branch: 'feat', force: true });
+  assert.ok(p.ok, p.error);
+  assert.match(p.display[0].text, /^check feat is still at [0-9a-f]{7}$/);
+  sh(d, 'switch', '-q', 'feat'); commit(d, 'more.txt', 'more\n'); sh(d, 'switch', '-q', 'main');
+  const r = await apply(p);
+  assert.equal(r.ok, false);
+  assert.match(r.results[0].out, /moved since the preview/);
+  assert.match(sh(d, 'branch'), /feat/);
+});
+
+test('F7: no commit, merge, pull or switch is planned during an unfinished merge', async () => {
+  const { d } = cloned();
+  sh(d, 'switch', '-q', '-c', 'side'); commit(d, 'a.txt', 'side\n'); sh(d, 'switch', '-q', 'main'); commit(d, 'a.txt', 'main\n');
+  assert.throws(() => sh(d, 'merge', 'side'), 'the merge conflicts');
+  const scanned = await scanRepo(d, {});
+  const c = await plan(scanned, { type: 'commit-all', message: 'wip' });
+  assert.equal(c.ok, false);
+  assert.match(c.error, /unfinished merge/);
+  assert.equal((await plan(scanned, { type: 'checkout', branch: 'feat' })).ok, false); // refused for its uncommitted changes first
+  const { unfinishedOp } = require('../src/git-safety');
+  assert.match(unfinishedOp(scanned, { uses: ['switch'] }), /unfinished merge/);
+  assert.equal(unfinishedOp(scanned, { uses: ['fetch'] }), null, 'a fetch changes no files');
+  assert.equal(unfinishedOp({ gitState: { ops: [{ kind: 'bisect' }] } }, { uses: ['commit'] }), null);
 });

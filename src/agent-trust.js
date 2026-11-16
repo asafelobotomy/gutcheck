@@ -119,7 +119,7 @@ function globRe(pattern) {
   if (dirOnly) p = p.slice(0, -1);
   const anchored = p.startsWith('/') || p.includes('/');
   p = p.replace(/^\//, '');
-  const body = p.split('/').map((seg) => (seg === '**' ? '\u0000' : seg.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]'))).join('/').replace(/\u0000\/?/g, (m) => (m.endsWith('/') ? '(?:.*/)?' : '.*')).replace(/\/\.\*$/, '/.*');
+  const body = p.split('/').map((seg) => (seg === '**' ? '\u0000' : seg.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]'))).join('/').replace(/\u0000\/?/g, (m) => (m.endsWith('/') ? '(?:.*/)?' : '.*'));
   return new RegExp(`${anchored ? '^' : '^(?:.*/)?'}${body}${dirOnly ? '/.*$' : '(?:/.*)?$'}`);
 }
 

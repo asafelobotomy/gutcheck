@@ -115,7 +115,8 @@ async function identity(runGit) {
     id.recent++;
     if ((n || '').toLowerCase() !== name.toLowerCase()) continue;
     id.mine++;
-    if (norm(e) !== norm(email)) counts.set(e, (counts.get(e) || 0) + 1);
+    // A noreply address is one GitHub itself links to an account (its squash merges use it): never "another email".
+    if (norm(e) !== norm(email) && !/@users\.noreply\.github\.com$/i.test(e)) counts.set(e, (counts.get(e) || 0) + 1);
   }
   id.other = [...counts].map(([e, count]) => ({ email: e, count })).sort((a, b) => b.count - a.count);
   return id;

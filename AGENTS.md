@@ -5,7 +5,7 @@ GutCheck is an Electron app (plus a CLI and an MCP server) that checks the healt
 ## Commands
 
 - `npm install`: install dependencies (Node 22 or newer)
-- `npm test`: run every unit test (`node --test test/*.test.js`; no network needed, temp git repos only)
+- `npm test`: run every unit test (`scripts/test.js` runs `node --test` on `test/*.test.js` with a private temp folder it removes afterwards; no network needed, temp git repos only). One file: `npm test -- test/cli.test.js`
 - `npm start`: run the app
 - `npm run dist`: build the AppImage into `dist/`
 - `node src/cli.js --help`: the command line; `node src/cli.js mcp` runs the MCP server
@@ -19,6 +19,10 @@ GutCheck is an Electron app (plus a CLI and an MCP server) that checks the healt
 - Upkeep checks: `dep-automation.js` (Dependabot grouping, auto-merge), `release.js` (tags vs manifest, changelog).
 - The user's rules: `policy.js` (ignores with reasons, baseline drift), `schedule.js` (new-since-last-scan, scheduled scans). Report steps for these are in `report-upkeep.js`.
 - AI agent context: `agent-context.js` (instruction size, LSP plugins, permission rules; redacted), `actions-agent.js` (split, prune, LSP set-up), `agent-tidy.js` (stale config files and machine-level fixes), `agent-usage.js` (the opt-in usage and health check).
+- Fix safety: `git-safety.js` (plan-time checks on a repo's own git config: network programs and settings, hooks, partial clones, unfinished operations) and `text-safe.js` (names left out of report commands).
+- Local-only work: `local-only.js` (what exists on no remote), `actions-rescue.js` (the rescue copy).
+- Secrets backup: `secrets.js` (find), `secret-status.js` (the record), `secrets-ctl.js`, `secrets-io.js` and `vault-adapters.js` (plan and save to a password manager), `secrets-glue.js` (IPC).
+- Headless: `cli.js`, `mcp.js` (the MCP server; `--allow-actions`, `--allow-danger`), `agent-connect.js` (registering it with agents).
 - Local git state: `git-state.js` (unfinished operations, detached HEAD, maintenance, identity), `checks-gitstate.js`, `actions-gitstate.js` (abort, maintenance register), `report-gitstate.js`.
 - Repos on GitHub not cloned here: `remote-settings.js` (settings, name rules), `remote-list.js` (list and filter), `remote-cache.js` (hook-free shallow copies under the data folder), `remote-scan.js` (scan a copy, working-copy checks left out; `repoDir(r)` is the folder to read), `remote-stage.js` (the workspace scan's second stage), `remote-branches.js` (branches from GitHub and their findings), `renderer/remote-view.js`. Results use the key `remote:owner/name`, never a folder: code that reads files goes through `repoDir`. Plans on them allow only `FixAll.API_ACTIONS` (gh steps, run in the temp folder; `actions.js` enforces it).
 - Other scans: `clutter.js` (+ `clutter-rules.js`), `quality/`, `tests/`, `agents.js`, `history.js`.
@@ -29,10 +33,10 @@ GutCheck is an Electron app (plus a CLI and an MCP server) that checks the healt
 
 ## Rules
 
-- Scans are read-only and never run a repo's code: every git call goes through `exec.git` (hooks and fsmonitor disabled). Only the opt-in `tests-run` action executes project code.
+- Scans are read-only and never run a repo's code: every git call goes through `exec.git` (hooks and fsmonitor disabled). Only the opt-in `tests-run` and `npm-install` actions execute project code; both are rated danger.
 - Every change goes plan, preview, apply. Nothing deletes repos, changes visibility, force-pushes or rewrites history.
 - Never put secret values, `.env` contents or settings values into findings, reports or logs.
 - Keep files under 400 lines; GutCheck checks itself.
 - Explain each new rule's source in `docs/sources.md`, and add a test for each false alarm you fix (`test/accuracy.test.js`).
 - Changes go under `## [Unreleased]` in `CHANGELOG.md`.
-- Releasing: `npm run bump -- patch|minor|major` (moves Unreleased into a dated version and updates `package.json` and `package-lock.json`; tests check all three agree), commit, push to `main`. CI tags `v<version>` and publishes the release with that changelog section as its notes.
+- Releasing: `npm run bump -- patch|minor|major` (moves Unreleased into a dated version and updates `package.json` and `package-lock.json`; tests check all three agree), commit, open a pull request and merge it once the `test` check passes (`main` requires it, so a direct push is refused). CI then tags `v<version>` and publishes the release with that changelog section as its notes.

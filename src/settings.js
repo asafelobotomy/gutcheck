@@ -17,7 +17,7 @@ function createSettingsStore(file, io = fs) {
     return {};
   }
   function save(s) {
-    io.writeFileSync(file + '.tmp', JSON.stringify(s, null, 2));
+    io.writeFileSync(file + '.tmp', JSON.stringify(s, null, 2), { mode: 0o600 });
     io.renameSync(file + '.tmp', file);
     return s;
   }

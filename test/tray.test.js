@@ -109,7 +109,7 @@ test('autostart writes and removes an XDG entry that relaunches hidden', () => {
 
 test('autostart uses the AppImage path, quotes awkward paths, and uses login items off Linux', () => {
   assert.deepEqual(launchCommand({ isPackaged: true }, { APPIMAGE: '/home/me/My Apps/GutCheck.AppImage' }, '/tmp/.mount/x'), { exec: '/home/me/My Apps/GutCheck.AppImage', args: ['--hidden'] });
-  assert.deepEqual(launchCommand({ isPackaged: false, getAppPath: () => '/src/gc' }, {}, '/usr/bin/electron'), { exec: '/usr/bin/electron', args: ['/src/gc', '--no-sandbox', '--hidden'] });
+  assert.throws(() => launchCommand({ isPackaged: false, getAppPath: () => '/src/gc' }, {}, '/usr/bin/electron'), /needs the packaged app/, 'a source checkout would start without the sandbox');
   assert.equal(quoteArg('/plain/path-1.0'), '/plain/path-1.0');
   assert.equal(quoteArg('/opt/100%/g'), '"/opt/100%%/g"');
   // Exec quoting (\$, \") plus the key-file string escape on top: each backslash written twice.

@@ -76,7 +76,9 @@ async function looksPytestTemp(abs) {
 // Real size of a big folder: du is far faster than walking it, and a capped walk would under-count.
 async function bigDirSize(p) {
   const r = await run('du', ['-sk', '--', p], { timeout: COMMAND_TIMEOUT_MS });
-  return r.ok ? (Number(r.stdout.split('\t')[0]) || 0) * 1024 : dirSize(p);
+  // du exits 1 when one entry is unreadable or vanished mid-walk, but still prints the total.
+  const kib = Number(r.stdout.split('\t')[0]);
+  return Number.isFinite(kib) && (r.ok || kib > 0) && /^\d+\t/.test(r.stdout) ? kib * 1024 : dirSize(p);
 }
 
 const STALE_LOG_DAYS = 14; // an ignored log or temp file untouched this long is stale

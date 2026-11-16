@@ -101,7 +101,8 @@ test('bitwarden parseStatus maps locked/unauthenticated to hints', () => {
 test('bitwarden parseList reads only ids', () => {
   const ids = ADAPTERS.bitwarden.parseList('[{"id":"i1","notes":"SECRET"},{"id":"i2"}]');
   assert.deepEqual([...ids].sort(), ['i1', 'i2']);
-  assert.deepEqual(ADAPTERS.bitwarden.listCmd('f1').args, ['list', 'items', '--folderid', 'f1']);
+  assert.deepEqual(ADAPTERS.bitwarden.listCmd('f1').args, ['list', 'items', '--folderid', 'f1', '--search', 'gutcheck:']);
+  assert.deepEqual(ADAPTERS.bitwarden.listCmd().args, ['list', 'items', '--search', 'gutcheck:']);
 });
 
 test('binary content is base64 for text-only tools', () => {

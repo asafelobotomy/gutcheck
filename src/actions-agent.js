@@ -16,6 +16,16 @@ const { claudeBin } = require('./agent-connect');
 
 class PlanError extends Error {}
 const fail = (msg) => { throw new PlanError(msg); };
+// A repo file read while planning: its text reaches the preview (and an agent, over MCP), so a link
+// that leads out of the repo is refused here, not only when the plan runs (audit B14).
+function readInRepo(root, file, rel) {
+  let st;
+  try { st = fs.lstatSync(file); } catch { fail(`${rel} is gone.`); }
+  let inside = false;
+  try { const top = fs.realpathSync(root); const dir = fs.realpathSync(path.dirname(file)); inside = dir === top || dir.startsWith(top + path.sep); } catch {}
+  if (!st.isFile() || !inside) fail(`${rel} is a link or leads outside the repo; GutCheck will not read it.`);
+  return fs.readFileSync(file, 'utf8');
+}
 const sha = (t) => crypto.createHash('sha256').update(t).digest('hex');
 const KB = 1024;
 const SECTION_MIN = 1.5 * KB; // smaller sections stay in the core file
@@ -29,8 +39,7 @@ function planPrune(r, p) {
   const file = path.join(r.path, '.claude', 'settings.local.json');
   const want = new Set((Array.isArray(p.hashes) ? p.hashes : []).filter((h) => /^[0-9a-f]{8}$/.test(h)));
   if (!want.size) fail('Choose the rules to remove.');
-  let text;
-  try { text = fs.readFileSync(file, 'utf8'); } catch { fail('.claude/settings.local.json is gone.'); }
+  const text = readInRepo(r.path, file, '.claude/settings.local.json');
   let cfg;
   try { cfg = JSON.parse(text); } catch { fail('.claude/settings.local.json is not valid JSON; GutCheck will not rewrite it.'); }
   const allow = cfg && cfg.permissions && Array.isArray(cfg.permissions.allow) ? cfg.permissions.allow : [];
@@ -74,8 +83,7 @@ const INSTRUCTION_FILE = /^(?:CLAUDE|AGENTS|GEMINI)\.md$/i;
 async function planSplit(r, p, ctx = {}) {
   const rel = ['CLAUDE.md', '.claude/CLAUDE.md', 'AGENTS.md'].find((f) => f === p.file) || fail('Choose CLAUDE.md, .claude/CLAUDE.md or AGENTS.md.');
   const file = path.join(r.path, rel);
-  let text;
-  try { text = fs.readFileSync(file, 'utf8'); } catch { fail(`${rel} is gone.`); }
+  const text = readInRepo(r.path, file, rel);
   const lines = text.split('\n');
   const steps = [];
   const moved = [];

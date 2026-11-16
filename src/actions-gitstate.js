@@ -39,6 +39,9 @@ module.exports = ({ fail, nothing, git, readGit }) => ({
       if (reg.ok && reg.stdout.split('\n').some((x) => x && real(x.replace(/\/+$/, '')) === real(r.path))) nothing('This repo is already registered for maintenance.');
       return {
         risk: 'caution', title: 'Register this repo for git maintenance',
+        // Background maintenance fetches from every remote with plain git, so the plan gets the checks a
+        // fetch gets: no programs or connection settings from the repo's config, plain network remotes.
+        uses: ['fetch'], remotes: ((r.git && r.git.remotes) || []).filter((x) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(x)),
         steps: [git(['maintenance', 'register'], r.path)],
         warnings: [`This writes your global git config: it adds ${r.path} to maintenance.repo, sets maintenance.strategy=incremental if you have not set one, and sets maintenance.auto=false in this repo's own config (background maintenance replaces gc --auto).`],
         note: 'Nothing is scheduled by this step: git maintenance start would install the timers, and GutCheck does not run it.',

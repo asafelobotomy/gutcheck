@@ -18,9 +18,10 @@ const FixAll = require('./renderer/fix-all');
 const { createSecretsCtl } = require('./secrets-ctl');
 const { engineSecrets, SECRET_TYPES, MCP_REFUSAL } = require('./secrets-glue');
 
+const DANGER_OFF = 'This is a dangerous action. An agent can run it only when GutCheck\'s MCP server was started with --allow-danger as well as --allow-actions; otherwise ask the user to run it in the GutCheck app or with the gutcheck command.';
 const OFF = 'Actions are turned off: start GutCheck with --allow-actions to plan and apply changes. Everything else works read-only.';
 
-const { dataDir } = require('./paths');
+const { dataDir, agentRootRefusal } = require('./paths');
 
 // Catalogue of every action an agent can plan: parameters and allowed values. Planning still
 // validates everything; this only saves the caller from guessing.
@@ -73,10 +74,14 @@ const brief = (x) => {
 function createEngine(opts = {}) {
   const env = opts.env || process.env;
   const dir = dataDir(env);
-  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  // Private: settings, the audit log and ignores say what is on this machine (audit A10).
+  try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); fs.chmodSync(dir, 0o700); } catch {}
   const store = createSettingsStore(path.join(dir, 'settings.json'));
   const known = new Map();
   const allowActions = !!opts.allowActions;
+  // Over MCP the caller is an agent, and it would be the one typing the repo name: dangerous plans
+  // need the person who started the server to have said so (audit 2026-11-16, F1).
+  const dangerOff = opts.via === 'mcp' && !opts.allowDanger;
   let ws = null; // the shared workspace scanner, made once the service exists
   const settings = () => {
     const s = store.load();
@@ -85,7 +90,7 @@ function createEngine(opts = {}) {
   const trendFile = path.join(dir, 'trend.json');
   const trendStore = {
     read: () => JSON.parse(fs.readFileSync(trendFile, 'utf8')),
-    write: (a) => { fs.writeFileSync(trendFile + '.tmp', JSON.stringify(a)); fs.renameSync(trendFile + '.tmp', trendFile); },
+    write: (a) => { fs.writeFileSync(trendFile + '.tmp', JSON.stringify(a), { mode: 0o600 }); fs.renameSync(trendFile + '.tmp', trendFile); },
   };
   const auditFile = path.join(dir, 'audit.log');
   const policy = createPolicyStore(dir);
@@ -117,8 +122,10 @@ function createEngine(opts = {}) {
   // must not use up the "new since last scan" baseline).
   async function scan({ root: r, deep = false, recordSeen = false, onProgress, remote } = {}) {
     const s = store.load();
+    if (via === 'mcp') { const no = agentRootRefusal(r, s); if (no) return { ok: false, error: no }; }
     const out = await ws.scan({ root: r || s.cliRoot || s.root || '', deep, recordSeen, onProgress, remote });
-    if (out.ok && out.root !== s.cliRoot) store.update({ cliRoot: out.root }); // never replaces the app's own folder
+    // Never replaces the app's own folder, and an agent's choice is never remembered.
+    if (out.ok && via !== 'mcp' && out.root !== s.cliRoot) store.update({ cliRoot: out.root });
     return out;
   }
 
@@ -286,13 +293,22 @@ function createEngine(opts = {}) {
       resolved.push({ dir: x.repo.path, action });
     }
     const plans = resolved.length ? await service.planActions(resolved.map(({ dir, action }) => ({ dir, action }))) : [];
+    // Fix all runs in order: once a step is refused (not just "nothing to do"), the later steps for that
+    // repo are not offered, since a commit or push after a refused pull is not what was planned (F9).
+    const stopped = new Set();
+    plans.forEach((p, k) => {
+      if (!resolved[k].all) return;
+      if (stopped.has(resolved[k].dir)) plans[k] = { ok: false, repoName: p.repoName, error: `Not planned: an earlier fix for ${p.repoName || 'this repo'} was refused. Sort that out, then plan again.` };
+      else if (!p.ok && !p.nothing) stopped.add(resolved[k].dir);
+    });
     const pub = (p) => (p.ok ? { ok: true, token: p.token, repo: p.repoName, title: p.title, risk: p.risk, commands: p.display.map((d) => d.text), warnings: p.warnings, undo: p.undo, note: p.note, confirmName: p.confirmName, ...(p.runsRepoCode ? { runsRepoCode: true } : {}) } : p);
     // Fix all never runs the repo's own hooks or drivers on its own: those plans come back in `held`,
     // without a token, so a caller cannot apply them from this answer. Planning the one action
     // explicitly ({ repo, action }) still returns a token, with the warning.
     const isHeld = (p, k) => resolved[k].all && p.ok && !FixAll.automatic(p);
+    const shown = (p) => (dangerOff && p.ok && p.confirmName ? { ok: false, repo: p.repoName, title: p.title, risk: p.risk, commands: p.display.map((d) => d.text), error: DANGER_OFF } : pub(p));
     const held = plans.filter(isHeld).map((p) => { const { token, ...rest } = pub(p); return { ...rest, note: 'This runs the repo\'s own code: ask the user to run this in the GutCheck app or CLI.' }; });
-    return { ok: true, plans: [...plans.filter((p, k) => !isHeld(p, k)).map(pub), ...errors], ...(held.length ? { held } : {}), ...(decisions.length ? { decisions } : {}) };
+    return { ok: true, plans: [...plans.filter((p, k) => !isHeld(p, k)).map(shown), ...errors], ...(held.length ? { held } : {}), ...(decisions.length ? { decisions } : {}) };
   }
 
   // Only plans returned by plan() can run. Danger plans need confirm: { <token>: '<repo name>' }.
@@ -304,7 +320,7 @@ function createEngine(opts = {}) {
     const startedAt = Date.now(); // plans fresh now stay valid for the whole batch
     for (const t of tokens) {
       if (typeof t === 'string' && t.startsWith('s:')) res.push({ title: 'Back up secret files', ...(await secrets.apply(t)), repoName: 'Secrets' });
-      else if (typeof t === 'string' && t.startsWith('a:')) { const r = store.load().readOnly ? { ok: false, error: 'Read-only mode is on in the GutCheck app.' } : await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm, failed, startedAt })));
+      else if (typeof t === 'string' && t.startsWith('a:')) { const r = store.load().readOnly ? { ok: false, error: 'Read-only mode is on in the GutCheck app.' } : await agentsCtl().apply(t.slice(2)); res.push({ ...r, repoName: 'Agent setup' }); } else res.push(...(await service.applyActions([t], { confirm: dangerOff ? {} : confirm, failed, startedAt })));
     }
     return { ok: res.every((r) => r.ok), results: res.map((r) => ({ ok: r.ok, ...(r.skipped ? { skipped: true } : {}), repo: r.repoName, title: r.title, error: r.error, steps: (r.results || []).map((x) => ({ cmd: x.text, ok: x.ok, output: brief(x) })) })) };
   }
@@ -329,7 +345,7 @@ function createEngine(opts = {}) {
     const scope = r ? [r] : [...known.values()].filter((x) => !x.error);
     const refused = !remove && via === 'mcp' && wildcardOk(String(finding || ''), MIN_PREFIX.user) && agentIgnoreRefusal(String(finding || ''), scope.flatMap((x) => [...(x.findings || []), ...(x.ignored || [])]));
     if (refused) return { ok: false, error: refused };
-    const res = remove ? policy.removeIgnore(key, String(finding || '')) : policy.setIgnore(key, String(finding || ''), reason, via);
+    const res = remove ? policy.removeIgnore(key, String(finding || '')) : policy.setIgnore(key, String(finding || ''), reason, via, r ? r.path : null);
     if (!res.ok) return res;
     appendAudit(auditFile, { ok: true, repo: r ? r.name : 'all repos', title: `${remove ? 'Stopped ignoring' : 'Ignored'} ${finding}${remove ? '' : `: ${res.reason}`}`, via: opts.via || 'cli' });
     if (r) await ws.refresh(r.path); else await ws.refreshAll(); // an ignore for every repo changes them all
@@ -371,7 +387,7 @@ function createEngine(opts = {}) {
 
   const history = ({ limit = 50 } = {}) => ({ ok: true, entries: readAudit(auditFile, Math.max(1, Math.min(500, limit))) });
 
-  return { scan, repos, findings, localOnly, repoDetail, remote, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, secrets: secrets.list, secretsPlan: secrets.plan, secretsApply: secrets.apply, secretsVerify: secrets.verify, secretsSkip: secrets.skip, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
+  return { scan, repos, findings, localOnly, repoDetail, remote, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, secrets: secrets.list, secretsPlan: secrets.plan, secretsApply: secrets.apply, secretsVerify: secrets.verify, secretsSkip: secrets.skip, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions, allowDanger: !!opts.allowDanger };
 }
 
 module.exports = { createEngine, dataDir, ACTION_CATALOG, brief };

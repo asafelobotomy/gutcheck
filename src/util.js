@@ -19,6 +19,15 @@ const printable = (s) => String(s).replace(UNPRINTABLE, (ch) => {
   const n = ch.codePointAt(0);
   return n <= 0x9f ? '\\x' + n.toString(16).padStart(2, '0') : '\\u{' + n.toString(16) + '}';
 });
+// Whole lines of output for a terminal: like printable, but "\\", newlines and tabs stay, so text that
+// already went through printable is unchanged. Nothing printed can then move the cursor, set the
+// title or clipboard, or reorder what is shown (audit 2026-11-16, T3).
+const TERM_UNSAFE = /[\x00-\x08\x0b-\x1f\x7f-\x9f\u{2028}\u{2029}\p{Cf}\u{34f}\u{115f}\u{1160}\u{3164}\u{fe00}-\u{fe0f}\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]/gu;
+const termSafe = (s) => String(s).replace(TERM_UNSAFE, (ch) => { const n = ch.codePointAt(0); return n <= 0x9f ? '\\x' + n.toString(16).padStart(2, '0') : '\\u{' + n.toString(16) + '}'; });
+// The same characters inside JSON text, as JSON's own \uXXXX escapes, so the output still parses.
+const jsonSafe = (s) => String(s).replace(TERM_UNSAFE, (ch) => [...Array(ch.length).keys()].map((i) => '\\u' + ch.charCodeAt(i).toString(16).padStart(4, '0')).join(''));
+// Text as a literal inside a RegExp.
+const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const list = (a, max = 6) => a.slice(0, max).join(', ') + (a.length > max ? `, +${a.length - max} more` : '');
 
 // Folders no scan should descend into: huge build/dependency output owned by a tool.
@@ -48,4 +57,4 @@ function cmpVersion(a, b) {
 // A workflow that failed this many runs in a row is broken, not flaky: a re-run would fail again.
 const BROKEN_RUN_STREAK = 3;
 
-module.exports = { BROKEN_RUN_STREAK, expandHome, NODE_LOCKFILES, installCommand, DAYS_PER_YEAR, MAX_PLAN_ITEMS, COMMAND_TIMEOUT_MS, cmpVersion, DAY, daysAgo, sq, plural, printable, list, HEAVY_DIRS };
+module.exports = { BROKEN_RUN_STREAK, expandHome, NODE_LOCKFILES, installCommand, DAYS_PER_YEAR, MAX_PLAN_ITEMS, COMMAND_TIMEOUT_MS, cmpVersion, DAY, daysAgo, sq, plural, printable, termSafe, jsonSafe, escapeRe, list, HEAVY_DIRS };

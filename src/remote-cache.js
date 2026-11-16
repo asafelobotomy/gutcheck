@@ -32,7 +32,7 @@ const cleanError = (s) => (String(s || '').trim().split('\n')[0] || 'git failed'
 function configOk(entries, url, branch) {
   for (const [k, v] of entries) {
     if (/^core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks)$/.test(k)) continue;
-    if (k === 'extensions.objectformat') continue;
+    if (k === 'extensions.objectformat' || k === 'extensions.refstorage') continue; // refstorage: init.defaultRefFormat=reftable
     if (k === 'remote.origin.url') { if (v !== url) return false; continue; }
     if (k === 'remote.origin.fetch' || k === 'remote.origin.tagopt') continue;
     if (k === `branch.${branch.toLowerCase()}.remote` || k === `branch.${branch.toLowerCase()}.merge`) continue;
@@ -172,7 +172,9 @@ function createRemoteCache({ root, run = execRun, urlFor = defaultUrlFor, now = 
 
   const clear = () => { for (const x of entries()) drop(x); };
 
-  return { sync, sizeBytes, evictFor, cleanup, clear, root };
+  const has = (ref) => entries().some((x) => x.key.toLowerCase() === keyOf(ref).toLowerCase());
+
+  return { sync, sizeBytes, evictFor, cleanup, clear, has, root };
 }
 
 module.exports = { createRemoteCache, defaultUrlFor, CLONE_CONFIG, cleanError };

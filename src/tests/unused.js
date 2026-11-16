@@ -4,7 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { git } = require('../exec');
-const { COMMAND_TIMEOUT_MS } = require('../util');
+const { COMMAND_TIMEOUT_MS, escapeRe } = require('../util');
 const { readJson, readText } = require('./stack');
 
 const MAX_KEPT = 30;
@@ -30,7 +30,7 @@ function unusedHelpers(kept, cfg) {
   const fixtures = [];
   const goFuncs = [];
   const hay = (self) => kept.filter((k) => k.rel !== self).map((k) => k.text).join('\n') + '\n' + cfg;
-  const word = (w) => new RegExp(`(?<![\\w$])${w.replace(/[$]/g, '\\$')}(?![\\w$])`, 'g');
+  const word = (w) => new RegExp(`(?<![\\w$])${escapeRe(w)}(?![\\w$])`, 'g');
   // Only in a test folder that holds tests: src/tests/ full of scanner code is not a helper folder.
   const rootOf = (rel) => { const m = TEST_DIR.exec(rel); return m ? rel.slice(0, m.index + m[0].length) : null; };
   const testRoots = new Set(kept.filter((k) => k.cases).map((k) => rootOf(k.rel)).filter(Boolean));

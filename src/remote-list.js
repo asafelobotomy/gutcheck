@@ -51,6 +51,7 @@ async function listRemote({ run = execRun, orgs = [], onCall } = {}) {
     const r = await pages(run, { ...o, onCall });
     if (!r.ok) return r;
     for (const n of r.nodes) {
+      if (!n) continue; // GitHub sends null for a repo it will not show (an org's SAML or IP rule)
       const l = toListing(n);
       const key = `${l.owner}/${l.name}`.toLowerCase();
       if (!validRef(l) || seen.has(key)) continue;

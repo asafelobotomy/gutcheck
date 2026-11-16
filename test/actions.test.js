@@ -137,7 +137,7 @@ test('remote branch deletion is guarded', async () => {
   const ok = await plan(repo, { type: 'delete-remote', branch: 'old' }, ctx);
   assert.equal(ok.risk, 'danger');
   assert.equal(ok.confirmName, 'demo');
-  assert.deepEqual(ok.steps[0].args.slice(-6), ['push', '--no-follow-tags', '--recurse-submodules=no', '--', 'origin', ':refs/heads/old']);
+  assert.deepEqual(ok.steps[0].args.slice(-7), ['push', '--no-follow-tags', '--recurse-submodules=no', '--force-with-lease=refs/heads/old', '--', 'origin', ':refs/heads/old']);
   assert.equal((await plan(repo, { type: 'delete-remote', branch: 'main' }, ctx)).ok, false); // default
   assert.equal((await plan(repo, { type: 'delete-remote', branch: 'topic' }, ctx)).ok, false); // has open PR
   assert.equal((await plan(repo, { type: 'delete-remote', branch: 'nope' }, ctx)).ok, false);
@@ -213,7 +213,8 @@ test('append and write refuse to follow a symlink out of the repo', async () => 
 });
 
 test('hygiene fixes: worktree prune and security features plan the exact documented calls, admin only', async () => {
-  const wt = await plan(ghRepo(), { type: 'worktree-prune' });
+  // The folder is made up, so the repo checks (work tree, partial clone) get stubs; test/action-safety.test.js runs them for real.
+  const wt = await plan(ghRepo(), { type: 'worktree-prune' }, { checkRepo: async () => {}, gitConfig: async () => ({ all: [], untrusted: [] }) });
   assert.ok(wt.ok, wt.error);
   assert.deepEqual(wt.display.map((d) => d.text), ['git worktree prune -v']);
   const want = {
@@ -293,4 +294,12 @@ test('commit-all refuses env files and keys, but not their templates or deletion
     const p = await plan(repo, { type: 'commit-all', message: 'x' }, st(` M a.js\n${fine}\n`));
     assert.ok(p.ok, `${fine}: ${p.error}`);
   }
+});
+
+test('npm-install is a danger plan that says it runs the repo\'s code (audit 2026-11-16, F3)', async () => {
+  const p = await plan({ ...ghRepo(), deps: { installer: ['npm', 'install'] } }, { type: 'npm-install' }, { checkRepo: async () => {}, gitConfig: async () => ({ all: [], untrusted: [] }) });
+  assert.ok(p.ok, p.error);
+  assert.equal(p.risk, 'danger');
+  assert.equal(p.confirmName, ghRepo().name);
+  assert.equal(p.runsRepoCode, true);
 });

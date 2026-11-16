@@ -50,3 +50,12 @@ test('a via other than cli, app or mcp counts as an agent\'s; a plain string sta
   const old = applyPolicy(result([F('git-dirty')]), { ignores: { 'o/app': { 'git-dirty': 'old style' } } }, score);
   assert.equal(ignoreView(old.ignored[0]).from, 'Ignored by you (GutCheck settings)');
 });
+
+test('ignores keep their owner/name key when GitHub cannot be reached (audit 2026-11-16, K1)', () => {
+  const { repoKey } = require('../src/policy');
+  const remote = { owner: 'octo', name: 'a', url: 'https://github.com/octo/a' };
+  assert.equal(repoKey({ path: '/w/folder', remote }), 'octo/a');
+  assert.equal(repoKey({ path: '/w/folder', remote: { ...remote, unreachable: true } }), 'octo/a');
+  assert.equal(repoKey({ path: '/w/folder', remote: null }), 'folder');
+  assert.equal(repoKey({ path: 'remote:octo/b', ref: { owner: 'octo', name: 'b' } }), 'octo/b');
+});

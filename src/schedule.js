@@ -59,7 +59,7 @@ function createSeenStore(file, io = fs) {
     if (prev && carry) for (const k of prev.keys) if (carry(k.slice(0, k.lastIndexOf('|'))) && !keys.includes(k)) keys.push(k);
     all.sets[id] = { ts: Date.now(), keys };
     const ids = Object.keys(all.sets).sort((a, b) => all.sets[b].ts - all.sets[a].ts).slice(0, MAX_SETS);
-    try { io.writeFileSync(file + '.tmp', JSON.stringify({ sets: Object.fromEntries(ids.map((k) => [k, all.sets[k]])) })); io.renameSync(file + '.tmp', file); } catch {}
+    try { io.writeFileSync(file + '.tmp', JSON.stringify({ sets: Object.fromEntries(ids.map((k) => [k, all.sets[k]])) }), { mode: 0o600 }); io.renameSync(file + '.tmp', file); } catch {}
     return { compared: !!prev, fresh };
   }
   return { load, record };

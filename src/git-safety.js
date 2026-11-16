@@ -17,7 +17,12 @@ const validRemote = (r) => typeof r === 'string' && REMOTE_RE.test(r);
 
 // Keys (git's lower-cased names) whose value is a program git runs when it talks to a remote,
 // and remote.<r>.vcs, which names a remote helper (git-remote-<vcs>) to run instead of a transport.
-const NETWORK_KEYS = '^(core\\.(sshcommand|askpass|gitproxy)|remote\\..+\\.(uploadpack|receivepack|vcs)|credential\\.(.+\\.)?helper|url\\..+\\.(insteadof|pushinsteadof))$';
+// HTTP_KEYS (also matched) do not run a program but decide where a connection goes and whether it
+// is checked: a proxy or a switched-off certificate check would hand the user's token to another
+// host, and a cookie file is written wherever the value says (audit 2026-11-16, E4).
+const HTTP_KEYS = 'proxy|proxyauthmethod|proxysslcert|proxysslkey|proxysslcainfo|sslverify|sslcainfo|sslcapath|sslcert|sslkey|sslbackend|pinnedpubkey|curloptresolve|cookiefile|savecookies|extraheader|emptyauth|followredirects';
+const NETWORK_KEYS = `^(core\\.(sshcommand|askpass|gitproxy)|remote\\..+\\.(uploadpack|receivepack|vcs|proxy|proxyauthmethod)|credential\\.(.+\\.)?helper|url\\..+\\.(insteadof|pushinsteadof)|http\\.(.+\\.)?(${HTTP_KEYS}))$`;
+const SETTING_RE = new RegExp(`^(?:remote\\.(.+)\\.(proxy|proxyauthmethod)|http\\.(?:.+\\.)?(${HTTP_KEYS})|url\\..+\\.(insteadof|pushinsteadof))$`);
 // The only remote addresses actions talk to: https, ssh and git, or scp-style [user@]host:path.
 // Not a local folder or file:// (that runs the other repo's own hooks, or this one's: url = .), and
 // not <helper>::address, which runs git-remote-<helper>.
@@ -30,12 +35,28 @@ function networkPrograms(untrusted) {
   const out = new Set();
   for (const e of untrusted) {
     if (!e.value || /^remote\..+\.vcs$/.test(e.key)) continue; // empty: switched off (credential.helper= resets the list); vcs: see remoteProblem
+    if (/^(http\.|remote\..+\.proxy)/.test(e.key)) continue; // settings, not programs: networkSettings
     let m = /^url\.(.+)\.(insteadof|pushinsteadof)$/.exec(e.key);
     if (m) { if (!PLAIN_URL.test(m[1])) out.add(`url.<address>.${m[2] === 'insteadof' ? 'insteadOf' : 'pushInsteadOf'}`); continue; }
     if ((m = /^core\.(.+)$/.exec(e.key))) out.add(`core.${PRETTY[m[1]] || m[1]}`);
     else if ((m = /^remote\.(.+)\.(uploadpack|receivepack)$/.exec(e.key))) out.add(`remote.${validRemote(m[1]) ? m[1] : '<name>'}.${m[2]}`);
     else if (e.key === 'credential.helper') out.add('credential.helper');
     else out.add('credential.<url>.helper');
+  }
+  return [...out];
+}
+
+// The names to show for the repo's own settings that redirect or weaken a connection: http.* and
+// remote.<r>.proxy keys, and any address rewrite (a plain one still sends a push somewhere the
+// preview does not name). A value or a URL subsection can hold a token, so neither is shown.
+function networkSettings(untrusted) {
+  const out = new Set();
+  for (const e of untrusted) {
+    const m = SETTING_RE.exec(e.key);
+    if (!m || (!e.value && !m[3])) continue; // a bare http.sslVerify still counts; an empty proxy or rewrite is off
+    if (m[2]) out.add(`remote.${validRemote(m[1]) ? m[1] : '<name>'}.${m[2]}`);
+    else if (m[3]) out.add(`http.${m[3]}`);
+    else out.add(`url.<address>.${m[4] === 'insteadof' ? 'insteadOf' : 'pushInsteadOf'}`);
   }
   return [...out];
 }
@@ -188,17 +209,40 @@ async function repoCode(ctx, dir, kinds, target) {
   return { hooks: found, drivers: [...drivers], tree, signs };
 }
 
+// The remotes a partial clone fetches missing objects from (null when it is not one). Whatever
+// file sets these, they decide whether git fetches, so trust does not come into it.
+async function promisorRemotes(ctx, dir, refuse) {
+  const { all } = await ctx.gitConfig(dir, '^(extensions\\.partialclone|remote\\..+\\.promisor)$');
+  const names = new Set();
+  for (const e of all) {
+    if (e.origin === 'command line:') continue;
+    const m = /^remote\.(.+)\.promisor$/.exec(e.key);
+    if (m ? /^(false|no|off|0)$/i.test(e.value == null ? 'true' : e.value) : !e.value) continue;
+    names.add(m ? m[1] : e.value);
+  }
+  if (!names.size) return null;
+  for (const n of names) if (!validRemote(n)) refuse('This repo is a partial clone whose remote has an unusual name. GutCheck won\'t run git steps that could fetch from it; run git yourself.');
+  return [...names];
+}
+
 // Checks a planned action (out.uses: the kinds of git step it runs; out.remotes and out.pushes:
 // the remotes its network steps talk to). Throws the refusal for network programs and non-network
 // remotes; otherwise returns { warnings, note, runsRepoCode } to add to the plan.
 async function inspect(ctx, dir, out, refuse) {
   const uses = out.uses || [];
-  if (!uses.length) return { warnings: [], note: null, runsRepoCode: false };
-  if (uses.some((k) => USES[k].network)) {
+  // Git must not run here at all when the repo's config moves its work tree or cannot be read.
+  if (out.runsGit || uses.length) await ctx.checkRepo(dir).catch((e) => refuse(`GutCheck won't run git here: ${e.message}.`));
+  // A partial clone fetches the objects it lacks when a step needs them, so any git step in one can
+  // talk to its promisor remotes: it gets the network checks too, and only then may fetch.
+  const promisors = out.runsGit || uses.length ? await promisorRemotes(ctx, dir, refuse) : null;
+  if (!uses.length && !promisors) return { warnings: [], note: null, runsRepoCode: false, lazyFetch: false };
+  if (promisors || uses.some((k) => USES[k].network)) {
     const { all, untrusted } = await ctx.gitConfig(dir, NETWORK_KEYS);
     const progs = networkPrograms(untrusted);
     if (progs.length) refuse(`This repo's own git config names programs to run for network commands (${progs.join(', ')}). GutCheck won't run them; remove them or run git yourself.`);
-    const bad = await remoteProblem(ctx, dir, all, out.remotes || [], !!out.pushes);
+    const sets = networkSettings(untrusted);
+    if (sets.length) refuse(`This repo's own git config changes where or how git connects (${sets.join(', ')}). GutCheck won't use the network with them; remove them or run git yourself.`);
+    const bad = await remoteProblem(ctx, dir, all, [...new Set([...(out.remotes || []), ...(promisors || [])])], !!out.pushes);
     if (bad) refuse(`This repo's remote "${bad}" is a local folder, a file:// URL or a remote helper. GutCheck only talks to https, ssh and git remotes (a local remote runs that repo's own hooks); run git yourself.`);
   }
   const code = await repoCode(ctx, dir, uses, out.target);
@@ -208,7 +252,20 @@ async function inspect(ctx, dir, out, refuse) {
   if (code.drivers.length) warnings.push(`This runs programs the repo's own git config names for its files (${code.drivers.join(', ')}). That is the repo's code, not GutCheck's.`);
   const commits = uses.includes('commit') || uses.includes('merge');
   const note = commits && code.signs ? 'Your git config signs commits (commit.gpgSign), but GutCheck\'s commits are not signed: signing runs programs a repo\'s config can change.' : null;
-  return { warnings, note, runsRepoCode: warnings.length > 0 };
+  const fetches = promisors ? `This repo is a partial clone, so this may download missing files from ${promisors.join(', ') || 'its remote'}.` : null;
+  return { warnings, note: [note, fetches].filter(Boolean).join(' ') || null, runsRepoCode: warnings.length > 0, lazyFetch: !!promisors };
 }
 
-module.exports = { validBranch, validRemote, networkPrograms, inspect, PLAIN_URL, USES, NETWORK_KEYS, CODE_KEYS };
+// A check step: the ref must still be at the commit the preview named (audit 2026-11-16, F6).
+const atCommit = (dir, ref, sha) => ({ kind: 'check', safeGit: true, cmd: 'git', args: ['rev-parse', '--verify', '--quiet', ref], cwd: dir, expect: sha, changed: 'The branch moved since the preview. Rescan and review it again.', display: `check ${ref.replace(/^refs\/heads\//, '')} is still at ${sha.slice(0, 7)}` });
+
+// Steps that commit, merge or check out files must not run in the middle of a merge, rebase,
+// cherry-pick or revert: a commit would conclude it, conflict markers and all (F7).
+const MID_OP = new Set(['commit', 'merge', 'pull', 'switch']);
+function unfinishedOp(repo, out) {
+  const ops = ((repo.gitState && repo.gitState.ops) || []).map((o) => o && o.kind).filter((k) => k && k !== 'bisect'); // a bisect has nothing to conclude
+  if (!ops.length || !(out.uses || []).some((u) => MID_OP.has(u))) return null;
+  return `This repo has an unfinished ${ops.join(' and ')}. Finish or abort it first.`;
+}
+
+module.exports = { atCommit, unfinishedOp, validBranch, validRemote, networkPrograms, networkSettings, inspect, PLAIN_URL, USES, NETWORK_KEYS, CODE_KEYS };

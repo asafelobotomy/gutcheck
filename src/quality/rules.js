@@ -63,6 +63,16 @@ function secretKinds(line, testFile) {
   return out;
 }
 
+// Text that is shown (a TODO comment) is held to a looser test than a finding: any value after a
+// credential word, a password inside a URL, or a Bearer token, whatever its length or quoting.
+// Hiding too much costs a line of text; showing a credential breaks a rule (audit 2026-11-16, T1).
+const LOOSE_SECRET = [
+  /(?:pass(?:word|wd|phrase)?|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credentials?)\w*["']?\s*(?:[=:]|\bis\b)\s*["'`]?[^\s"'`]{4,}/i,
+  /[a-z][a-z0-9+.-]*:\/\/[^\s/@:]*:[^\s/@]+@/i,
+  /\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{6,}/i,
+];
+const looksLikeCredential = (text) => secretKinds(text, false).length > 0 || LOOSE_SECRET.some((re) => re.test(text));
+
 // Debug leftovers on a code line (strings and comments already blanked).
 function debugKind(line, ext) {
   if (/\bdebugger\s*;?\s*$/.test(line)) return ['debugger', 'warn'];
@@ -118,4 +128,4 @@ function constantDef(line) {
   return Number.isFinite(value) ? { name: m[1], value } : null;
 }
 
-module.exports = { softSecret, CONST_FILE_RE, TEST_RE, GENERATED_RE, SKIP_SEGMENTS, SKIP_FILE_RE, CONFIG_EXT, MARKER_RE, secretKinds, debugKind, magicNumbers, constantDef };
+module.exports = { softSecret, CONST_FILE_RE, TEST_RE, GENERATED_RE, SKIP_SEGMENTS, SKIP_FILE_RE, CONFIG_EXT, MARKER_RE, secretKinds, looksLikeCredential, debugKind, magicNumbers, constantDef };

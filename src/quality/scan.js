@@ -44,6 +44,7 @@ function ignored(rel, rules) {
 
 async function listFiles(dir) {
   const r = await git(['ls-files', '-co', '--exclude-standard', '-z'], { cwd: dir, timeout: COMMAND_TIMEOUT_MS });
+  if (!r.ok) throw new Error(`could not list this repo's files (${String(r.stderr || '').trim().split('\n').pop().slice(0, 160) || 'git ls-files failed'})`); // never "no files, so nothing found"
   return [...new Set(r.stdout.split('\0').filter(Boolean))].sort();
 }
 
@@ -159,7 +160,7 @@ async function scanQuality(dir, rawSettings) {
       markers[m[1]]++;
       // The comment text is shown in the app and the report, so a marker that looks like it holds a
       // credential (any rule, generic included) keeps its place but never its text.
-      if (markers.items.length < 40) markers.items.push({ path: rel, line: i + 1, kind: m[1], text: R.secretKinds(c, false).length ? '(text hidden: it looks like it contains a credential)' : snippet(c) });
+      if (markers.items.length < 40) markers.items.push({ path: rel, line: i + 1, kind: m[1], text: R.looksLikeCredential(c) ? '(text hidden: it looks like it contains a credential)' : snippet(c) });
     });
   }
 

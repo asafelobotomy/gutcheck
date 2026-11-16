@@ -108,6 +108,7 @@ test('repo accepts owner/name for a remote repo; fix plans API fixes and refuses
 
 test('MCP: overview rows carry source; tests and local-only leave remote repos out; plan takes API fixes only', async () => {
   const s = setup();
+  require('./helpers/env').chooseWorkspace(s.data, s.root);
   const e = createEngine({ env: s.env, via: 'mcp', allowActions: true, remoteDeps: s.remoteDeps });
   const tool = (n) => TOOLS.find((t) => t.name === n);
   const ov = await tool('gutcheck_overview').run(e, { root: s.root });

@@ -28,7 +28,7 @@ test('the MCP copy tells agents when the installed app is newer, and only then',
     const engine = { dataDir: data, allowActions: false, repos: async () => ({ ok: true, repos: [] }) };
     const server = createServer({ engine, send: (m) => sent.push(m) });
     await server.handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
-    assert.match(sent[0].result.instructions, new RegExp(`GutCheck ${version.replace(/\./g, '\\.')}, but GutCheck 999\\.0\\.0 is installed`));
+    assert.match(sent[0].result.instructions, new RegExp(`GutCheck ${require('../src/util').escapeRe(version)}, but GutCheck 999\\.0\\.0 is installed`));
     await server.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'gutcheck_overview', arguments: {} } });
     assert.match(sent[1].result.structuredContent.notice, /999\.0\.0 is installed/);
   } finally { fs.rmSync(data, { recursive: true, force: true }); }
@@ -65,6 +65,7 @@ test('plans made for an agent last 30 minutes; the app and CLI keep 5', async ()
   assert.equal(AGENT_PLAN_TTL, 30 * 60 * 1000);
   const dir = tmp();
   try {
+    require('node:child_process').execFileSync('git', ['init', '-q', dir]); // clutter needs a repo: a failed file listing is an error
     put(path.join(dir, 'x.tmp'));
     const known = new Map([[dir, { path: dir, name: 'r', findings: [] }]]);
     const mk = (planTtl) => createService({ known, settings: () => ({ readOnly: false }), audit() {}, trash: async () => {}, planTtl });

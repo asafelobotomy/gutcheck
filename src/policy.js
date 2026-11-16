@@ -16,10 +16,12 @@ const viaOf = (v) => (v == null ? undefined : VIA.has(v) ? v : 'mcp');
 const ID_RE = /^[A-Za-z0-9][\w.:/-]{0,120}\*?$/; // a finding id, or a prefix ending in * (pr-stale-*)
 
 const readJSON = (f) => { try { const v = JSON.parse(fs.readFileSync(f, 'utf8')); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
-const writeJSON = (f, v) => { fs.writeFileSync(f + '.tmp', JSON.stringify(v, null, 2) + '\n'); fs.renameSync(f + '.tmp', f); };
+const writeJSON = (f, v) => { fs.writeFileSync(f + '.tmp', JSON.stringify(v, null, 2) + '\n', { mode: 0o600 }); fs.renameSync(f + '.tmp', f); };
 
-// The key ignores are stored under: owner/name for GitHub repos (stable across clones), else the folder name.
-const repoKey = (r) => (r.remote && r.remote.owner && !r.remote.unreachable ? `${r.remote.owner}/${r.remote.name}` : r.ref ? `${r.ref.owner}/${r.ref.name}` : path.basename(r.path || r.dir || ''));
+// The key ignores are stored under: owner/name for GitHub repos (stable across clones), else the folder
+// name. Still owner/name when GitHub cannot be reached (offline, rate limit): the scan keeps both from
+// the origin URL, and a key that changed would drop every ignore until the next good scan.
+const repoKey = (r) => (r.remote && r.remote.owner && r.remote.name ? `${r.remote.owner}/${r.remote.name}` : r.ref ? `${r.ref.owner}/${r.ref.name}` : path.basename(r.path || r.dir || ''));
 
 // Repo-local rules: .gutcheck.json { "ignore": { "<id>": "<reason>" } }. Read as data only: whoever
 // controls the repo writes them, so a wildcard needs 4 characters before its * and applyPolicy never
@@ -97,18 +99,26 @@ function driftOf(s, baseline, key) {
 function createPolicyStore(dir) {
   const ignoreFile = path.join(dir, 'ignores.json');
   const baselineFile = path.join(dir, 'baseline.json');
-  // ignores.json: { "<owner/name or *>": { "<id>": { reason, via } } }, via = who wrote it (cli, app or mcp).
+  // ignores.json: { "<owner/name or *>": { "<id>": { reason, via, at } } }, via = who wrote it (cli, app or mcp),
+  // at = the folders it was made in (one per clone): an ignore of an error or security finding applies only there, since
+  // any folder can claim a repo's owner/name through its origin URL (audit 2026-11-16, T8).
   // Files from before via was stored hold the reason as a plain string; those read as the user's.
   const readRaw = () => { const v = readJSON(ignoreFile) || {}; const out = {}; for (const [k, m] of Object.entries(v)) if (m && typeof m === 'object' && !Array.isArray(m)) out[k] = m; return out; };
   const loadIgnores = () => Object.fromEntries(Object.entries(readRaw()).map(([k, m]) => [k, clean(m)]));
   const loadVia = () => Object.fromEntries(Object.entries(readRaw()).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).filter(([, v]) => v && typeof v === 'object').map(([id, v]) => [id, viaOf(v.via) || 'mcp']))]));
-  function setIgnore(key, id, reason, via = 'cli') {
+  const loadAt = () => Object.fromEntries(Object.entries(readRaw()).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).filter(([, v]) => v && typeof v === 'object' && Array.isArray(v.at)).map(([id, v]) => [id, v.at.filter((x) => typeof x === 'string' && x)]))]));
+  function setIgnore(key, id, reason, via = 'cli', at = null) {
     if (typeof key !== 'string' || !key || !ID_RE.test(String(id || ''))) return { ok: false, error: 'Name a repo and a finding id (a trailing * ignores every id that starts with it).' };
     if (!wildcardOk(id, MIN_PREFIX.user)) return { ok: false, error: `An ignore needs at least ${MIN_PREFIX.user} characters before the *.` };
     const why = String(reason || '').trim().slice(0, MAX_REASON);
     if (!why) return { ok: false, error: 'Give a reason: it is shown wherever the finding would have been.' };
     const all = readRaw();
-    all[key] = { ...(all[key] || {}), [id]: { reason: why, via: VIA.has(via) ? via : 'cli' } };
+    // A rule from before folders were recorded keeps applying everywhere; a new one, or one that
+    // already lists folders, gains this folder.
+    const old = (all[key] || {})[id];
+    const legacy = old != null && !(old && typeof old === 'object' && Array.isArray(old.at));
+    const folders = key !== '*' && !legacy && typeof at === 'string' && at ? { at: [...new Set([...((old && old.at) || []), path.resolve(at)])] } : {};
+    all[key] = { ...(all[key] || {}), [id]: { reason: why, via: VIA.has(via) ? via : 'cli', ...folders } };
     writeJSON(ignoreFile, all);
     return { ok: true, key, id, reason: why };
   }
@@ -126,14 +136,14 @@ function createPolicyStore(dir) {
     writeJSON(baselineFile, DEFAULT_BASELINE);
     return { ok: true, file: baselineFile, created: true };
   }
-  return { load: () => ({ ignores: loadIgnores(), ignoreVia: loadVia(), baseline: loadBaseline() }), setIgnore, removeIgnore, initBaseline, ignoreFile, baselineFile };
+  return { load: () => ({ ignores: loadIgnores(), ignoreVia: loadVia(), ignoreAt: loadAt(), baseline: loadBaseline() }), setIgnore, removeIgnore, initBaseline, ignoreFile, baselineFile };
 }
 
 // Apply the policy to a scored result (mutates and returns it). score(findings) recomputes the score.
 function applyPolicy(res, policy, score) {
   if (!res || res.error || !policy) return res;
   const key = repoKey(res);
-  const user = (k, from) => Object.entries((policy.ignores || {})[k] || {}).filter(([id]) => wildcardOk(id, MIN_PREFIX.user)).map(([id, reason]) => ({ id, reason, from, via: viaOf(((policy.ignoreVia || {})[k] || {})[id]) }));
+  const user = (k, from) => Object.entries((policy.ignores || {})[k] || {}).filter(([id]) => wildcardOk(id, MIN_PREFIX.user)).map(([id, reason]) => ({ id, reason, from, via: viaOf(((policy.ignoreVia || {})[k] || {})[id]), at: ((policy.ignoreAt || {})[k] || {})[id] || null }));
   const rules = [
     ...user('*', 'all repos'),
     ...user(key, 'GutCheck'),
@@ -150,7 +160,10 @@ function applyPolicy(res, policy, score) {
   const kept = [];
   for (const f of findings) {
     // Rules from the repo's .gutcheck.json or written by an AI agent never hide errors or security findings.
-    const rule = rules.find((r) => matches(r.id, f.id) && ((r.from !== FROM_REPO && r.via !== 'mcp') || canRepoIgnore(f)));
+    // The user's own ignore of one hides it only in the folder the ignore was made in (rules from before
+    // the folder was recorded, and all-repos rules, apply as they always did).
+    const here = (r) => !r.at || canRepoIgnore(f) || r.at.includes(path.resolve(res.path || ''));
+    const rule = rules.find((r) => matches(r.id, f.id) && here(r) && ((r.from !== FROM_REPO && r.via !== 'mcp') || canRepoIgnore(f)));
     if (rule) ignored.push({ ...f, ignoredBecause: rule.reason, ignoredIn: rule.from, ignoreRule: rule.id, ...(rule.via ? { ignoredVia: rule.via } : {}) }); else kept.push(f);
   }
   res.ignoreKey = key;

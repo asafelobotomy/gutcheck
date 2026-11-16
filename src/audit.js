@@ -7,10 +7,10 @@ const KEEP_LINES = 500;
 
 function appendAudit(file, entry, io = fs) {
   try {
-    io.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n');
+    io.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n', { mode: 0o600 });
     if (io.statSync(file).size > MAX_BYTES) {
       const lines = io.readFileSync(file, 'utf8').split('\n').filter(Boolean).slice(-KEEP_LINES);
-      io.writeFileSync(file + '.tmp', lines.join('\n') + '\n');
+      io.writeFileSync(file + '.tmp', lines.join('\n') + '\n', { mode: 0o600 });
       io.renameSync(file + '.tmp', file);
     }
   } catch {}

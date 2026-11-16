@@ -4,8 +4,72 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Changed
+
+- `npm test` runs through `scripts/test.js`, which gives the tests one private temp folder and removes it afterwards. The tests used to leave their throwaway repos in the shared temp folder: about 4,500 folders and 3.5 GB after a day's runs.
+
+### Security
+
+- Fixes that only read or move commits can no longer run a program a cloned repo's `.git/config` names. In a partial clone, a step that needed a missing file (Switch, Pull's fast-forward, Merge, Commit, deleting a branch, aborting) fetched it, which ran the repo's `remote.<name>.uploadpack` or `core.sshCommand`, while the plan said "safe". Every git step now runs with fetching of missing files switched off. A real partial clone still works: its steps get the same checks as Fetch (no programs named for network commands, a plain https, ssh or git remote), the plan says it may download missing files, and only then may it fetch.
+- The rescue copy no longer runs an external diff program. With `diff.external` set, by the repo or by you, `uncommitted.patch` came out empty while every step reported success, and the repo's program ran. The patch and the stash patches are now always git's own diff (`--no-ext-diff --no-textconv`).
+- A repo whose git config points its work tree at another folder (`core.worktree`) is refused, for scans and for fixes. A Switch rated "safe" could write a branch's files into that folder (your home folder, say), and Commit all could commit files from it. A value that names the repo's own folder, as a submodule's does, is fine. The repo shows as an error that names the setting.
+- A TODO or FIXME comment that holds a credential no longer reaches the report, the app or MCP when the value is short, unquoted or inside a URL (`token=abc123def`, `postgres://user:password@host`, `Bearer …`, "password is …"). The comment is still counted and located; its text is hidden.
+- Fetch, Pull, Push and remote-branch deletion refuse a repo whose own git config redirects or weakens the connection: a proxy (`http.proxy`, `remote.<name>.proxy`), a switched-off or replaced certificate check (`http.sslVerify`, `http.sslCAInfo` and similar), extra headers, a cookie file, or any address rewrite (`url.<address>.insteadOf` and `pushInsteadOf`, which used to be allowed when the new address was a plain one). These run no program, but they could send your GitHub token to a host the repo chose while the preview said "origin". The same settings in your own global config still apply.
+- "Copy for LLM" leaves a branch, tag or file name that starts with `-` out of its commands. A branch named `--force` or `-D` used to appear as `git push -u origin '--force'` and `git branch -d '-D'`, which git reads as options even when quoted.
+- The CLI escapes control, bidi and other invisible characters in every line it prints, not only in `secrets` and `local-only`. A repo, workflow file or pull request name could send terminal escapes through `scan`, `findings`, `repo`, `fix` and the rest. `--json` output carries them as `\uXXXX` escapes and still parses.
+- An AI agent can no longer confirm its own dangerous actions. Over MCP, `gutcheck_plan` used to return the repo name a dangerous plan needs, so an agent could force-delete a branch, archive a repo or delete remote branches (also on repos not cloned here) with no step from you. Dangerous plans over MCP now need the server started with `--allow-danger` as well as `--allow-actions`; without it the agent gets the commands to show you, but no token. **If your agent relies on dangerous fixes, add `--allow-danger` to its GutCheck server command.** The app and the CLI are unchanged.
+- The package install fix (`npm install` and the yarn, pnpm and bun forms) is rated danger and marked as running the repo's code, since it runs the project's install scripts: it needs the typed repo name, like a test run.
+- A repo's own `.gutcheck.json` (and an AI agent) can no longer hide work that exists only on your machine or is half done (`git-detached`, `git-stashes`, `git-no-commits`, `git-op`, `git-no-upstream`, `git-upstream-gone`), nor `tag-protection`, `runtime-eol` or `lockfile-drift`. You can still ignore them yourself in the app or the CLI.
+- Short credentials are redacted from MCP server failure reasons (`token=…`, `pass=…`, `Bearer …`, a password in a URL, at any length), and a Bash permission rule's first word is shown only when it is a known command name, never a word that might be a password.
+- GutCheck's data folder is created private (0700) by the CLI and the MCP server, and `settings.json`, `audit.log`, `ignores.json`, `baseline.json`, `seen.json` and `trend.json` are written readable by you only (0600). Files that already exist keep their mode until they are next rewritten.
+- Registering a repo for git maintenance gets the same checks as Fetch, since background maintenance fetches with plain git: it is refused when the repo's config names network programs or connection settings, or its remote is a local folder.
+- GutCheck no longer inherits `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and similar variables. Started from a git hook or alias, every scan and fix would have acted on that other repo.
+- An MCP result that is cut at 100,000 characters no longer carries the full, uncut data beside the text.
+- An ignore of an error or security finding now applies only in the folder it was made in. Ignores are stored by GitHub owner/name, so any folder whose origin URL named one of your repos got your ignores for it, security ones included. Ordinary ignores still follow the repo across clones; for a second clone of your own, ignore the finding there too. Ignores made before this version keep applying everywhere.
+- Over MCP, the live agent-usage check (which starts MCP servers, some defined by the repos themselves) needs `--allow-danger` as well as `--allow-actions`.
+- "Launch when I log in" is refused when GutCheck runs from a source checkout, which starts without the browser sandbox. Use the AppImage for that; turning it off still works anywhere.
+- Releases now carry a build provenance attestation: `gh attestation verify GutCheck-*.AppImage --repo asafelobotomy/gutcheck` shows the AppImage was built by this repo's workflow from its code.
+- Over MCP, an AI agent can only scan the workspace folder you chose (in the app or with `gutcheck scan <folder>`) or a folder inside it. It used to accept any folder, `/` and your home folder included, and remembered it as the CLI's workspace. An agent's scan is no longer remembered, and with no workspace set the agent is told to ask you to choose one. **If you use GutCheck only through an agent, run `gutcheck scan <folder>` once, or pick the folder in the app.**
+- MCP results write your home folder as `~` (paths, and the report's text), so your user name no longer goes to the model provider, and the email addresses in the git identity findings are masked (`a***@example.com`). Agents can pass `~` paths back.
+- Plan previews escape control and bidi characters in clutter paths, `gutcheck new --notify` escapes markup in the notification text, and agent config files are written through a new, unguessable temp file.
+- A uQ theme whose text, warning or error colour cannot be told from its background is not applied; GutCheck keeps its own colours. Such a theme would have hidden the preview and warnings of a confirm dialog.
+- Secrets backup, hardening:
+  - A committed link such as `.env -> .git/config` no longer makes git's own config (which can hold a token) a file to back up, and at most 500 secret-looking files per repo are read and hashed on a scan (the repo says so when there are more).
+  - Error text from a password manager is also cleared of the file's contents when the tool echoes them JSON-escaped or percent-encoded.
+  - An item ID a tool returns is refused, and nothing is recorded, when it is longer than 128 characters or is part of the file's own contents.
+  - A file whose name starts with `-` is attached to KeePassXC with the dashes replaced by `_`, so it cannot be read as an option.
+  - Verifying Bitwarden backups asks only for GutCheck's own items (`bw list items --search gutcheck:`), not every item in the vault.
+  - The backup record is written through its own new temp file, so the app and the CLI can save at the same moment.
+- GitHub steps (`gh`) no longer run inside the repo's folder, where `gh` runs plain git and so the repo's hooks and config; they run in your home folder and name the repo themselves. Two things change as a result: merging a PR with "delete its branch" no longer deletes your local copy of the branch (the next scan lists it as merged), and Open a PR takes its title from the branch's last commit instead of `gh --fill`, with an empty description.
+- Planning a test run probes for tools in a new private folder, not the shared temp folder, where another user of the machine could plant a config file that runs code.
+- Planning to split an instruction file or prune permission rules refuses a file that is a link leading out of the repo, instead of showing its contents in the preview.
+
 ### Fixed
 
+- The rescue copy saves uncommitted changes made after the last scan. It took "nothing uncommitted" from the scan, so edits made since were left out of the copy with no warning; it now asks git when the plan is made.
+- Ignored findings stay ignored when GitHub cannot be reached (offline, rate limit, `gh` logged out). The repo's key fell back to its folder name, so its ignores stopped applying, the findings came back and the score dropped until the next good scan.
+- A detached HEAD is no longer listed as a merged branch ("1 local branch already merged: (HEAD detached at …)") with a delete fix.
+- When git cannot list a repo's files (a damaged index, a timeout on a huge repo), the clutter, code-quality and tests scans report the repo as failed. They used to carry on with an empty list, so committed files such as `notes.bak` were offered as removable clutter and the quality scan reported no secrets.
+- A folder with one unreadable or vanishing entry keeps its real size in the clutter list. `du` exits with an error for it but still prints the total; GutCheck threw that away and counted at most 20,000 files itself.
+- A cached copy of an uncloned repo is no longer thrown away and cloned again on every scan when your git uses the reftable format (`init.defaultRefFormat`).
+- The large-blob check in a deep scan no longer vanishes on repos with more than about 320,000 objects.
+- The list of uncloned repos no longer fails when GitHub leaves one out (an organisation's SAML or IP rule).
+- Closing a pull request and deleting its branch (on a repo not cloned here) is rated danger, like deleting an unmerged branch on its own, and the undo command quotes the branch name.
+- `npm run bump` moves a changelog entry that contains `$&`, `$'` or `$$` as written.
+- A plugin you use through its own commands, skills or subagents (`/name:command`, `name:agent`) is no longer reported as unused with a fix that turns it off. Plugins that ship hooks or output styles are never judged, since those work without being called.
+- Long-lived branches on GitHub (`develop`, `staging`, `gh-pages`, `release-1.x`, `release/2.4`, `1.x` and the like) are no longer listed as "merged branch still on GitHub" or "has work and no pull request".
+- Commits GitHub made under your `users.noreply.github.com` address (squash merges) no longer count as "commits by you used another email".
+- The cache limit for copies of uncloned repos is now a limit. When everything in the cache belongs to the current scan and there is no room for another copy, that repo gets GitHub checks only and a note saying so ("No room left to check its files").
+- Deleting a remote branch only goes ahead if the branch on GitHub is still where your clone last saw it, and deleting a local branch is held if it moved after the preview.
+- Commit, merge, pull and switch fixes are refused while the repo has an unfinished merge, rebase, cherry-pick or revert. A commit would have concluded it, conflict markers included.
+- A scheduled scan no longer starts while the last fix of a batch is still running.
+- `gutcheck fix <repo> all` and the MCP's Fix all stop offering a repo's later fixes once one is refused (a refused pull is no longer followed by a commit and push).
+- Secrets backup: one file a password manager cannot take (over Bitwarden's 10,000-character note limit) is left out with a note instead of stopping the whole backup, and one failed save no longer stops the files after it (three failures in a row still stop the run).
+- Secrets backup: a credentials file under an `XDG_CONFIG_HOME` outside your home folder is named `xdg-config/…`. It used to be named `~/../…`, which `pass` refuses, so it could never be saved.
+- The command line rejects a mistyped command or option (`--yess`, `findigs`, `--severity critical`, `--repo` with no value) straight away. An unknown option used to be ignored, so `--yess` gave a preview instead of running, and an unknown command ran a full scan before saying so.
+- A branch that shares its name with a tag is listed by its plain name (it was `heads/<name>`), and "merged" is measured against the default branch, not a tag of the same name.
+- Up to 100 open pull requests per repo are checked (it was 30; the rest were silently left out).
+- "Commits since the last release" is counted on the default branch as last fetched, not on whatever branch is checked out, so a feature branch's own commits no longer count as unreleased.
 - Clutter sizes no longer promise more space than a clean-up frees on a disk that compresses files. On btrfs (`compress=`) or bcachefs, `du` gives sizes before compression, so 60 GB of `target/` folders freed 24 GB. GutCheck now says those sizes are before compression (in the app, the plan, the MCP and CLI result's `compressed`), and a clean-up ends with the free space it actually gained, measured on the disk.
 
 ## [0.28.1] - 2026-11-15

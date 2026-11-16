@@ -202,7 +202,8 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
       const prev = rec.entries[c.real];
       const again = l.a.named && ours(prev) && !prev.missing && isName(prev.itemId) ? { update: true, itemId: prev.itemId } : {};
       let save = l.a.saveCmd(c, l.target, again);
-      if (save.error) return { ok: false, error: save.error };
+      // One file the tool cannot take (too large for a Bitwarden note) is left out; the rest go ahead.
+      if (save.error) { clash = clash || save.error; warnings.push(printable(`skipped: ${shortName(c)}: ${save.error}`)); continue; }
       const others = othersOf(save.key, c.real);
       let kept = null;
       // An id-based tool only ever creates, so a gone owner's title is no clash. A named tool gets a
@@ -269,6 +270,8 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
       if (!r || !r.ok) return fail(failText(r || { code: null, stderr: '' }, l, buf, input));
     }
     const itemId = it.save.parseId(r.stdout);
+    // An id is short and is not the file: a CLI that echoed its input must not put a secret in the record.
+    if (itemId && !l.a.named && (String(itemId).length > 128 || (String(itemId).length >= 8 && buf.includes(String(itemId))))) return fail(`${l.info.label} returned an item ID GutCheck does not trust, so nothing was recorded. Check the vault for a new "${printable(cand.title)}" item.`);
     if (!itemId) return fail(scrub(r.stderr, buf, input).slice(0, 300) || `${l.info.label} returned no item ID, so nothing was recorded.`);
     record.update((rec) => {
       const e = { sha256: it.sha256, tool: l.tool, target: l.target, itemId, key: it.save.key, title: cand.title, at: new Date().toISOString() };
@@ -290,11 +293,14 @@ function createSecretsCtl({ dataDir, settings, run = exec.run, env = process.env
     const s = await status(p.l, p.bin, p.ws); // a locked vault fails here with the fixed hint, before any save
     if (!s.ok) return { ok: false, error: lockedText(p.l, s), results: [] };
     const results = [];
+    let failing = 0;
     for (const it of p.items) {
       const r = await saveOne(p, it);
       results.push(r);
       audit({ ok: r.ok, repo: 'Secrets', title: printable(`${r.ok ? 'Backed up' : 'Back up'} ${it.cand.title} to ${p.l.info.label}`) });
-      if (!r.ok) break;
+      // One file failing does not stop the rest; three in a row means the vault itself is the problem.
+      failing = r.ok ? 0 : failing + 1;
+      if (failing >= 3) break;
     }
     return { ok: results.length === p.items.length && results.every((r) => r.ok), results };
   }

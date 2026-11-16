@@ -197,7 +197,7 @@ The exact command or JSON is shown before anything runs, the change is recorded 
 
 **Why it unpacks itself.** Agents started by Claude Desktop (and other sandboxed hosts) run with `NoNewPrivs`, which blocks `fusermount`, so an AppImage cannot mount there. Its runtime's FUSE-free mode prints file names to standard output, which breaks MCP. So when you connect from the AppImage, GutCheck first unpacks itself once into its data folder (`mcp-app/<version>/`, about 400 MB) and registers that copy. After updating GutCheck, the agent shows **Update needed**: press **Update** to unpack the new version and repoint the agent. Until you do, the agent's server says it is out of date (in its instructions and in `gutcheck_overview`), and the update moves older unpacked copies no agent still uses to the trash. Agents need a new session to see a newly added server.
 
-**MCP server.** To set it up by hand, add GutCheck to your agent as a stdio MCP server. It starts **read-only**; add `--allow-actions` to let the agent plan and apply fixes. If your agent runs under `NoNewPrivs` (Claude Desktop does), point it at an unpacked copy (`GutCheck.AppImage --appimage-extract`, then `squashfs-root/gutcheck --mcp`) rather than the AppImage.
+**MCP server.** To set it up by hand, add GutCheck to your agent as a stdio MCP server. It starts **read-only**; add `--allow-actions` to let the agent plan and apply fixes. Dangerous fixes (force-deleting a branch, archiving a repo, deleting remote branches, package installs, test runs) and the live MCP server check are still refused for agents unless you also add `--allow-danger`; without it the agent can show you the commands, and you run them in the app or the CLI. An agent can only scan the workspace folder you chose in the app or with `gutcheck scan <folder>` (or a folder inside it), and results it receives write your home folder as `~`. If your agent runs under `NoNewPrivs` (Claude Desktop does), point it at an unpacked copy (`GutCheck.AppImage --appimage-extract`, then `squashfs-root/gutcheck --mcp`) rather than the AppImage.
 
 ```bash
 claude mcp add --transport stdio --scope user gutcheck -- /path/to/GutCheck.AppImage --mcp                    # Claude Code, read-only
@@ -283,7 +283,7 @@ A baseline says what every repo should have. **Baseline** in the sidebar (or `gu
 
 **Settings** (top bar) has these startup, tray and schedule options, all off by default:
 
-- **Launch when I log in**: starts GutCheck at login, straight into the tray with no window. On Linux this writes `~/.config/autostart/gutcheck.desktop` (pointing at the AppImage you ran, so keep it in a stable place); on Windows and macOS it uses the system login items. Turning it off removes the entry.
+- **Launch when I log in** (the packaged app only, not a source checkout): starts GutCheck at login, straight into the tray with no window. On Linux this writes `~/.config/autostart/gutcheck.desktop` (pointing at the AppImage you ran, so keep it in a stable place); on Windows and macOS it uses the system login items. Turning it off removes the entry.
 - **Minimise to the system tray**: minimising hides the window; click the tray icon to bring it back.
 - **Closing the window keeps GutCheck running in the tray**: use **Quit** in the tray menu to exit.
 - **Scan on a schedule**: while GutCheck runs (in the tray is enough), it rescans the last workspace every hour to every week, and shows a desktop notification only when warnings or errors appear that the previous scan did not have. Without the app, run `gutcheck new --notify` from cron or a systemd timer: it prints only new findings and notifies through `notify-send`. Only finding ids are stored between scans (`seen.json`).
@@ -303,7 +303,7 @@ chmod +x GutCheck-*.AppImage
 ./GutCheck-*.AppImage
 ```
 
-Requires `gh` and `git` on your `PATH`, and `gh auth login` completed. To check the download, run `sha256sum -c SHA256SUMS.txt` next to the AppImage (the file is attached to every release).
+Requires `gh` and `git` on your `PATH`, and `gh auth login` completed. To check the download, run `sha256sum -c SHA256SUMS.txt` next to the AppImage (the file is attached to every release). From the release after 0.28.1 on, `gh attestation verify GutCheck-*.AppImage --repo asafelobotomy/gutcheck` also shows that GitHub's own build made it from this repo's code.
 
 Each release's notes are in [CHANGELOG.md](CHANGELOG.md).
 
@@ -311,7 +311,7 @@ Each release's notes are in [CHANGELOG.md](CHANGELOG.md).
 
 - GitHub data for all repos in a scan is fetched with batched GraphQL queries (10 repos per query), plus one REST call per repo that has workflows. Results are cached in memory for 2 minutes and never written to disk.
 - Remaining quota is shown in the header. When it runs low, GutCheck stops making calls instead of hitting the limit.
-- The only network access is through your own `gh` CLI. There is no telemetry, no updater and no other server. The UI is sandboxed with a strict Content Security Policy.
+- GutCheck talks to GitHub through your own `gh` CLI. Three other things use the network, each with your own tools and only when you turn them on or run them: copies of your uncloned repos are fetched with `git` (remote repos, off by default), a deep scan asks the public npm registry which packages are outdated, and the Fetch, Pull and Push fixes run `git`. There is no telemetry, no updater and no other server. The UI is sandboxed with a strict Content Security Policy.
 - Scans run read-only `git` commands with hooks and `core.fsmonitor` disabled, so opening an untrusted repo does not run its code.
 - Actions are planned by the app, previewed, and then run exactly as previewed. They only target branches, PRs and runs found in the last scan, or (for clutter) items found by a fresh scan at plan time. Right before removing anything GutCheck checks it is still unchanged and not tracked by git.
 - Files GutCheck keeps on your machine, in its app data folder (`~/.config/GutCheck` on Linux): `settings.json` (workspace folder, read-only switch, tray and schedule options; written atomically, and a damaged copy is kept as `settings.json.bad`), `audit.log` (every change it made; trimmed to the latest 500 entries once it passes 1 MB), `trend.json` (scores and totals per scan), `seen.json` (finding ids from the last scan, for "new since last scan"), `ignores.json` and `baseline.json` (your own rules), `runs/` (output of coverage and mutation runs you started), `backups/` (files GutCheck rewrote, such as a settings.local.json before rules were removed; listed for clean-up after 30 days) and `mcp-app/` (the unpacked copy agents run). Nothing is uploaded.

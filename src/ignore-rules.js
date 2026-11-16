@@ -17,6 +17,8 @@ const SECURITY_IDS = new Set([
   'automerge-ungated',                                    // dep-automation.js
   'baseline-drift',                                       // policy.js: the user's own baseline
   'git-dirty', 'git-ahead', 'git-unpushed-branches', 'nested-repo',                // uncommitted or unpushed work (checks.js, clutter.js)
+  'git-detached', 'git-stashes', 'git-no-commits', 'git-op', 'git-no-upstream', 'git-upstream-gone', // other work that exists only here, or is half done (no-remote stays ignorable: a scratch repo)
+  'tag-protection', 'runtime-eol', 'lockfile-drift',       // release tags anyone can move, a runtime without security fixes, installs that differ from the lockfile
 ]);
 // wf-*: every Actions security finding (workflows.js via checks-hygiene.js); secret-*: secret files
 // (secret-status.js) and secret scanning; ws-secret-*: the workspace's secret files.

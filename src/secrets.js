@@ -13,6 +13,7 @@ const P = require('./secret-patterns');
 
 const MAX_FILES = 40000;
 const MAX_DEPTH = 6;
+const MAX_CANDIDATES = 500; // per repo: each is read (1 MB at most) and hashed on every scan
 const NO_DESCEND = new Set([...HEAVY_DIRS, '.git', '.venv', 'venv', '.next', '.nuxt', '.svelte-kit', '.cxx', '.gradle']);
 
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
@@ -127,11 +128,15 @@ async function findRepoSecrets(dir, { name, problems = null, maxBuffer = LS_MAX_
       return false;
     };
 
+    let over = false;
     const consider = async (abs) => {
       let real;
       try { real = await fsp.realpath(abs); } catch { return; }
       const rel = posix(path.relative(root, real));
       if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return; // target outside this checkout
+      // A committed link (.env -> .git/config) must not make git's own files, or a dependency folder's, a candidate.
+      if (rel.split('/').some((seg) => NO_DESCEND.has(seg))) return;
+      if (found.size >= MAX_CANDIDATES) { if (!over && problems) problems.push({ repo, error: `Only the first ${MAX_CANDIDATES} secret-looking files in ${repo} were checked.` }); over = true; return; }
       if (tracked.has(rel) || found.has(real) || await inNested(rel)) return; // a link may point into a submodule
       const relTop = prefix + rel;
       const c = await makeCandidate({ real, scope: 'repo', repo, rel: relTop, title: TITLE.repo(repo, relTop) });
@@ -200,7 +205,9 @@ async function findHomeSecrets({ home, env = {} }) {
   const add = async (at, opts = {}) => {
     let real;
     try { real = await fsp.realpath(at); } catch { return; }
-    const rel = posix(path.relative(home, at));
+    // XDG_CONFIG_HOME can be outside the home folder: named xdg-config/<rel>, never ~/../<somewhere>.
+    let rel = posix(path.relative(home, at));
+    if (rel.startsWith('..')) { const x = posix(path.relative(cfg, at)); if (x.startsWith('..') || path.isAbsolute(x)) return; rel = `xdg-config/${x}`; }
     const c = await makeCandidate({ real, scope: 'home', repo: null, rel, title: TITLE.home(rel), ...opts });
     if (c) out.push(c);
   };
