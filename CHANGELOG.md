@@ -4,6 +4,13 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Security
+
+- Fixes that only read or move commits can no longer run a program a cloned repo's `.git/config` names. In a partial clone, a step that needed a missing file (Switch, Pull's fast-forward, Merge, Commit, deleting a branch, aborting) fetched it, which ran the repo's `remote.<name>.uploadpack` or `core.sshCommand`, while the plan said "safe". Every git step now runs with fetching of missing files switched off. A real partial clone still works: its steps get the same checks as Fetch (no programs named for network commands, a plain https, ssh or git remote), the plan says it may download missing files, and only then may it fetch.
+- The rescue copy no longer runs an external diff program. With `diff.external` set, by the repo or by you, `uncommitted.patch` came out empty while every step reported success, and the repo's program ran. The patch and the stash patches are now always git's own diff (`--no-ext-diff --no-textconv`).
+- A repo whose git config points its work tree at another folder (`core.worktree`) is refused, for scans and for fixes. A Switch rated "safe" could write a branch's files into that folder (your home folder, say), and Commit all could commit files from it. A value that names the repo's own folder, as a submodule's does, is fine. The repo shows as an error that names the setting.
+- A TODO or FIXME comment that holds a credential no longer reaches the report, the app or MCP when the value is short, unquoted or inside a URL (`token=abc123def`, `postgres://user:password@host`, `Bearer …`, "password is …"). The comment is still counted and located; its text is hidden.
+
 ### Fixed
 
 - Clutter sizes no longer promise more space than a clean-up frees on a disk that compresses files. On btrfs (`compress=`) or bcachefs, `du` gives sizes before compression, so 60 GB of `target/` folders freed 24 GB. GutCheck now says those sizes are before compression (in the app, the plan, the MCP and CLI result's `compressed`), and a clean-up ends with the free space it actually gained, measured on the disk.

@@ -19,6 +19,9 @@ const defaultCtx = (over = {}) => {
   // A repo's config entries for some keys, and those its own config decided (git-safety.js). An
   // injected runner has no real repo behind it, so it sees none.
   ctx.gitConfig = ctx.gitConfig || (ctx.run === run ? exec.configEntries : async () => ({ all: [], untrusted: [] }));
+  // Rejects when git must not run in this folder at all (its config moves the work tree, or its
+  // drivers cannot be read): the same refusal the scans' git gives, for action steps.
+  ctx.checkRepo = ctx.checkRepo || (ctx.run === run ? exec.checkRepo : async () => {});
   // Recoverable removal. The app passes Electron's shell.trashItem; this fallback uses gio.
   ctx.trash = ctx.trash || (async (p) => {
     const t = await ctx.run('gio', ['trash', '--', p]);

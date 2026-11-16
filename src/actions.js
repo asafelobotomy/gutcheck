@@ -5,6 +5,7 @@
 const os = require('node:os');
 const path = require('node:path');
 const { apply, defaultCtx } = require('./apply');
+const { SAFE_GIT_ENV } = require('./exec');
 const { MAX_PLAN_ITEMS, sq } = require('./util');
 const INSTALLERS = ['npm install', 'yarn install', 'pnpm install', 'bun install'];
 const { TEMPLATES, findEcosystems } = require('./templates');
@@ -44,7 +45,9 @@ const GIT_STEP = [
   '-c', 'core.alternateRefsCommand=true', '-c', 'core.alternateRefsPrefixes=', // true: lists no refs (an empty command makes git print "cannot run")
   '-c', 'submodule.recurse=false', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false',
 ];
-const git = (args, dir, note, pre = []) => ({ kind: 'cmd', cmd: 'git', args: [...GIT_STEP, ...pre, ...args], cwd: dir, display: show('git', args), note });
+// No lazy fetch either (a partial clone fetching a missing object runs the repo's uploadpack or
+// sshCommand: audit 2026-11-16, E1); plan() lifts this once its remotes pass the network checks.
+const git = (args, dir, note, pre = []) => ({ kind: 'cmd', cmd: 'git', args: [...GIT_STEP, ...pre, ...args], cwd: dir, env: { ...SAFE_GIT_ENV }, display: show('git', args), note });
 const gh = (args, dir, input) => ({ kind: 'cmd', cmd: 'gh', args, cwd: dir, input, display: show('gh', args) + (input ? '   # with JSON body' : '') });
 
 const RISK = { safe: 0, caution: 1, danger: 2 };
@@ -351,7 +354,9 @@ async function plan(repo, action, ctx = {}) {
     if (remote) onlyApi(out);
     // The repo's own network programs and non-network remotes refuse the plan; its hooks and
     // drivers make it caution (B9, B10).
-    const code = await inspect(ctx, repo.path, out, fail);
+    const runsGit = !remote && out.steps.some((s) => s.cmd === 'git');
+    const code = await inspect(ctx, repo.path, { ...out, runsGit }, fail);
+    if (code.lazyFetch) for (const s of out.steps) if (s.cmd === 'git' && s.env) delete s.env.GIT_NO_LAZY_FETCH;
     const risk = code.runsRepoCode && RISK[out.risk] < RISK.caution ? 'caution' : out.risk;
     return {
       ok: true,
@@ -366,7 +371,7 @@ async function plan(repo, action, ctx = {}) {
       // Fix all leaves these out of what it runs on its own (renderer/fix-all.js).
       runsRepoCode: code.runsRepoCode,
       // What recheck() inspects again just before the plan runs.
-      inspected: { uses: out.uses || [], remotes: out.remotes || [], pushes: !!out.pushes, target: out.target || null },
+      inspected: { uses: out.uses || [], remotes: out.remotes || [], pushes: !!out.pushes, target: out.target || null, runsGit },
       undo: out.undo || null,
       body: out.body || null,
       note: [out.note, code.note].filter(Boolean).join(' ') || null,

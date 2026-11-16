@@ -188,17 +188,38 @@ async function repoCode(ctx, dir, kinds, target) {
   return { hooks: found, drivers: [...drivers], tree, signs };
 }
 
+// The remotes a partial clone fetches missing objects from (null when it is not one). Whatever
+// file sets these, they decide whether git fetches, so trust does not come into it.
+async function promisorRemotes(ctx, dir, refuse) {
+  const { all } = await ctx.gitConfig(dir, '^(extensions\\.partialclone|remote\\..+\\.promisor)$');
+  const names = new Set();
+  for (const e of all) {
+    if (e.origin === 'command line:') continue;
+    const m = /^remote\.(.+)\.promisor$/.exec(e.key);
+    if (m ? /^(false|no|off|0)$/i.test(e.value == null ? 'true' : e.value) : !e.value) continue;
+    names.add(m ? m[1] : e.value);
+  }
+  if (!names.size) return null;
+  for (const n of names) if (!validRemote(n)) refuse('This repo is a partial clone whose remote has an unusual name. GutCheck won\'t run git steps that could fetch from it; run git yourself.');
+  return [...names];
+}
+
 // Checks a planned action (out.uses: the kinds of git step it runs; out.remotes and out.pushes:
 // the remotes its network steps talk to). Throws the refusal for network programs and non-network
 // remotes; otherwise returns { warnings, note, runsRepoCode } to add to the plan.
 async function inspect(ctx, dir, out, refuse) {
   const uses = out.uses || [];
-  if (!uses.length) return { warnings: [], note: null, runsRepoCode: false };
-  if (uses.some((k) => USES[k].network)) {
+  // Git must not run here at all when the repo's config moves its work tree or cannot be read.
+  if (out.runsGit || uses.length) await ctx.checkRepo(dir).catch((e) => refuse(`GutCheck won't run git here: ${e.message}.`));
+  // A partial clone fetches the objects it lacks when a step needs them, so any git step in one can
+  // talk to its promisor remotes: it gets the network checks too, and only then may fetch.
+  const promisors = out.runsGit || uses.length ? await promisorRemotes(ctx, dir, refuse) : null;
+  if (!uses.length && !promisors) return { warnings: [], note: null, runsRepoCode: false, lazyFetch: false };
+  if (promisors || uses.some((k) => USES[k].network)) {
     const { all, untrusted } = await ctx.gitConfig(dir, NETWORK_KEYS);
     const progs = networkPrograms(untrusted);
     if (progs.length) refuse(`This repo's own git config names programs to run for network commands (${progs.join(', ')}). GutCheck won't run them; remove them or run git yourself.`);
-    const bad = await remoteProblem(ctx, dir, all, out.remotes || [], !!out.pushes);
+    const bad = await remoteProblem(ctx, dir, all, [...new Set([...(out.remotes || []), ...(promisors || [])])], !!out.pushes);
     if (bad) refuse(`This repo's remote "${bad}" is a local folder, a file:// URL or a remote helper. GutCheck only talks to https, ssh and git remotes (a local remote runs that repo's own hooks); run git yourself.`);
   }
   const code = await repoCode(ctx, dir, uses, out.target);
@@ -208,7 +229,8 @@ async function inspect(ctx, dir, out, refuse) {
   if (code.drivers.length) warnings.push(`This runs programs the repo's own git config names for its files (${code.drivers.join(', ')}). That is the repo's code, not GutCheck's.`);
   const commits = uses.includes('commit') || uses.includes('merge');
   const note = commits && code.signs ? 'Your git config signs commits (commit.gpgSign), but GutCheck\'s commits are not signed: signing runs programs a repo\'s config can change.' : null;
-  return { warnings, note, runsRepoCode: warnings.length > 0 };
+  const fetches = promisors ? `This repo is a partial clone, so this may download missing files from ${promisors.join(', ') || 'its remote'}.` : null;
+  return { warnings, note: [note, fetches].filter(Boolean).join(' ') || null, runsRepoCode: warnings.length > 0, lazyFetch: !!promisors };
 }
 
 module.exports = { validBranch, validRemote, networkPrograms, inspect, PLAIN_URL, USES, NETWORK_KEYS, CODE_KEYS };

@@ -213,7 +213,8 @@ test('append and write refuse to follow a symlink out of the repo', async () => 
 });
 
 test('hygiene fixes: worktree prune and security features plan the exact documented calls, admin only', async () => {
-  const wt = await plan(ghRepo(), { type: 'worktree-prune' });
+  // The folder is made up, so the repo checks (work tree, partial clone) get stubs; test/action-safety.test.js runs them for real.
+  const wt = await plan(ghRepo(), { type: 'worktree-prune' }, { checkRepo: async () => {}, gitConfig: async () => ({ all: [], untrusted: [] }) });
   assert.ok(wt.ok, wt.error);
   assert.deepEqual(wt.display.map((d) => d.text), ['git worktree prune -v']);
   const want = {

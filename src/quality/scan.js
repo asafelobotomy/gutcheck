@@ -159,7 +159,7 @@ async function scanQuality(dir, rawSettings) {
       markers[m[1]]++;
       // The comment text is shown in the app and the report, so a marker that looks like it holds a
       // credential (any rule, generic included) keeps its place but never its text.
-      if (markers.items.length < 40) markers.items.push({ path: rel, line: i + 1, kind: m[1], text: R.secretKinds(c, false).length ? '(text hidden: it looks like it contains a credential)' : snippet(c) });
+      if (markers.items.length < 40) markers.items.push({ path: rel, line: i + 1, kind: m[1], text: R.looksLikeCredential(c) ? '(text hidden: it looks like it contains a credential)' : snippet(c) });
     });
   }
 

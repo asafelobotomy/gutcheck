@@ -87,7 +87,9 @@ module.exports = ({ fail, nothing }) => ({
         steps.push(step(['bundle', 'verify', out('repo.bundle')]));
         written.push('repo.bundle: every branch, tag and the latest stash (git clone repo.bundle <folder>)');
         if (lo.uncommitted > 0) {
-          steps.push(step(['diff', 'HEAD', '--binary', `--output=${out('uncommitted.patch')}`]));
+          // Git's own diff only: an external diff program (diff.external, GIT_EXTERNAL_DIFF) or a textconv
+          // filter would run instead and leave a patch that cannot be applied.
+          steps.push(step(['diff', '--no-ext-diff', '--no-textconv', 'HEAD', '--binary', `--output=${out('uncommitted.patch')}`]));
           written.push('uncommitted.patch: changes to tracked files (git apply uncommitted.patch)');
         }
         // Counted now, not taken from the scan: a stash dropped since would stop the rescue halfway.
@@ -97,7 +99,7 @@ module.exports = ({ fail, nothing }) => ({
           const withUntracked = (await git(['stash', 'show', '--include-untracked', '--stat', 'stash@{0}'])).ok;
           if (!withUntracked) warnings.push('This git cannot include untracked files in stash patches; they stay only in the bundle\'s stash commits.');
           for (let n = 0; n < stashCount; n++) {
-            steps.push(step(['stash', 'show', '-p', '--binary', ...(withUntracked ? ['--include-untracked'] : []), `--output=${out(`stash-${n}.patch`)}`, `stash@{${n}}`]));
+            steps.push(step(['stash', 'show', '-p', '--no-ext-diff', '--no-textconv', '--binary', ...(withUntracked ? ['--include-untracked'] : []), `--output=${out(`stash-${n}.patch`)}`, `stash@{${n}}`]));
             // A stash patch applies to the commit the stash was made on, not to HEAD. The bundle
             // holds that commit when a ref reaches it (nothing reachable only from older stashes).
             const base = (await git(['rev-parse', '-q', '--verify', `stash@{${n}}^1`])).stdout.trim();
