@@ -139,3 +139,24 @@ test('the page loads the vendored module and maps uQ onto GutCheck\'s colours', 
   for (const m of ['--bg: var(--uq-bg)', '--text: var(--uq-text)', '--accent: var(--uq-accent)', '--err: var(--uq-error)']) assert.ok(css.includes(m), m);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'preload.js'), 'utf8'), /exposeInMainWorld\('uqTokens'/);
 });
+
+test('renderer: a theme whose text or danger colour cannot be read on its background is not applied (audit 2026-11-16, T7)', async () => {
+  const { startUqTheme, readable, contrast } = await renderer();
+  assert.ok(contrast('#000000', '#ffffff') > 20.9);
+  assert.equal(contrast('#101010', 'red'), null);
+  assert.equal(readable(tokens({ bg: '#101010', text: '#fafafa', error: '#e06c75' })), true);
+  assert.equal(readable(tokens({ bg: '#101010', text: '#121212' })), false);
+  assert.equal(readable(tokens({ bg: '#101010', text: '#fafafa', error: '#141010' })), false);
+  assert.equal(readable(tokens({ bg: '#fdfdfd' })), true, 'a pair with a colour missing is not judged');
+  const shell = fakeWindow(tokens({ bg: '#202020', text: '#202020', error: '#202020' }));
+  const root = fakeRoot();
+  const watch = startUqTheme(shell.win, root);
+  await watch.ready;
+  assert.equal(root.props.has('--uq-bg'), false);
+  assert.equal(root.attrs.has('data-uq-variant'), false, 'GutCheck keeps its own colours');
+  shell.text = tokens({ bg: '#101010', text: '#fafafa' });
+  shell.fire();
+  await watch.refresh();
+  assert.equal(root.props.get('--uq-bg'), '#101010');
+  watch.stop();
+});

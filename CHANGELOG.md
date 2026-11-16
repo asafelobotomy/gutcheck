@@ -4,6 +4,10 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Changed
+
+- `npm test` runs through `scripts/test.js`, which gives the tests one private temp folder and removes it afterwards. The tests used to leave their throwaway repos in the shared temp folder: about 4,500 folders and 3.5 GB after a day's runs.
+
 ### Security
 
 - Fixes that only read or move commits can no longer run a program a cloned repo's `.git/config` names. In a partial clone, a step that needed a missing file (Switch, Pull's fast-forward, Merge, Commit, deleting a branch, aborting) fetched it, which ran the repo's `remote.<name>.uploadpack` or `core.sshCommand`, while the plan said "safe". Every git step now runs with fetching of missing files switched off. A real partial clone still works: its steps get the same checks as Fetch (no programs named for network commands, a plain https, ssh or git remote), the plan says it may download missing files, and only then may it fetch.
@@ -21,9 +25,14 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 - Registering a repo for git maintenance gets the same checks as Fetch, since background maintenance fetches with plain git: it is refused when the repo's config names network programs or connection settings, or its remote is a local folder.
 - GutCheck no longer inherits `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and similar variables. Started from a git hook or alias, every scan and fix would have acted on that other repo.
 - An MCP result that is cut at 100,000 characters no longer carries the full, uncut data beside the text.
+- An ignore of an error or security finding now applies only in the folder it was made in. Ignores are stored by GitHub owner/name, so any folder whose origin URL named one of your repos got your ignores for it, security ones included. Ordinary ignores still follow the repo across clones; for a second clone of your own, ignore the finding there too. Ignores made before this version keep applying everywhere.
+- Over MCP, the live agent-usage check (which starts MCP servers, some defined by the repos themselves) needs `--allow-danger` as well as `--allow-actions`.
+- "Launch when I log in" is refused when GutCheck runs from a source checkout, which starts without the browser sandbox. Use the AppImage for that; turning it off still works anywhere.
+- Releases now carry a build provenance attestation: `gh attestation verify GutCheck-*.AppImage --repo asafelobotomy/gutcheck` shows the AppImage was built by this repo's workflow from its code.
 - Over MCP, an AI agent can only scan the workspace folder you chose (in the app or with `gutcheck scan <folder>`) or a folder inside it. It used to accept any folder, `/` and your home folder included, and remembered it as the CLI's workspace. An agent's scan is no longer remembered, and with no workspace set the agent is told to ask you to choose one. **If you use GutCheck only through an agent, run `gutcheck scan <folder>` once, or pick the folder in the app.**
 - MCP results write your home folder as `~` (paths, and the report's text), so your user name no longer goes to the model provider, and the email addresses in the git identity findings are masked (`a***@example.com`). Agents can pass `~` paths back.
 - Plan previews escape control and bidi characters in clutter paths, `gutcheck new --notify` escapes markup in the notification text, and agent config files are written through a new, unguessable temp file.
+- A uQ theme whose text, warning or error colour cannot be told from its background is not applied; GutCheck keeps its own colours. Such a theme would have hidden the preview and warnings of a confirm dialog.
 - Secrets backup, hardening:
   - A committed link such as `.env -> .git/config` no longer makes git's own config (which can hold a token) a file to back up, and at most 500 secret-looking files per repo are read and hashed on a scan (the repo says so when there are more).
   - Error text from a password manager is also cleared of the file's contents when the tool echoes them JSON-escaped or percent-encoded.
@@ -57,6 +66,10 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 - `gutcheck fix <repo> all` and the MCP's Fix all stop offering a repo's later fixes once one is refused (a refused pull is no longer followed by a commit and push).
 - Secrets backup: one file a password manager cannot take (over Bitwarden's 10,000-character note limit) is left out with a note instead of stopping the whole backup, and one failed save no longer stops the files after it (three failures in a row still stop the run).
 - Secrets backup: a credentials file under an `XDG_CONFIG_HOME` outside your home folder is named `xdg-config/…`. It used to be named `~/../…`, which `pass` refuses, so it could never be saved.
+- The command line rejects a mistyped command or option (`--yess`, `findigs`, `--severity critical`, `--repo` with no value) straight away. An unknown option used to be ignored, so `--yess` gave a preview instead of running, and an unknown command ran a full scan before saying so.
+- A branch that shares its name with a tag is listed by its plain name (it was `heads/<name>`), and "merged" is measured against the default branch, not a tag of the same name.
+- Up to 100 open pull requests per repo are checked (it was 30; the rest were silently left out).
+- "Commits since the last release" is counted on the default branch as last fetched, not on whatever branch is checked out, so a feature branch's own commits no longer count as unreleased.
 - Clutter sizes no longer promise more space than a clean-up frees on a disk that compresses files. On btrfs (`compress=`) or bcachefs, `du` gives sizes before compression, so 60 GB of `target/` folders freed 24 GB. GutCheck now says those sizes are before compression (in the app, the plan, the MCP and CLI result's `compressed`), and a clean-up ends with the free space it actually gained, measured on the disk.
 
 ## [0.28.1] - 2026-11-15

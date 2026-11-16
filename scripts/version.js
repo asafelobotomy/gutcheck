@@ -28,7 +28,7 @@ const cmp = (a, b) => { const x = SEMVER.exec(a).slice(1, 4).map(Number); const 
 // The text under "## [<version>]" (or "## [Unreleased]") up to the next "## " heading.
 function section(changelog, version) {
   const lines = changelog.split('\n');
-  const start = lines.findIndex((l) => new RegExp(`^## \\[${version.replace(/\./g, '\\.')}\\]`, 'i').test(l));
+  const start = lines.findIndex((l) => l.toLowerCase().startsWith(`## [${String(version).toLowerCase()}]`));
   if (start < 0) return null;
   const end = lines.findIndex((l, i) => i > start && /^## /.test(l));
   return lines.slice(start + 1, end < 0 ? undefined : end).join('\n').trim();

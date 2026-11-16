@@ -101,3 +101,23 @@ test('cli: no command prints terminal escapes or bidi controls from a repo name,
     assert.ok(JSON.parse(j.out).findings.some((f) => f.repo === evil), 'the name survives as JSON escapes');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('cli: a mistyped command or option is an error before anything is scanned or run (audit 2026-11-07, B23)', async () => {
+  const env = isolatedEnv({ GUTCHECK_DATA_DIR: tmp('gutcheck-updata-') });
+  let scans = 0;
+  const run2 = async (argv) => { const o = []; const e = []; const code = await main(argv, { out: (s) => o.push(s), err: (s) => e.push(s), env, engineOpts: { onScan: () => scans++ } }); return { code, out: o.join('\n'), err: e.join('\n') }; };
+  for (const [argv, why] of [
+    [['findigs', '--root', '/nowhere'], /unknown command "findigs"/],
+    [['fix', 'alpha', 'all', '--yess'], /unknown option --yess/],
+    [['findings', '--severity', 'critical'], /--severity is error, warn or info/],
+    [['findings', '--repo'], /--repo needs a value/],
+    [['findings', '--repo', '--json'], /--repo needs a value/],
+  ]) {
+    const r = await run2(argv);
+    assert.equal(r.code, 1, argv.join(' '));
+    assert.match(r.err, why);
+    assert.equal(r.out, '', 'nothing else is printed');
+  }
+  assert.equal((await run2(['--version'])).code, 0);
+  assert.equal((await run2(['help'])).code, 0);
+});

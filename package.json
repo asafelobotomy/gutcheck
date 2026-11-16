@@ -14,7 +14,7 @@
   },
   "scripts": {
     "start": "electron . --no-sandbox",
-    "test": "node --test test/*.test.js",
+    "test": "node scripts/test.js",
     "dist": "electron-builder --linux AppImage",
     "bump": "node scripts/version.js bump",
     "check:uq-tokens": "bash scripts/check-uq-tokens.sh 1.0.0 src/vendor/uq-tokens/uq-tokens.js",

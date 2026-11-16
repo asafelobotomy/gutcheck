@@ -26,6 +26,8 @@ const TERM_UNSAFE = /[\x00-\x08\x0b-\x1f\x7f-\x9f\u{2028}\u{2029}\p{Cf}\u{34f}\u
 const termSafe = (s) => String(s).replace(TERM_UNSAFE, (ch) => { const n = ch.codePointAt(0); return n <= 0x9f ? '\\x' + n.toString(16).padStart(2, '0') : '\\u{' + n.toString(16) + '}'; });
 // The same characters inside JSON text, as JSON's own \uXXXX escapes, so the output still parses.
 const jsonSafe = (s) => String(s).replace(TERM_UNSAFE, (ch) => [...Array(ch.length).keys()].map((i) => '\\u' + ch.charCodeAt(i).toString(16).padStart(4, '0')).join(''));
+// Text as a literal inside a RegExp.
+const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const list = (a, max = 6) => a.slice(0, max).join(', ') + (a.length > max ? `, +${a.length - max} more` : '');
 
 // Folders no scan should descend into: huge build/dependency output owned by a tool.
@@ -55,4 +57,4 @@ function cmpVersion(a, b) {
 // A workflow that failed this many runs in a row is broken, not flaky: a re-run would fail again.
 const BROKEN_RUN_STREAK = 3;
 
-module.exports = { BROKEN_RUN_STREAK, expandHome, NODE_LOCKFILES, installCommand, DAYS_PER_YEAR, MAX_PLAN_ITEMS, COMMAND_TIMEOUT_MS, cmpVersion, DAY, daysAgo, sq, plural, printable, termSafe, jsonSafe, list, HEAVY_DIRS };
+module.exports = { BROKEN_RUN_STREAK, expandHome, NODE_LOCKFILES, installCommand, DAYS_PER_YEAR, MAX_PLAN_ITEMS, COMMAND_TIMEOUT_MS, cmpVersion, DAY, daysAgo, sq, plural, printable, termSafe, jsonSafe, escapeRe, list, HEAVY_DIRS };

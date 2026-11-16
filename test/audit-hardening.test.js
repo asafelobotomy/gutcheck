@@ -153,3 +153,49 @@ test('C7: MCP output writes the home folder as ~ and masks the addresses of the 
   const md = outbound('- Path: `/home/ann/Projects/app`\n- 2 recent commits by you used another email than ann@home.example\n- Author bob@other.example', home);
   assert.equal(md, '- Path: `~/Projects/app`\n- 2 recent commits by you used another email than a***@home.example\n- Author bob@other.example');
 });
+
+test('T8: your ignore of a security finding applies only in the folder it was made in; an ordinary ignore follows the repo', () => {
+  const { applyPolicy, createPolicyStore } = require('../src/policy');
+  const data = tmp('gutcheck-t8-');
+  const store = createPolicyStore(data);
+  assert.equal(store.setIgnore('octo/app', 'wf-injection', 'reviewed here', 'cli', '/w/app').ok, true);
+  assert.equal(store.setIgnore('octo/app', 'no-license', 'internal', 'cli', '/w/app').ok, true);
+  const score = (findings) => ({ findings, score: 100 - findings.length });
+  const res = (p) => ({ path: p, name: path.basename(p), remote: { owner: 'octo', name: 'app' }, findings: [
+    { id: 'wf-injection', category: 'Actions security', severity: 'error', title: 'x' }, { id: 'no-license', category: 'Docs', severity: 'warn', title: 'y' }] });
+  const mine = applyPolicy(res('/w/app'), store.load(), score);
+  assert.deepEqual(mine.findings.map((f) => f.id), []);
+  const claimed = applyPolicy(res('/tmp/evil-clone'), store.load(), score);
+  assert.deepEqual(claimed.findings.map((f) => f.id), ['wf-injection'], 'a folder that only claims octo/app keeps its security finding');
+  assert.deepEqual(claimed.ignored.map((f) => f.id), ['no-license']);
+  // A second clone of your own: ignore it there too, and both folders are listed.
+  store.setIgnore('octo/app', 'wf-injection', 'reviewed here', 'app', '/w/app-2');
+  assert.deepEqual(applyPolicy(res('/w/app-2'), store.load(), score).findings, []);
+  assert.deepEqual(applyPolicy(res('/w/app'), store.load(), score).findings, []);
+  // A rule written before folders were recorded keeps applying everywhere.
+  fs.writeFileSync(path.join(data, 'ignores.json'), JSON.stringify({ 'octo/app': { 'wf-injection': { reason: 'old', via: 'cli' } } }));
+  assert.deepEqual(applyPolicy(res('/anywhere'), store.load(), score).findings.map((f) => f.id), ['no-license']);
+});
+
+test('E7: over MCP the live usage check needs --allow-danger as well as --allow-actions', async () => {
+  const { TOOLS } = require('../src/mcp');
+  const tool = TOOLS.find((t) => t.name === 'gutcheck_agent_usage');
+  let ran = null;
+  const engine = (o) => ({ ...o, agentUsage: async (a) => { ran = a; return { ok: true }; } });
+  assert.match((await tool.run(engine({ allowActions: true, allowDanger: false }), { live: true }, () => {})).error, /--allow-danger/);
+  assert.equal(ran, null);
+  assert.equal((await tool.run(engine({ allowActions: true, allowDanger: true }), { live: true }, () => {})).ok, true);
+  assert.equal(ran.live, true);
+  assert.equal((await tool.run(engine({ allowActions: false }), {}, () => {})).ok, true, 'the transcript-only check needs neither');
+});
+
+test('B15: launch at login is refused from a source checkout, and can still be turned off', () => {
+  const { setAutostart, isAutostart, ENTRY } = require('../src/autostart');
+  const dir = tmp('gutcheck-auto-');
+  const app = { isPackaged: false, getAppPath: () => '/src/gc' };
+  assert.throws(() => setAutostart(app, true, { dir, platform: 'linux' }), /needs the packaged app/);
+  assert.equal(isAutostart(app, { dir, platform: 'linux' }), false);
+  fs.writeFileSync(path.join(dir, ENTRY), 'old entry from an earlier version\n');
+  setAutostart(app, false, { dir, platform: 'linux' });
+  assert.equal(isAutostart(app, { dir, platform: 'linux' }), false);
+});

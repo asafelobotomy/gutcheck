@@ -4,7 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { git } = require('./exec');
-const { cmpVersion, daysAgo } = require('./util');
+const { cmpVersion, daysAgo, escapeRe } = require('./util');
 
 const VERSION_TAG = /^v?(\d+\.\d+\.\d+)$/; // plain releases only: v1.2.3 or 1.2.3, no pre-releases
 const UNRELEASED_MIN_COMMITS = 5;
@@ -51,13 +51,16 @@ async function collectRelease(dir) {
   const vTags = vAll.length;
   if (!tags.length) return { latest: null, manifest, vTag, vTags };
   const latest = tags.sort((a, b) => cmpVersion(a.replace(/^v/, ''), b.replace(/^v/, ''))).pop();
+  // Counted on the default branch as last fetched (origin/HEAD), not on whatever branch is checked
+  // out: a feature branch's own commits are not "unreleased". Without that ref, HEAD.
+  const tip = (await git(['rev-parse', '-q', '--verify', 'refs/remotes/origin/HEAD'], { cwd: dir })).ok ? 'refs/remotes/origin/HEAD' : 'HEAD';
   const [since, date] = await Promise.all([
-    git(['rev-list', '--count', `refs/tags/${latest}..HEAD`], { cwd: dir }),
+    git(['rev-list', '--count', `refs/tags/${latest}..${tip}`], { cwd: dir }),
     git(['log', '-1', '--format=%cI', `refs/tags/${latest}`], { cwd: dir }),
   ]);
   const cl = changelogText(dir);
   const ver = latest.replace(/^v/, '');
-  const esc = ver.replace(/\./g, '\\.');
+  const esc = escapeRe(ver);
   return {
     latest, version: ver, vTag, vTags,
     commitsSince: since.ok ? Number(since.stdout.trim()) || 0 : null,

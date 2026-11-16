@@ -197,7 +197,7 @@ The exact command or JSON is shown before anything runs, the change is recorded 
 
 **Why it unpacks itself.** Agents started by Claude Desktop (and other sandboxed hosts) run with `NoNewPrivs`, which blocks `fusermount`, so an AppImage cannot mount there. Its runtime's FUSE-free mode prints file names to standard output, which breaks MCP. So when you connect from the AppImage, GutCheck first unpacks itself once into its data folder (`mcp-app/<version>/`, about 400 MB) and registers that copy. After updating GutCheck, the agent shows **Update needed**: press **Update** to unpack the new version and repoint the agent. Until you do, the agent's server says it is out of date (in its instructions and in `gutcheck_overview`), and the update moves older unpacked copies no agent still uses to the trash. Agents need a new session to see a newly added server.
 
-**MCP server.** To set it up by hand, add GutCheck to your agent as a stdio MCP server. It starts **read-only**; add `--allow-actions` to let the agent plan and apply fixes. Dangerous fixes (force-deleting a branch, archiving a repo, deleting remote branches, package installs, test runs) are still refused for agents unless you also add `--allow-danger`; without it the agent can show you the commands, and you run them in the app or the CLI. An agent can only scan the workspace folder you chose in the app or with `gutcheck scan <folder>` (or a folder inside it), and results it receives write your home folder as `~`. If your agent runs under `NoNewPrivs` (Claude Desktop does), point it at an unpacked copy (`GutCheck.AppImage --appimage-extract`, then `squashfs-root/gutcheck --mcp`) rather than the AppImage.
+**MCP server.** To set it up by hand, add GutCheck to your agent as a stdio MCP server. It starts **read-only**; add `--allow-actions` to let the agent plan and apply fixes. Dangerous fixes (force-deleting a branch, archiving a repo, deleting remote branches, package installs, test runs) and the live MCP server check are still refused for agents unless you also add `--allow-danger`; without it the agent can show you the commands, and you run them in the app or the CLI. An agent can only scan the workspace folder you chose in the app or with `gutcheck scan <folder>` (or a folder inside it), and results it receives write your home folder as `~`. If your agent runs under `NoNewPrivs` (Claude Desktop does), point it at an unpacked copy (`GutCheck.AppImage --appimage-extract`, then `squashfs-root/gutcheck --mcp`) rather than the AppImage.
 
 ```bash
 claude mcp add --transport stdio --scope user gutcheck -- /path/to/GutCheck.AppImage --mcp                    # Claude Code, read-only
@@ -283,7 +283,7 @@ A baseline says what every repo should have. **Baseline** in the sidebar (or `gu
 
 **Settings** (top bar) has these startup, tray and schedule options, all off by default:
 
-- **Launch when I log in**: starts GutCheck at login, straight into the tray with no window. On Linux this writes `~/.config/autostart/gutcheck.desktop` (pointing at the AppImage you ran, so keep it in a stable place); on Windows and macOS it uses the system login items. Turning it off removes the entry.
+- **Launch when I log in** (the packaged app only, not a source checkout): starts GutCheck at login, straight into the tray with no window. On Linux this writes `~/.config/autostart/gutcheck.desktop` (pointing at the AppImage you ran, so keep it in a stable place); on Windows and macOS it uses the system login items. Turning it off removes the entry.
 - **Minimise to the system tray**: minimising hides the window; click the tray icon to bring it back.
 - **Closing the window keeps GutCheck running in the tray**: use **Quit** in the tray menu to exit.
 - **Scan on a schedule**: while GutCheck runs (in the tray is enough), it rescans the last workspace every hour to every week, and shows a desktop notification only when warnings or errors appear that the previous scan did not have. Without the app, run `gutcheck new --notify` from cron or a systemd timer: it prints only new findings and notifies through `notify-send`. Only finding ids are stored between scans (`seen.json`).
@@ -303,7 +303,7 @@ chmod +x GutCheck-*.AppImage
 ./GutCheck-*.AppImage
 ```
 
-Requires `gh` and `git` on your `PATH`, and `gh auth login` completed. To check the download, run `sha256sum -c SHA256SUMS.txt` next to the AppImage (the file is attached to every release).
+Requires `gh` and `git` on your `PATH`, and `gh auth login` completed. To check the download, run `sha256sum -c SHA256SUMS.txt` next to the AppImage (the file is attached to every release). From the release after 0.28.1 on, `gh attestation verify GutCheck-*.AppImage --repo asafelobotomy/gutcheck` also shows that GitHub's own build made it from this repo's code.
 
 Each release's notes are in [CHANGELOG.md](CHANGELOG.md).
 

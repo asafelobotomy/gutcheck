@@ -5,7 +5,7 @@ GutCheck is an Electron app (plus a CLI and an MCP server) that checks the healt
 ## Commands
 
 - `npm install`: install dependencies (Node 22 or newer)
-- `npm test`: run every unit test (`node --test test/*.test.js`; no network needed, temp git repos only)
+- `npm test`: run every unit test (`scripts/test.js` runs `node --test` on `test/*.test.js` with a private temp folder it removes afterwards; no network needed, temp git repos only). One file: `npm test -- test/cli.test.js`
 - `npm start`: run the app
 - `npm run dist`: build the AppImage into `dist/`
 - `node src/cli.js --help`: the command line; `node src/cli.js mcp` runs the MCP server
@@ -39,4 +39,4 @@ GutCheck is an Electron app (plus a CLI and an MCP server) that checks the healt
 - Keep files under 400 lines; GutCheck checks itself.
 - Explain each new rule's source in `docs/sources.md`, and add a test for each false alarm you fix (`test/accuracy.test.js`).
 - Changes go under `## [Unreleased]` in `CHANGELOG.md`.
-- Releasing: `npm run bump -- patch|minor|major` (moves Unreleased into a dated version and updates `package.json` and `package-lock.json`; tests check all three agree), commit, push to `main`. CI tags `v<version>` and publishes the release with that changelog section as its notes.
+- Releasing: `npm run bump -- patch|minor|major` (moves Unreleased into a dated version and updates `package.json` and `package-lock.json`; tests check all three agree), commit, open a pull request and merge it once the `test` check passes (`main` requires it, so a direct push is refused). CI then tags `v<version>` and publishes the release with that changelog section as its notes.

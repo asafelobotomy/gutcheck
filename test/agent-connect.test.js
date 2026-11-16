@@ -117,7 +117,7 @@ test('Claude Code bundled with Claude Desktop is used when claude is not on PATH
   const ac = createAgentConnect({ home, platform: 'linux', env: { PATH: '' }, launch: LAUNCH, runner: async () => ({ ok: true, stdout: '', stderr: '' }) });
   assert.equal(ac.status().clients.find((c) => c.id === 'claude-code').installed, true);
   const p = ac.plan('claude-code', {});
-  assert.match(p.display[1], new RegExp(`^${path.join(home, '.config', 'Claude', 'claude-code', '2.1.317', 'b1', 'claude').replace(/[.]/g, '\\.')} mcp add `));
+  assert.match(p.display[1], new RegExp(`^${require('../src/util').escapeRe(path.join(home, '.config', 'Claude', 'claude-code', '2.1.317', 'b1', 'claude'))} mcp add `));
 });
 
 test('from an AppImage, agents get an unpacked copy (no FUSE under NoNewPrivs): unpacked once, then registered; an old registration shows as outdated', async () => {

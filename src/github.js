@@ -33,7 +33,7 @@ fragment F on Repository {
   licenseInfo { key }
   defaultBranchRef { name branchProtectionRule { id } }
   vulnerabilityAlerts(first: 100, states: OPEN) { totalCount nodes { vulnerableManifestPath securityVulnerability { severity package { name ecosystem } firstPatchedVersion { identifier } } } }
-  pullRequests(states: OPEN, first: 30, orderBy: { field: UPDATED_AT, direction: DESC }) {
+  pullRequests(states: OPEN, first: 100, orderBy: { field: UPDATED_AT, direction: DESC }) {
     totalCount
     nodes {
       number title body url isDraft updatedAt mergeable reviewDecision headRefName headRefOid

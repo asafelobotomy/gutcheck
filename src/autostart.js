@@ -23,9 +23,12 @@ function desktopEntry(exec, args = []) {
 }
 
 // Packaged AppImages must relaunch the AppImage itself, not the temporary mount inside it.
+const FROM_SOURCE = 'Launch when I log in needs the packaged app (the AppImage). From a source checkout GutCheck runs without the browser sandbox, so it is not started at login.';
 function launchCommand(app, env = process.env, execPath = process.execPath) {
-  if (app.isPackaged) return { exec: env.APPIMAGE || execPath, args: [HIDDEN_FLAG] };
-  return { exec: execPath, args: [app.getAppPath(), '--no-sandbox', HIDDEN_FLAG] };
+  // Only the packaged app: a source checkout runs with --no-sandbox (npm start), and nothing that
+  // starts at every login should run without the browser sandbox (audit B15).
+  if (!app.isPackaged) throw new Error(FROM_SOURCE);
+  return { exec: env.APPIMAGE || execPath, args: [HIDDEN_FLAG] };
 }
 
 function setLinux(dir, enabled, cmd) {
@@ -38,7 +41,7 @@ function setLinux(dir, enabled, cmd) {
 // `dir` is the XDG autostart folder (Linux only); it is a parameter so tests never touch the real one.
 function setAutostart(app, enabled, { dir, platform = process.platform } = {}) {
   const on = !!enabled;
-  if (platform === 'linux') setLinux(dir, on, launchCommand(app));
+  if (platform === 'linux') setLinux(dir, on, on ? launchCommand(app) : null);
   else app.setLoginItemSettings({ openAtLogin: on, args: [HIDDEN_FLAG] });
   return on;
 }

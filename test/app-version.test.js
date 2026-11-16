@@ -28,7 +28,7 @@ test('the MCP copy tells agents when the installed app is newer, and only then',
     const engine = { dataDir: data, allowActions: false, repos: async () => ({ ok: true, repos: [] }) };
     const server = createServer({ engine, send: (m) => sent.push(m) });
     await server.handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
-    assert.match(sent[0].result.instructions, new RegExp(`GutCheck ${version.replace(/\./g, '\\.')}, but GutCheck 999\\.0\\.0 is installed`));
+    assert.match(sent[0].result.instructions, new RegExp(`GutCheck ${require('../src/util').escapeRe(version)}, but GutCheck 999\\.0\\.0 is installed`));
     await server.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'gutcheck_overview', arguments: {} } });
     assert.match(sent[1].result.structuredContent.notice, /999\.0\.0 is installed/);
   } finally { fs.rmSync(data, { recursive: true, force: true }); }

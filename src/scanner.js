@@ -78,7 +78,8 @@ async function collectGit(dir) {
       if (line.startsWith('? ')) g.untracked++;
     }
   }
-  const refs = await git(['for-each-ref', '--format=%(refname:short)\t%(committerdate:iso-strict)', 'refs/heads'], { cwd: dir });
+  // lstrip=2, not :short: with a tag of the same name, :short gives "heads/<branch>".
+  const refs = await git(['for-each-ref', '--format=%(refname:lstrip=2)\t%(committerdate:iso-strict)', 'refs/heads'], { cwd: dir });
   g.branches = refs.stdout
     .split('\n')
     .filter(Boolean)
@@ -106,7 +107,10 @@ async function collectGit(dir) {
 async function mergedInto(dir, base, g) {
   if (!base || !g.branches.some((b) => b.name === base)) return [];
   // for-each-ref, not `git branch --merged`: that also prints "(HEAD detached at …)" as if it were a branch.
-  const r = await git(['for-each-ref', `--merged=${base}`, '--format=%(refname:lstrip=2)', 'refs/heads'], { cwd: dir });
+  // refs/heads/<base>: a tag of the same name must not be what "merged" is measured against. A branch
+  // at the base's own tip counts as merged: that is what a fast-forward merge leaves, and a branch
+  // made there with no commits yet loses nothing either.
+  const r = await git(['for-each-ref', `--merged=refs/heads/${base}`, '--format=%(refname:lstrip=2)', 'refs/heads'], { cwd: dir });
   return r.stdout
     .split('\n')
     .filter(Boolean)

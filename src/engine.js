@@ -345,7 +345,7 @@ function createEngine(opts = {}) {
     const scope = r ? [r] : [...known.values()].filter((x) => !x.error);
     const refused = !remove && via === 'mcp' && wildcardOk(String(finding || ''), MIN_PREFIX.user) && agentIgnoreRefusal(String(finding || ''), scope.flatMap((x) => [...(x.findings || []), ...(x.ignored || [])]));
     if (refused) return { ok: false, error: refused };
-    const res = remove ? policy.removeIgnore(key, String(finding || '')) : policy.setIgnore(key, String(finding || ''), reason, via);
+    const res = remove ? policy.removeIgnore(key, String(finding || '')) : policy.setIgnore(key, String(finding || ''), reason, via, r ? r.path : null);
     if (!res.ok) return res;
     appendAudit(auditFile, { ok: true, repo: r ? r.name : 'all repos', title: `${remove ? 'Stopped ignoring' : 'Ignored'} ${finding}${remove ? '' : `: ${res.reason}`}`, via: opts.via || 'cli' });
     if (r) await ws.refresh(r.path); else await ws.refreshAll(); // an ignore for every repo changes them all
@@ -387,7 +387,7 @@ function createEngine(opts = {}) {
 
   const history = ({ limit = 50 } = {}) => ({ ok: true, entries: readAudit(auditFile, Math.max(1, Math.min(500, limit))) });
 
-  return { scan, repos, findings, localOnly, repoDetail, remote, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, secrets: secrets.list, secretsPlan: secrets.plan, secretsApply: secrets.apply, secretsVerify: secrets.verify, secretsSkip: secrets.skip, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions };
+  return { scan, repos, findings, localOnly, repoDetail, remote, report, clutter, quality, tests, workspace, plan, apply, history, fresh, ignore, ignored, drift, agentUsage, secrets: secrets.list, secretsPlan: secrets.plan, secretsApply: secrets.apply, secretsVerify: secrets.verify, secretsSkip: secrets.skip, actions: () => ({ ok: true, actions: ACTION_CATALOG }), dataDir: dir, allowActions, allowDanger: !!opts.allowDanger };
 }
 
 module.exports = { createEngine, dataDir, ACTION_CATALOG, brief };

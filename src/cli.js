@@ -58,6 +58,7 @@ Usage: gutcheck <command> [options]
                                 dangerous fixes also need --allow-danger)
 
 Options: --root <folder>  --deep  --json  --yes  --confirm <name>  --help  --version
+--yes plans and runs in one go, without stopping at the preview: leave it off to read the commands first.
          --remote / --no-remote  include or leave out GitHub repos not cloned here, for this run
 `;
 
@@ -68,6 +69,21 @@ function parseValue(k, v) {
   if (v === 'true' || v === 'false') return v === 'true';
   if (/^\d+$/.test(v)) return Number(v);
   return v;
+}
+
+// Everything the command line takes. A typo (--yess, "findigs") is an error before anything is scanned
+// or run, never a silent preview or a full scan followed by "unknown command".
+const COMMANDS = new Set(['help', 'mcp', 'scan', 'new', 'findings', 'repo', 'report', 'clutter', 'quality', 'tests', 'workspace', 'local-only', 'remote', 'secrets', 'actions', 'fix', 'ignore', 'unignore', 'ignored', 'drift', 'baseline', 'history', 'agents']);
+const FLAGS = new Set(['root', 'repo', 'severity', 'category', 'confirm', 'limit', 'skip', 'json', 'deep', 'yes', 'all', 'notify', 'help', 'version', 'remote', 'no-remote', 'clear-cache', 'backup', 'verify', 'live', 'allow-actions', 'allow-danger']);
+const VALUE_FLAGS = ['root', 'repo', 'severity', 'category', 'confirm', 'limit', 'skip'];
+function usageError(cmd, f) {
+  const bad = Object.keys(f).find((k) => !FLAGS.has(k));
+  if (bad != null) return `unknown option --${P(bad)}`;
+  const empty = VALUE_FLAGS.find((k) => k in f && (typeof f[k] !== 'string' || !f[k] || f[k].startsWith('--')));
+  if (empty) return `--${empty} needs a value`;
+  if (f.severity && !['error', 'warn', 'info'].includes(f.severity)) return '--severity is error, warn or info';
+  if (cmd && !COMMANDS.has(cmd)) return `unknown command "${P(cmd)}"`;
+  return null;
 }
 
 function parseArgs(argv) {
@@ -197,6 +213,8 @@ async function main(argv, { out: rawOut = (s) => process.stdout.write(s + '\n'),
   const a = parseArgs(argv);
   const [cmd, ...rest] = a._;
   const f = a.flags;
+  const bad = usageError(cmd, f);
+  if (bad) { err(`gutcheck: ${bad}. Try gutcheck --help.`); return 1; }
   if (f.version) { out(version); return 0; }
   if (!cmd || f.help || cmd === 'help') { out(HELP); return cmd || f.help ? 0 : 1; }
   if (cmd === 'mcp') { await require('./mcp').start({ allowActions: !!f['allow-actions'], allowDanger: !!f['allow-danger'] }); return 0; }

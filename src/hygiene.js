@@ -60,7 +60,7 @@ async function collectHygiene(dir, { names, rawOrigin, deep, branch }) {
   const run = (args) => git(args, { cwd: dir });
   const [stash, track, fetchedRefs, wt, head, objects, tags] = await Promise.all([
     run(['stash', 'list', '--format=%gd']),
-    run(['for-each-ref', '--format=%(refname:short)\t%(upstream:track)', 'refs/heads']),
+    run(['for-each-ref', '--format=%(refname:lstrip=2)\t%(upstream:track)', 'refs/heads']),
     run(['for-each-ref', '--count=1', '--format=%(refname)', 'refs/remotes']),
     run(['worktree', 'list', '--porcelain']),
     run(['rev-parse', '-q', '--verify', 'HEAD']),

@@ -33,6 +33,12 @@ jobs:
   appimage:
     needs: test
     runs-on: ubuntu-latest
+    # The provenance attestation is signed with this job's own identity (a push only: a pull
+    # request from a fork gets no identity token).
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     outputs:
       version: ${{ steps.ver.outputs.version }}
     steps:
@@ -59,6 +65,12 @@ jobs:
       - run: npx electron-builder --linux AppImage --publish never
       - name: Checksum
         run: cd dist && sha256sum *.AppImage > SHA256SUMS.txt
+      # Records, on GitHub, that this AppImage was built by this workflow from this commit. Check a
+      # download with: gh attestation verify GutCheck-*.AppImage --repo <owner>/gutcheck
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: github.event_name == 'push'
+        with:
+          subject-path: dist/*.AppImage
       # This version's CHANGELOG.md section becomes the release notes (the tests fail without one).
       - name: Release notes
         env:
