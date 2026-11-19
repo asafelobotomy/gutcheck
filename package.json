@@ -23,7 +23,7 @@
   "devDependencies": {
     "electron": "^45.2.3",
     "electron-builder": "^26.18.1",
-    "jsdom": "^31.0.0"
+    "jsdom": "^31.0.1"
   },
   "build": {
     "appId": "dev.solon.gutcheck",
