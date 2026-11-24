@@ -77,7 +77,7 @@ function drawHistory(entries) {
   search.addEventListener('input', () => { histView.q = search.value; drawHistory(entries); const s = $('detail').querySelector('input[type=search]'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } });
   const row = (e) => h('div', { class: 'finding hist ' + (e.ok ? 'done' : 'error') },
     UI.icon(e.ok ? 'check' : 'x', 'sev'),
-    h('div', { class: 't' }, h('b', {}, `${e.ok ? '✓' : '✗'} ${e.repo}: ${e.title}`),
+    h('div', { class: 't' }, h('b', {}, h('span', { class: 'sr' }, `${e.ok ? '✓' : '✗'} `), `${e.repo}: ${e.title}`),
       h('span', {}, new Date(e.ts).toLocaleTimeString(), e.via && e.via !== 'app' ? ` · via ${e.via}` : ''),
       (e.steps || []).length ? h('details', { class: 'cmds' }, h('summary', {}, plural(e.steps.length, 'command')), ...e.steps.map((s) => h('code', {}, s.cmd))) : null));
   put($('detail'),

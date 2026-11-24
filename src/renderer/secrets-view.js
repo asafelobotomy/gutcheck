@@ -5,6 +5,9 @@
 
 const SEC_STATUS = { unbacked: 'not backed up', changed: 'changed since the backup', missing: 'missing from the vault', mismatch: 'differs from the vault', backed: 'backed up', skipped: 'skipped' };
 const SEC_CLS = { unbacked: 'b-warn', changed: 'b-warn', missing: 'b-err', mismatch: 'b-err', backed: 'ok', skipped: '' };
+// Each status as a picture: the word is the tooltip and screen-reader text.
+const SEC_ICON = { unbacked: 'alert', changed: 'refresh', missing: 'x', mismatch: 'x', backed: 'shieldok', skipped: 'eyeoff' };
+const SEC_TONE = { unbacked: 'warn', changed: 'warn', missing: 'err', mismatch: 'err', backed: 'ok', skipped: '' };
 const SEC_NEEDS = new Set(['unbacked', 'changed', 'missing', 'mismatch']);
 // id -> [name, what its one target field means] (KeePassXC has three fields instead).
 const VAULTS = { proton: ['Proton Pass', 'Vault name'], '1password': ['1Password', 'Vault name'], bitwarden: ['Bitwarden', 'Folder ID (optional)'], keepassxc: ['KeePassXC'],
@@ -147,11 +150,11 @@ function secretRow(it) {
   }
   return h('div', { class: 'row' }, cb || h('span', { class: 'pickgap' }), UI.icon(it.kind === 'ssh' || it.kind === 'key' ? 'secrets' : 'file'),
     h('div', { class: 'grow' }, h('b', {}, secName(it)), ' ',
-      h('span', { class: 'badge ' + (SEC_CLS[it.status] || '') }, SEC_STATUS[it.status] || it.status),
-      it.confidence === 'low' ? h('span', { class: 'badge', title: 'In a test or fixture folder' }, 'probably a test key') : null,
+      UI.badge(SEC_ICON[it.status] || 'dot', SEC_STATUS[it.status] || it.status, SEC_TONE[it.status] || ''),
+      it.confidence === 'low' ? UI.badge('tests', 'probably a test key: in a test or fixture folder') : null,
       h('div', { class: 'muted' }, [kind, it.saveable ? fmtSize(it.size) : '', it.sameAs ? `same as ${it.sameAs}` : '', it.note || ''].filter(Boolean).join(' · '))),
     it.saveable && it.status !== 'skipped' && it.status !== 'backed' ? btn('Back up', () => backupSecrets([it.path])) : null,
-    it.status === 'skipped' ? btn('Back up after all', () => unskipSecret(it)) : it.status !== 'backed' ? btn('Don\'t back up…', () => skipSecret(it)) : null);
+    it.status === 'skipped' ? btn('Back up after all', () => unskipSecret(it)) : it.status !== 'backed' ? UI.iconOnly('eyeoff', 'Don\'t back up…', () => skipSecret(it), 'ghost', 'Don\'t back up this file (asks why)…') : null);
 }
 
 const secView = { status: 'all' };
@@ -174,7 +177,7 @@ function renderSecrets() {
   const tone = { 'b-warn': 'warn', 'b-err': 'err', ok: 'ok', '': 'info' };
   const vault = c.linked ? h('span', { class: 'pill ok' }, UI.icon('lock'), `Saving to ${(VAULTS[c.tool] || [c.tool])[0]}`) : h('span', { class: 'pill bad' }, UI.icon('unlock'), 'No password manager linked');
   put($('detail'), ...head,
-    h('div', { class: 'toolbar' }, vault, UI.ibtn('refresh', 'Rescan', () => scanSecretsNow()),
+    h('div', { class: 'toolbar' }, vault, UI.iconOnly('refresh', 'Rescan', () => scanSecretsNow()),
       btn('Back up all unbacked', () => backupSecrets(all), all.length ? 'primary' : ''),
       btn('Verify with vault', () => verifySecrets()), btn('Password manager…', () => openVaultPanel())),
     (c.advice || []).map(secretAdviceEl),

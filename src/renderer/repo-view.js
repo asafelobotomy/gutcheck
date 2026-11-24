@@ -5,7 +5,7 @@
 
 const repoPick = { key: null, findings: new Set(), prs: new Set(), branches: new Set(), files: new Set() };
 const repoView = { tab: 'issues', sev: 'all', branchFilter: 'all' };
-const SEV_ICON = { error: 'alert', warn: 'alert', info: 'dot' };
+const SEV_ICON = { error: 'error', warn: 'alert', info: 'dot' };
 
 // Picks belong to one repo: opening another clears them.
 function repoPicks(r) {
@@ -20,7 +20,7 @@ function findingEl(r, f, pick) {
     UI.icon(SEV_ICON[f.severity] || 'dot', 'sev'),
     h('div', { class: 't' }, h('b', {}, f.title), h('span', {}, f.detail || '')),
     h('div', { class: 'facts' },
-      f.url ? btn('Open ↗', () => window.api.openUrl(f.url), 'ghost') : null,
+      f.url ? UI.iconOnly('external', 'Open ↗', () => window.api.openUrl(f.url), 'ghost', 'Open on GitHub') : null,
       !fix ? null : fix.type === 'permissions-prune' ? btn('Review rules…', () => reviewRules(r, fix.hashes)) : btn(fix.label, () => runActions([{ repo: r, action: fix }]), 'fixb'),
       ignoreButton(r, f)));
 }
@@ -83,8 +83,8 @@ function prsTab(r) {
         h('div', { class: 'grow' }, h('b', {}, `#${p.number} ${p.title}`),
           h('div', { class: 'chips' }, h('span', { class: 'chip mono' }, p.headRefName), p.isDraft ? UI.status('muted', 'draft') : null, UI.status(ck[0], ck[1]), UI.status(rv[0], rv[1]), p.mergeable === 'CONFLICTING' ? UI.status('err', 'conflicts') : null)),
         p.isDraft ? btn('Ready for review', act('pr-ready', p)) : btn('Merge…', act('pr-merge', p, { method: 'squash', deleteBranch: true })),
-        btn('Close', act('pr-close', p)),
-        btn('Open ↗', () => window.api.openUrl(p.url), 'ghost'));
+        UI.iconOnly('x', 'Close', act('pr-close', p), '', `Close #${p.number} without merging…`),
+        UI.iconOnly('external', 'Open ↗', () => window.api.openUrl(p.url), 'ghost', 'Open on GitHub'));
     })];
 }
 
@@ -111,21 +111,21 @@ function branchesTab(r) {
     deletable.includes(b) ? UI.tick(pick, b.key, renderRepo, `Select ${b.name}`) : h('span', { class: 'pickgap' }),
     UI.icon('branch', b.current ? 'cur' : ''),
     h('div', { class: 'grow' }, h('b', {}, b.remoteOnly ? 'origin/' + b.name : b.name), ' ',
-      b.current ? h('span', { class: 'badge cur' }, 'current') : null,
-      b.merged ? h('span', { class: 'badge ok' }, 'merged') : null,
-      b.stale ? h('span', { class: 'badge warn' }, 'stale') : null,
-      b.remoteOnly ? h('span', { class: 'badge' }, 'remote only') : b.localOnly ? h('span', { class: 'badge' }, 'local only') : null,
+      b.current ? UI.badge('star', 'current', 'cur') : null,
+      b.merged ? UI.badge('merge', 'merged', 'ok') : null,
+      b.stale ? UI.badge('clock', `stale: no commits for ${Metrics.STALE_BRANCH_DAYS}+ days`, 'warn') : null,
+      b.remoteOnly ? UI.badge('cloud', 'remote only: not checked out here') : b.localOnly ? UI.badge('laptop', 'local only: not on GitHub') : null,
       b.remoteOnly && b.name === def ? h('span', { class: 'badge cur' }, 'default') : null,
-      prByBranch.has(b.name) ? h('span', { class: 'badge' }, `PR #${prByBranch.get(b.name).number}`) : null,
+      prByBranch.has(b.name) ? h('span', { class: 'badge', title: 'Has an open pull request' }, UI.icon('pr'), `#${prByBranch.get(b.name).number}`) : null,
       h('span', { class: 'muted' }, ' ' + fmtDate(b.date))),
-    b.remoteOnly ? null : !b.current ? btn('Switch', act('checkout', { branch: b.name })) : null,
-    b.remoteOnly ? null : !b.current ? btn('Merge into current…', act('merge-branch', { branch: b.name })) : null,
-    !b.remoteOnly && r.remote && !r.remote.unreachable && b.name !== def && remoteSet.has(b.name) && !prByBranch.has(b.name) ? btn('Open PR…', act('pr-create', { branch: b.name })) : null,
-    b.remoteOnly ? (b.name !== def ? btn('Delete on GitHub', act('delete-remote', { branch: b.name }), 'dng') : null)
-      : !b.current ? btn(b.merged ? 'Delete' : 'Force delete', act('delete-local', { branch: b.name, force: !b.merged }), b.merged ? '' : 'dng') : null));
+    b.remoteOnly ? null : !b.current ? UI.iconOnly('switch', 'Switch', act('checkout', { branch: b.name }), '', `Switch to ${b.name}`) : null,
+    b.remoteOnly ? null : !b.current ? UI.iconOnly('merge', 'Merge into current…', act('merge-branch', { branch: b.name }), '', `Merge ${b.name} into ${g.branch || 'the current branch'}…`) : null,
+    !b.remoteOnly && r.remote && !r.remote.unreachable && b.name !== def && remoteSet.has(b.name) && !prByBranch.has(b.name) ? UI.iconOnly('pr', 'Open PR…', act('pr-create', { branch: b.name }), '', `Open a pull request from ${b.name}…`) : null,
+    b.remoteOnly ? (b.name !== def ? UI.iconOnly('trash', 'Delete on GitHub', act('delete-remote', { branch: b.name }), 'dng', `Delete ${b.name} on GitHub…`) : null)
+      : !b.current ? UI.iconOnly('trash', b.merged ? 'Delete' : 'Force delete', act('delete-local', { branch: b.name, force: !b.merged }), b.merged ? '' : 'dng', b.merged ? `Delete ${b.name} (merged, nothing is lost)…` : `Force delete ${b.name}: not merged, its commits may be lost…`) : null));
   const count = (k) => every.filter(F[k]).length;
   return [h('h3', {}, `Branches (${local.length} local, ${remoteOnly.length} remote-only)`),
-    h('div', { class: 'toolbar' }, UI.ibtn('plus', 'New branch…', act('create-branch', {})), UI.ibtn('arrowdown', 'Pull', act('pull', {})), UI.ibtn('arrowup', 'Push', act('push', {})), btn('Save a rescue copy…', act('rescue-bundle', {}))),
+    h('div', { class: 'toolbar' }, UI.ibtn('plus', 'New branch…', act('create-branch', {})), UI.ibtn('arrowdown', 'Pull', act('pull', {})), UI.ibtn('arrowup', 'Push', act('push', {})), UI.ibtn('rescue', 'Save a rescue copy…', act('rescue-bundle', {}))),
     h('div', { class: 'listhead' }, UI.tickAll(pick, deletable.map((b) => b.key), renderRepo, 'Select every branch that can be deleted'),
       UI.segmented([{ value: 'all', label: 'All', count: every.length }, { value: 'merged', label: 'Merged', count: count('merged'), dot: 'ok' }, { value: 'stale', label: 'Stale', count: count('stale'), dot: 'warn' },
         { value: 'local', label: 'Local only', count: count('local') }, { value: 'remote', label: 'Remote only', count: count('remote') }], repoView.branchFilter, (v) => { repoView.branchFilter = v; renderRepo(); }, 'Show branches')),
@@ -166,7 +166,7 @@ function filesTab(r) {
     UI.bulkBar(sel.length, 'file', [btn(`Add ${sel.length} file${sel.length === 1 ? '' : 's'}…`, () => runActions(sel.map(([id]) => ({ repo: r, action: { type: 'add-file', template: id, commit: true } })), { ask: false }), 'primary')], () => { pick.clear(); renderRepo(); }),
     h('div', { class: 'tiles' }, FILE_TEMPLATES.map(([id, label, has]) => (has(r)
       ? h('div', { class: 'tile have' }, UI.icon('check'), h('span', {}, label))
-      : h('div', { class: 'tile miss' }, UI.tick(pick, id, renderRepo, `Select ${label}`), UI.icon('file'), h('span', { class: 'grow' }, label), btn('+ ' + label, actOn(r, 'add-file', { template: id }), 'ghost')))))];
+      : h('div', { class: 'tile miss' }, UI.tick(pick, id, renderRepo, `Select ${label}`), UI.icon('file'), h('span', { class: 'grow' }, label), UI.iconOnly('plus', '+ ' + label, actOn(r, 'add-file', { template: id }), 'ghost', `Add ${label}…`)))))];
 }
 
 function repoStatus(r) {
@@ -174,10 +174,10 @@ function repoStatus(r) {
   const failing = (r.ci && r.ci.failed || []).length;
   return h('div', { class: 'chips vit' },
     g.branch ? h('span', { class: 'chip mono', title: 'Current branch' }, UI.icon('branch'), g.branch) : null,
-    g.dirty ? UI.status('warn', `${g.dirty} uncommitted`) : g.branch ? UI.status('ok', 'clean') : null,
-    g.ahead ? UI.status('warn', `${g.ahead} to push`) : null, g.behind ? UI.status('info', `${g.behind} to pull`) : null,
-    r.prs?.length ? UI.status('info', plural(r.prs.length, 'open PR')) : null,
-    r.remote ? (failing ? UI.status('err', `CI failing`) : UI.status('ok', 'CI ok')) : UI.status('warn', 'no GitHub backup'));
+    g.dirty ? UI.icount('pencil', g.dirty, 'uncommitted changes', 'b-warn') : g.branch ? UI.badge('check', 'clean: nothing uncommitted', 'ok') : null,
+    g.ahead ? UI.icount('arrowup', g.ahead, 'commits to push', 'b-warn') : null, g.behind ? UI.icount('arrowdown', g.behind, 'commits to pull') : null,
+    r.prs?.length ? UI.icount('pr', r.prs.length, r.prs.length === 1 ? 'open PR' : 'open PRs') : null,
+    r.remote ? (failing ? UI.status('err', `CI failing`) : UI.status('ok', 'CI ok')) : UI.badge('cloudoff', 'no GitHub backup', 'warn'));
 }
 
 function renderRepo() {
@@ -190,10 +190,10 @@ function renderRepo() {
   const all = FixAll.plan(r);
   const fixable = all.actions.length + all.decisions.length;
   if (fixable) toolbar.append(UI.ibtn('wrench', `Fix all issues (${fixable})…`, () => fixAllIssues(r, all), 'primary'));
-  toolbar.append(UI.ibtn('refresh', 'Rescan', async (e) => { e.currentTarget.disabled = true; await refreshOne(r.path); }));
-  if (!RemoteView.isRemote(r) && (!r.git || !Array.isArray(r.git.remotes) || r.git.remotes.length)) toolbar.append(btn('Fetch & prune', actOn(r, 'fetch')));
-  if (!RemoteView.isRemote(r)) toolbar.append(UI.ibtn('folder', 'Open folder', () => window.api.openFolder(r.path)));
-  if (r.remote) toolbar.append(btn('Open on GitHub ↗', () => window.api.openUrl(r.remote.url)));
+  toolbar.append(UI.iconOnly('refresh', 'Rescan', async (e) => { e.currentTarget.disabled = true; await refreshOne(r.path); }, '', 'Rescan this repo'));
+  if (!RemoteView.isRemote(r) && (!r.git || !Array.isArray(r.git.remotes) || r.git.remotes.length)) toolbar.append(UI.iconOnly('fetch', 'Fetch & prune', actOn(r, 'fetch'), '', 'Fetch & prune: download new commits and drop deleted remote branches…'));
+  if (!RemoteView.isRemote(r)) toolbar.append(UI.iconOnly('folder', 'Open folder', () => window.api.openFolder(r.path), '', 'Open the folder'));
+  if (r.remote) toolbar.append(UI.iconOnly('github', 'Open on GitHub ↗', () => window.api.openUrl(r.remote.url), '', 'Open on GitHub'));
   toolbar.append(copyButton(r.path, r.name));
   const c = UI.sevCounts(r.findings);
   const branches = branchesTab(r);

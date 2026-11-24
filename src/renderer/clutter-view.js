@@ -5,6 +5,8 @@
 
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : n < 1073741824 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1073741824).toFixed(2)} GB`);
 const CAT_LABEL = { env: 'env file', duplicate: 'duplicate', backup: 'backup', temp: 'temp', junk: 'junk', cache: 'cache', 'test-artifact': 'test output', log: 'log', build: 'build output' };
+// What kind of clutter, as a picture (the word is the tooltip).
+const CAT_ICON = { env: 'secrets', duplicate: 'copy', backup: 'history', temp: 'clock', junk: 'trash', cache: 'layers', 'test-artifact': 'tests', log: 'file', build: 'wrench' };
 const CONF_TIP = { high: 'Safe to remove: regenerable or an exact copy', medium: 'Probably clutter: check first', low: 'Maybe clutter: review before removing' };
 const pkey = (repoPath, rel) => repoPath + '\u0000' + rel;
 
@@ -70,9 +72,9 @@ function clutterRepoEl(res, biggest) {
     cb.addEventListener('change', () => { cb.checked ? state.picked.add(pkey(res.path, i.path)) : state.picked.delete(pkey(res.path, i.path)); renderClutterView(); });
     return h('label', { class: 'crow' }, cb,
       h('div', { class: 'grow' }, h('b', {}, i.path + (i.kind === 'dir' ? '/' : '')), ' ',
-        h('span', { class: 'badge' }, CAT_LABEL[i.category] || i.category),
+        UI.badge(CAT_ICON[i.category] || 'file', CAT_LABEL[i.category] || i.category),
         h('span', { class: 'badge conf-' + i.confidence, title: CONF_TIP[i.confidence] }, i.confidence),
-        i.ignored ? h('span', { class: 'badge' }, 'git-ignored') : null,
+        i.ignored ? UI.badge('eyeoff', 'git-ignored') : null,
         h('div', { class: 'muted' }, `${i.reason} · ${i.ageDays ? `${i.ageDays}d old` : 'today'}${i.keep ? ` · keeps ${i.keep}` : ''}`)),
       UI.meter(biggest ? Math.round((i.size / biggest) * 100) : 0, i.confidence === 'high' ? 'ok' : i.confidence === 'medium' ? 'warn' : 'info', fmtSize(i.size)));
   });
@@ -106,7 +108,7 @@ function renderClutterView() {
   const selectSafe = () => { for (const r of c.repos.values()) preselect(r); renderClutterView(); };
   const selectNone = () => { state.picked.clear(); renderClutterView(); };
   const top = $('detail').scrollTop;
-  const rescan = UI.ibtn('refresh', 'Rescan', (e) => { e.currentTarget.disabled = true; scanClutterNow(); });
+  const rescan = UI.iconOnly('refresh', 'Rescan', (e) => { e.currentTarget.disabled = true; scanClutterNow(); });
   const biggest = Math.max(0, ...items.map((i) => i.size));
   const conf = { high: 0, medium: 0, low: 0 };
   for (const i of items) conf[i.confidence]++;

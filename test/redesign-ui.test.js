@@ -50,6 +50,27 @@ test('repo issues: filter by severity, tick several and fix them in one review',
   assert.equal(t.$$('.modal .plan.off').length, 2, 'unticked plans fade');
 });
 
+test('every icon-only button and icon badge keeps its name for screen readers and as a tooltip', async () => {
+  const git = { branch: 'main', dirty: 1, ahead: 1, behind: 0, remotes: ['origin'], branches: [{ name: 'main', current: true, date: new Date().toISOString() }, { name: 'old', date: new Date().toISOString() }], remoteBranches: [], mergedBranches: ['old'] };
+  const r = fixable('eta', 'C', [{ ...fixF('l', 'error', 'Missing LICENSE', 'license'), url: 'https://example.com' }], { git, files: { license: false, readme: true } });
+  const t = await boot({ repos: [r] });
+  await scan(t);
+  click(t.$$('#repos li')[0]);
+  const visible = (el) => [...el.childNodes].filter((n) => !(n.classList && (n.classList.contains('sr') || n.classList.contains('ic')))).map((n) => n.textContent).join('').trim();
+  const iconOnly = t.$$('button').filter((b) => !visible(b));
+  assert.ok(iconOnly.length >= 8, `found ${iconOnly.length}`);
+  for (const b of iconOnly) {
+    assert.ok(b.getAttribute('aria-label'), `${b.outerHTML.slice(0, 80)} has a name`);
+    assert.ok(b.title, `${b.getAttribute('aria-label')} has a tooltip`);
+    assert.equal(b.textContent, b.getAttribute('aria-label'), 'the hidden text matches the name');
+  }
+  for (const name of ['Rescan', 'Open folder', 'Open on GitHub ↗', 'Copy for LLM', 'Ignore…', 'Open ↗', 'Switch', 'Delete', '+ LICENSE', 'Browse…', 'Settings']) {
+    assert.ok(iconOnly.some((b) => b.getAttribute('aria-label') === name), `${name} is an icon button`);
+  }
+  for (const b of t.$$('.ib')) assert.ok(b.title && b.querySelector('.sr').textContent, 'an icon badge has a tooltip and hidden text');
+  assert.match(t.$('#repos li').textContent, /1 error/, 'the list still says what the icons count');
+});
+
 test('a single change\'s review has no risk summary and no stray text', async () => {
   const t = await boot({ repos: [fixable('zeta', 'C', [fixF('l', 'error', 'Missing LICENSE', 'license')])] });
   await scan(t);
