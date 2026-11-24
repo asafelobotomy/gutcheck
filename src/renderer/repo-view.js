@@ -193,6 +193,7 @@ function renderRepo() {
   toolbar.append(UI.ibtn('refresh', 'Rescan', async (e) => { e.currentTarget.disabled = true; await refreshOne(r.path); }));
   if (!RemoteView.isRemote(r) && (!r.git || !Array.isArray(r.git.remotes) || r.git.remotes.length)) toolbar.append(btn('Fetch & prune', actOn(r, 'fetch')));
   if (!RemoteView.isRemote(r)) toolbar.append(UI.ibtn('folder', 'Open folder', () => window.api.openFolder(r.path)));
+  else if (r.remote) toolbar.append(UI.ibtn('download', 'Clone here', () => GitHubView.get([{ owner: r.remote.owner, name: r.remote.name, kind: 'clone' }]), 'fixb'));
   if (r.remote) toolbar.append(btn('Open on GitHub ↗', () => window.api.openUrl(r.remote.url)));
   toolbar.append(copyButton(r.path, r.name));
   const c = UI.sevCounts(r.findings);

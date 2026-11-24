@@ -134,9 +134,22 @@ function createWorkspaceScanner({ known, service, policy, seen = null, onBegin =
     return { ok: true, res };
   }
   async function refreshAll() { for (const d of [...known.keys()]) await refresh(d); }
+  // A repo just cloned into the scanned folder joins the workspace without a full scan. replaceKey
+  // ("remote:owner/name") drops that repo's "not cloned here" entry. Null when the folder is not
+  // directly inside the scanned one, or a new scan started meanwhile.
+  async function adopt(dir, replaceKey) {
+    await settled();
+    if (!last.root || path.dirname(path.resolve(dir)) !== path.resolve(last.root)) return null;
+    const g = gen;
+    const res = await scanRepo(dir, { deep: last.deep, policy, worktreeOf: worktrees });
+    if (g !== gen) return null;
+    if (replaceKey && known.has(replaceKey)) { known.delete(replaceKey); remoteListing.delete(replaceKey); }
+    known.set(res.path, res);
+    return res;
+  }
 
   return {
-    resolveRoot, scan, settled, refresh, rescan, refreshAll,
+    resolveRoot, scan, settled, refresh, rescan, refreshAll, adopt,
     busy: () => !!running,
     root: () => last.root,
     deep: () => last.deep,

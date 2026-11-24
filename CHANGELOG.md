@@ -4,6 +4,10 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+
+- **From GitHub** in the sidebar clones and forks repos into the scanned folder. Search all of GitHub with results as you type, or list your own repos filtered to the ones not here and tick several to clone together. A repo that is only on GitHub has **Clone here** on its page. Each clone or fork is reviewed first (the exact `gh` command and the folder it creates), never lands on an existing folder, skips submodules, is recorded in History, and joins the repo list straight away.
+
 ### Changed
 
 - The app's pages are redesigned around showing state instead of describing it, shorter lists, and acting on many things at once (the audit is in `docs/ui-audit-2026-11-24.md`):

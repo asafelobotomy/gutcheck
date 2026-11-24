@@ -53,6 +53,16 @@ GutCheck can also check your GitHub repos that have no folder in the workspace. 
 - **Branches:** read from GitHub (the copy has none). Merged branches still on GitHub, and branches with work that is not in the default branch and no pull request, are reported; you can delete them on GitHub (each is checked to still be at the scanned commit, and the undo restores it), open a pull request, or close a PR and delete its branch in one step.
 - **Fixes:** the ones made through the GitHub API: merging, closing or readying pull requests, opening one from a branch, deleting branches, re-running failed CI, branch and tag protection, Actions settings, security features, repository settings, and archiving a repo with no pushes for a year (asked, never picked for you). Fix all, the finding buttons, `gutcheck fix owner/name ...` and MCP `gutcheck_plan` offer them, with the same preview and confirmation as for a local repo; each step is a `gh` command that names the repo (`-R owner/name`), so no folder is needed. Fixes that change files or local git are skipped (Fix all lists them) or refused, until they arrive as pull requests in a later version; clone the repo to make them now.
 
+## Clone and fork from GitHub
+
+**From GitHub** in the sidebar gets repos into the scanned folder:
+
+- **Search GitHub:** results show as you type (GitHub's own repository search, best 20 matches), each with **Clone** and **Fork**. Repos already in the folder say **Here** and open from the list.
+- **Your repos:** every repo you own, filtered to the ones not here. Tick several and clone them together.
+- A repo in the list that is only on GitHub (see below) has **Clone here** on its page.
+
+Each is a normal change: the review shows the exact `gh repo clone` or `gh repo fork --clone` command and the folder it creates, nothing runs until you apply it, and History records it. A clone never goes on top of an existing folder or outside the scanned one, submodules are not fetched, and nothing in the repo runs. A fork makes your fork `origin` and the original `upstream`. The new clone joins the repo list straight away.
+
 ## Screenshots
 
 All screenshots show a made-up demo workspace (`npm run screenshots` rebuilds them).

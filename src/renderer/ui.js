@@ -39,6 +39,7 @@ const UI = (() => {
     trash: 'M2 4h12M6 4V2h4v2M3.5 4l1 10h7l1-10',
     plus: 'M8 3v10M3 8h10',
     play: 'M4 2v12l10-6z',
+    download: 'M8 2v8M4.5 6.5 8 10l3.5-3.5M2 13h12',
   };
   function icon(name, cls = '') {
     const svg = document.createElementNS(NS, 'svg');
@@ -186,7 +187,7 @@ const UI = (() => {
 })();
 
 // Icons on the page's fixed controls (index.html). Labels stay as they are.
-for (const [id, name] of [['dashboard', 'dashboard'], ['overview', 'overview'], ['baseline', 'baseline'], ['quality', 'quality'], ['tests', 'tests'], ['secrets', 'secrets'], ['clutter', 'clutter'], ['history', 'history'], ['browse', 'folder'], ['scan', 'scan'], ['background', 'gear']]) {
+for (const [id, name] of [['dashboard', 'dashboard'], ['overview', 'overview'], ['baseline', 'baseline'], ['quality', 'quality'], ['tests', 'tests'], ['secrets', 'secrets'], ['clutter', 'clutter'], ['history', 'history'], ['github', 'download'], ['browse', 'folder'], ['scan', 'scan'], ['background', 'gear']]) {
   const el = document.getElementById(id);
   if (el) el.prepend(UI.icon(name));
 }
