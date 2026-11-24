@@ -19,6 +19,7 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
   - The dashboard's cards are grouped (Health, On GitHub, On this machine, Deeper scans). Clutter, Code quality and Tests fold per repo with their key numbers in the header; clutter can be filtered by confidence. Secrets filter by status and can be ticked all at once. Baseline shows each rule as a progress bar with the repos that miss it. History groups changes by day, filters to failures and hides commands until asked.
   - The review dialog counts plans by risk, can tick or untick them all, and fades unticked ones. Results show how many succeeded, failed ones first. The Fix all wizard shows its progress.
   - Read-only mode shows a band under the header and a locked switch. The GitHub API quota is a small gauge, and error messages stay until dismissed.
+  - Repeated actions and states are icons instead of words: refresh, folder, GitHub, copy, ignore, open, close, switch, merge and delete buttons, and badges for branch, clutter and secret states. Each keeps its words for screen readers and in a tooltip that names what it acts on. Errors and warnings get different shapes, not just different colours.
 
 - `npm test` runs through `scripts/test.js`, which gives the tests one private temp folder and removes it afterwards. The tests used to leave their throwaway repos in the shared temp folder: about 4,500 folders and 3.5 GB after a day's runs.
 

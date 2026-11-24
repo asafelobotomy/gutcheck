@@ -68,7 +68,7 @@ function renderTestsView() {
   const n = (x) => x.toLocaleString();
   const top = $('detail').scrollTop;
   put($('detail'), ...head,
-    h('div', { class: 'toolbar' }, UI.ibtn('refresh', 'Rescan', (e) => { e.currentTarget.disabled = true; scanTestsNow(); })),
+    h('div', { class: 'toolbar' }, UI.iconOnly('refresh', 'Rescan', (e) => { e.currentTarget.disabled = true; scanTestsNow(); })),
     h('div', { class: 'qstats' }, stat('Test cases', n(sum((r) => r.testCases))), stat('Repos without tests', n(all.filter((r) => !r.testCases).length), all.some((r) => !r.testCases) ? 'warn' : 'ok'),
       stat('Not run by CI', n(all.filter((r) => r.advice.some((a) => a.id === 't-ci' || a.id === 't-ci-none')).length), 'warn'),
       stat('Skipped or focused', n(sum((r) => r.skipped.length + r.focused.length))), stat('With coverage', `${covered.length}/${all.length}`)),

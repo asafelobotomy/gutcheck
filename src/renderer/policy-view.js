@@ -24,11 +24,11 @@ async function applyIgnore(r, o) {
 }
 
 function ignoreButton(r, f) {
-  return btn('Ignore…', async () => {
+  return UI.iconOnly('eyeoff', 'Ignore…', async () => {
     const v = await askInputs({ ...IGNORE_SPEC, title: `Ignore "${f.title}"` }, {});
     if (!v) return;
     await applyIgnore(r, { id: f.id, reason: v.reason, allRepos: !!v.allRepos });
-  });
+  }, 'ghost', 'Ignore this finding (asks why)…');
 }
 
 // Written through MCP, or by anything other than the CLI or the app (as ignore-rules.js labels it).

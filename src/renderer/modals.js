@@ -148,7 +148,7 @@ function showResults(outs) {
     box.append(h('h3', { class: 'mh' }, outs.every((o) => o.ok) ? 'Done' : 'Finished with errors'),
       ...(outs.length > 1 ? [h('p', { class: 'sub' }, `${okN} of ${outs.length} succeeded${okN < outs.length ? '. Failed ones are listed first.' : '.'}`), bar] : []),
       h('div', { class: 'plans' }, sorted.map((o) => h('div', { class: 'plan ' + (o.ok ? 'safe' : 'danger') },
-        h('b', {}, `${o.repoName || ''}  ${o.ok ? '✓' : '✗'}`),
+        h('div', { class: 'phead' }, h('b', {}, o.repoName || ''), UI.badge(o.ok ? 'check' : 'x', o.ok ? 'succeeded' : 'failed', o.ok ? 'ok' : 'err')),
         o.error ? h('div', { class: 'b-err' }, o.error) : null,
         ...(o.results || []).map((r) => h('div', {}, h('code', {}, (r.ok ? '✓ ' : '✗ ') + r.text), r.out ? h('pre', { class: 'prev' }, r.out) : null))))),
       h('div', { class: 'mbtns' }, h('button', { class: 'primary', onclick: () => close() }, 'Close')));

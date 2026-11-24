@@ -27,7 +27,7 @@ const GitHubView = (() => {
       h('div', { class: 'grow' },
         h('div', {}, h('b', {}, key(r)), r.description ? h('span', { class: 'muted' }, '  ' + r.description) : null),
         h('div', { class: 'chips' },
-          r.stars ? h('span', { class: 'chip', title: 'Stars' }, '★ ' + stars(r.stars)) : null,
+          r.stars ? h('span', { class: 'chip', title: 'Stars' }, UI.icon('star'), stars(r.stars)) : null,
           r.language ? h('span', { class: 'chip' }, r.language) : null,
           r.isPrivate ? h('span', { class: 'chip' }, UI.icon('lock'), 'private') : null,
           r.isFork ? h('span', { class: 'chip' }, UI.icon('branch'), 'fork') : null,
@@ -38,7 +38,7 @@ const GitHubView = (() => {
       open,
       away && !r.empty ? UI.ibtn('download', 'Clone', () => get([{ owner: r.owner, name: r.name, kind: 'clone' }]), 'fixb') : null,
       away && !r.mine ? UI.ibtn('branch', 'Fork', () => get([{ owner: r.owner, name: r.name, kind: 'fork' }])) : null,
-      btn('GitHub ↗', () => window.api.openUrl(`https://github.com/${key(r)}`), 'ghost'));
+      UI.iconOnly('github', 'Open on GitHub ↗', () => window.api.openUrl(`https://github.com/${key(r)}`), 'ghost', `Open ${key(r)} on GitHub`));
   }
 
   // Plan, review, run, then put the new clones in the list. items: [{ owner, name, kind }]

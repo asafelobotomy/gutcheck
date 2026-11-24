@@ -80,7 +80,7 @@ function renderQualityView() {
   const n = (x) => x.toLocaleString();
   const top = $('detail').scrollTop;
   put($('detail'), ...head, qualityForm(c.settings, c.limits),
-    h('div', { class: 'toolbar' }, UI.ibtn('refresh', 'Rescan', (e) => { e.currentTarget.disabled = true; scanQualityNow(); })),
+    h('div', { class: 'toolbar' }, UI.iconOnly('refresh', 'Rescan', (e) => { e.currentTarget.disabled = true; scanQualityNow(); })),
     h('div', { class: 'qstats' }, stat('Files', n(t.files)), stat('Lines', n(t.lines)), stat(`Over ${t.max} lines`, n(t.over), t.over ? 'warn' : 'ok'),
       stat('Magic numbers', n(t.magic), t.magic ? 'warn' : 'ok'), stat('Possible secrets', n(t.secrets), t.secrets ? 'err' : 'ok'), stat('TODO markers', n(t.todos))),
     t.largest.length ? [h('h3', {}, 'Largest files across the workspace'), h('p', { class: 'muted' }, `The bar turns amber past your ${t.max}-line limit.`), hbars(t.largest.map((f) => ({ label: `${f.repo}/${f.path}`, value: f.measured, cls: f.measured > t.max ? 'c-warn' : 'c-info', title: `${f.repo}/${f.path}` })), { max: Math.max(1, t.largest[0].measured) })] : null,

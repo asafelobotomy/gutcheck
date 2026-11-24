@@ -48,6 +48,7 @@ function activate(el, fn) {
 function copyButton(dir, label) {
   const b = h('button', { class: 'sm', title: 'Copy a full report with an ordered fix plan, to paste into any LLM' }, 'Copy for LLM');
   b.prepend(UI.icon('copy'));
+  if (dir) UI.makeIconOnly(b, 'copy', 'Copy for LLM: a full report with an ordered fix plan, to paste into any LLM'); // on a repo page; the workspace pages keep the words
   b.addEventListener('click', () => copyForLlm(b, dir, label));
   return b;
 }
@@ -166,12 +167,13 @@ function renderList() {
         h('div', { class: 'rname' }, r.name),
         r.error ? h('div', { class: 'rmeta b-err' }, 'scan failed') : UI.vitals(UI.sevCounts(r.findings), most),
         h('div', { class: 'rmeta' },
-          c.err ? h('span', { class: 'b-err' }, `${c.err} err`) : null,
-          c.warn ? h('span', { class: 'b-warn' }, `${c.warn} warn`) : null,
-          r.prs?.length ? h('span', { title: 'Open pull requests' }, UI.icon('pr'), plural(r.prs.length, 'PR')) : null,
-          g.dirty ? h('span', { class: 'b-warn', title: `${g.dirty} uncommitted changes` }, '● changes') : null,
-          g.ahead ? h('span', { title: `${g.ahead} commits not pushed` }, `↑${g.ahead}`) : null,
-          !r.remote && !r.error ? h('span', {}, 'local only') : null, RemoteView.chip(r)))), () => select(r.path));
+          c.err ? UI.icount('error', c.err, c.err === 1 ? 'error' : 'errors', 'b-err') : null,
+          c.warn ? UI.icount('alert', c.warn, c.warn === 1 ? 'warning' : 'warnings', 'b-warn') : null,
+          r.prs?.length ? UI.icount('pr', r.prs.length, r.prs.length === 1 ? 'open PR' : 'open PRs') : null,
+          g.dirty ? UI.icount('pencil', g.dirty, 'uncommitted changes', 'b-warn') : null,
+          g.ahead ? UI.icount('arrowup', g.ahead, 'commits not pushed') : null,
+          g.behind ? UI.icount('arrowdown', g.behind, 'commits to pull') : null,
+          !r.remote && !r.error ? UI.badge('cloudoff', 'local only: no GitHub backup', 'b-warn') : null, RemoteView.chip(r)))), () => select(r.path));
   });
   const hidden = base.length - rs.length;
   if (hidden && base.length) {
@@ -366,7 +368,7 @@ $('readonly').addEventListener('change', async (e) => {
   showReadOnly();
   const a = await window.api.authStatus();
   const pill = $('auth');
-  pill.replaceChildren(h('span', { class: 'sdot' }), a.ok ? 'gh: signed in' : 'gh: not signed in (run gh auth login)');
+  pill.replaceChildren(UI.icon('github'), h('span', { class: 'sdot' }), h('span', { class: a.ok ? 'sr' : '' }, a.ok ? 'gh: signed in' : 'gh: not signed in (run gh auth login)'));
   pill.title = a.ok ? 'The gh command line is signed in to GitHub' : 'Run "gh auth login" in a terminal, then scan again';
   pill.classList.add(a.ok ? 'ok' : 'bad');
   renderStats();

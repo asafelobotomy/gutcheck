@@ -23,6 +23,7 @@ const UI = (() => {
     check: 'M3 8.5 6.5 12 13 4',
     x: 'M4 4l8 8M12 4l-8 8',
     alert: 'M8 2 1 14h14L8 2zM8 6v4M8 12h0',
+    error: 'M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zM8 4.5v4M8 11h0',
     branch: 'M5 2v8M5 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM11 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM11 6c0 3-6 2-6 4',
     pr: 'M4 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM4 6v8M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM12 10V5H8M10 3 8 5l2 2',
     shield: 'M8 1 2 3v5c0 4 3 6 6 7 3-1 6-3 6-7V3L8 1z',
@@ -40,6 +41,21 @@ const UI = (() => {
     plus: 'M8 3v10M3 8h10',
     play: 'M4 2v12l10-6z',
     download: 'M8 2v8M4.5 6.5 8 10l3.5-3.5M2 13h12',
+    github: 'M6 14c-3 1-3-1.5-4.5-2M10 15v-2.5c0-.8.1-1.3-.4-1.8 2-.2 4-1 4-4.4a3.4 3.4 0 0 0-1-2.4 3 3 0 0 0-.1-2.4s-.8-.2-2.5 1a8.6 8.6 0 0 0-4.5 0C3.8.9 3 1.1 3 1.1a3 3 0 0 0-.1 2.4 3.4 3.4 0 0 0-1 2.4c0 3.4 2 4.2 4 4.4-.4.4-.5 1-.4 1.6V15',
+    merge: 'M4 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM4 6v8M12 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM4 6c0 3 3 4 6 4',
+    switch: 'M2 5h10l-3-3M14 11H4l3 3',
+    cloud: 'M4.5 13a3.5 3.5 0 0 1-.4-7A4.5 4.5 0 0 1 12.8 7 3 3 0 0 1 12 13z',
+    cloudoff: 'M2 2l12 12M4.5 13a3.5 3.5 0 0 1-.9-6.9M7 4.2A4.5 4.5 0 0 1 12.8 7 3 3 0 0 1 13.6 12',
+    laptop: 'M3 3h10v7H3zM1 13h14',
+    clock: 'M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2zM8 5v3l2 2',
+    star: 'M8 1.5l2 4.2 4.5.6-3.3 3.1.8 4.5L8 11.8l-4 2.1.8-4.5-3.3-3.1 4.5-.6z',
+    book: 'M2 2h5a2 2 0 0 1 2 2v10a2 2 0 0 0-2-2H2zM14 2H9a2 2 0 0 0-2 2v10a2 2 0 0 1 2-2h5z',
+    eye: 'M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5zM8 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
+    pencil: 'M11 2l3 3-8 8H3v-3zM9 4l3 3',
+    fetch: 'M8 2v8M5 7l3 3 3-3M2 12v2h12v-2',
+    layers: 'M8 2 1 5.5 8 9l7-3.5L8 2zM1 9l7 3.5L15 9',
+    shieldok: 'M8 1 2 3v5c0 4 3 6 6 7 3-1 6-3 6-7V3L8 1zM5.5 8l2 2 3-3.5',
+    rescue: 'M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zM8 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM3 3l3 3M13 3l-3 3M3 13l3-3M13 13l-3-3',
   };
   function icon(name, cls = '') {
     const svg = document.createElementNS(NS, 'svg');
@@ -58,6 +74,28 @@ const UI = (() => {
     b.prepend(icon(name));
     return b;
   }
+
+  // Icon-only button. Its name stays in the page as hidden text (screen readers, tests, Ctrl+F) and
+  // shows as a tooltip, so dropping the visible word loses nothing.
+  function iconOnly(name, label, onclick, cls = '', tip = null) {
+    const b = btn('', onclick, 'icon ' + cls);
+    b.replaceChildren(icon(name), h('span', { class: 'sr' }, label));
+    b.title = tip || label.replace(/…$/, '');
+    b.setAttribute('aria-label', label);
+    return b;
+  }
+  // Turn a fixed button (index.html) into an icon-only one, keeping its words as its name.
+  function makeIconOnly(el, name, tip) {
+    const label = el.textContent.trim();
+    el.replaceChildren(icon(name), h('span', { class: 'sr' }, label));
+    el.classList.add('icon');
+    el.setAttribute('aria-label', label);
+    el.title = tip || el.title || label;
+  }
+  // A state as a small picture; the word is hidden text and the tooltip.
+  const badge = (name, label, tone = '') => h('span', { class: 'ib ' + tone, title: label }, icon(name), h('span', { class: 'sr' }, label));
+  // A count with its icon: "⚠ 3", read as "3 errors".
+  const icount = (name, n, label, tone = '') => h('span', { class: 'icnt ' + tone, title: `${n} ${label}` }, icon(name), String(n), h('span', { class: 'sr' }, ` ${label}`));
 
   // One-of-many filter. options: [{ value, label, count?, cls? }]. Options with count 0 are dimmed.
   function segmented(options, value, onChange, label) {
@@ -183,11 +221,13 @@ const UI = (() => {
   // A small status chip: a coloured dot and a word, so state reads before the text does.
   const status = (tone, text, title) => h('span', { class: 'status s-' + tone, title: title || null }, h('span', { class: 'sdot' }), text);
 
-  return { icon, ibtn, segmented, fold, tick, tickAll, bulkBar, vitals, sevCounts, gauge, meter, more, empty, tabs, status, GRADE_TONE };
+  return { icon, ibtn, iconOnly, makeIconOnly, badge, icount, segmented, fold, tick, tickAll, bulkBar, vitals, sevCounts, gauge, meter, more, empty, tabs, status, GRADE_TONE };
 })();
 
 // Icons on the page's fixed controls (index.html). Labels stay as they are.
-for (const [id, name] of [['dashboard', 'dashboard'], ['overview', 'overview'], ['baseline', 'baseline'], ['quality', 'quality'], ['tests', 'tests'], ['secrets', 'secrets'], ['clutter', 'clutter'], ['history', 'history'], ['github', 'download'], ['browse', 'folder'], ['scan', 'scan'], ['background', 'gear']]) {
+for (const [id, name] of [['dashboard', 'dashboard'], ['overview', 'overview'], ['baseline', 'baseline'], ['quality', 'quality'], ['tests', 'tests'], ['secrets', 'secrets'], ['clutter', 'clutter'], ['history', 'history'], ['github', 'download'], ['scan', 'scan']]) {
   const el = document.getElementById(id);
   if (el) el.prepend(UI.icon(name));
 }
+UI.makeIconOnly(document.getElementById('browse'), 'folder', 'Choose the workspace folder');
+UI.makeIconOnly(document.getElementById('background'), 'gear', 'Settings: AI agents, launch on start up, tray and scheduled scans');
