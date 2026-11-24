@@ -102,20 +102,31 @@ function confirmPlans(plans, { lead = [], hold = null } = {}) {
       planConfirm.set(chosen, Object.fromEntries(chosen.filter((p) => p.confirmName).map((p) => [p.token, typed.get(p.confirmName).value])));
       close(chosen);
     });
+    const boxes = new Map();
     const tick = (p) => {
       if (!many) return null;
       const c = h('input', { type: 'checkbox', 'aria-label': `Include: ${p.title}` });
       c.checked = picked.has(p);
-      c.addEventListener('change', () => { if (c.checked) picked.add(p); else picked.delete(p); update(); });
+      c.addEventListener('change', () => { if (c.checked) picked.add(p); else picked.delete(p); sync(); });
+      boxes.set(p, c);
       return c;
     };
+    // Unticked plans fade, so what will run reads at a glance.
+    const sync = () => { for (const [p, c] of boxes) { c.checked = picked.has(p); c.closest('.plan')?.classList.toggle('off', !c.checked); } update(); };
+    const riskCount = (r) => plans.filter((p) => p.risk === r).length;
+    const summary = many ? h('div', { class: 'risksum' },
+      ...['safe', 'caution', 'danger'].filter(riskCount).map((r) => h('span', { class: 'risk r-' + r }, `${riskCount(r)} ${RISK_LABEL[r].toLowerCase()}`)),
+      h('span', { class: 'grow' }),
+      h('button', { class: 'sm ghost', onclick: () => { for (const p of plans) picked.add(p); sync(); } }, 'Tick all'),
+      h('button', { class: 'sm ghost', onclick: () => { picked.clear(); sync(); } }, 'Untick all')) : null;
     box.classList.add('wide');
     box.append(
       h('h3', { class: 'mh' }, many ? `Review ${plans.length} changes` : 'Review change'),
       h('p', { class: 'sub' }, many ? 'These exact commands will run, in this order, and nothing else. Untick any you do not want.' : 'These exact commands will run, and nothing else.'),
       ...lead.map((l) => h('p', { class: 'muted lead' }, l)),
-      h('div', { class: 'plans' }, plans.map((p, i) => h('div', { class: 'plan ' + p.risk },
-        h('div', { class: 'phead' }, tick(p), h('b', {}, many ? `${i + 1}. ${p.repoName}` : p.repoName), h('span', { class: 'risk r-' + p.risk }, RISK_LABEL[p.risk])),
+      ...(summary ? [summary] : []), // append() would print null
+      h('div', { class: 'plans' }, plans.map((p, i) => h('div', { class: 'plan ' + p.risk + (many && !picked.has(p) ? ' off' : '') },
+        h('div', { class: 'phead' }, tick(p), h('b', { class: 'grow' }, many ? `${i + 1}. ${p.repoName}` : p.repoName), h('span', { class: 'risk r-' + p.risk }, RISK_LABEL[p.risk])),
         h('div', {}, p.title),
         p.note ? h('div', { class: 'muted' }, p.note) : null,
         ...p.warnings.map((w) => h('pre', { class: 'warnbox' }, w)),
@@ -130,9 +141,14 @@ function confirmPlans(plans, { lead = [], hold = null } = {}) {
 function showResults(outs) {
   return modal((box, close) => {
     box.classList.add('wide');
+    const okN = outs.filter((o) => o.ok).length;
+    const bar = h('div', { class: 'resbar', role: 'img', 'aria-label': `${okN} of ${outs.length} succeeded` });
+    for (const [n, cls] of [[okN, 'ok'], [outs.length - okN, 'bad']]) { if (!n) continue; const f = h('span', { class: 'fill ' + cls }); f.style.width = (n / outs.length) * 100 + '%'; bar.append(f); }
+    const sorted = [...outs.filter((o) => !o.ok), ...outs.filter((o) => o.ok)];
     box.append(h('h3', { class: 'mh' }, outs.every((o) => o.ok) ? 'Done' : 'Finished with errors'),
-      h('div', { class: 'plans' }, outs.map((o) => h('div', { class: 'plan ' + (o.ok ? 'safe' : 'danger') },
-        h('b', {}, `${o.repoName || ''}  ${o.ok ? '✓' : '✗'}`),
+      ...(outs.length > 1 ? [h('p', { class: 'sub' }, `${okN} of ${outs.length} succeeded${okN < outs.length ? '. Failed ones are listed first.' : '.'}`), bar] : []),
+      h('div', { class: 'plans' }, sorted.map((o) => h('div', { class: 'plan ' + (o.ok ? 'safe' : 'danger') },
+        h('div', { class: 'phead' }, h('b', {}, o.repoName || ''), UI.badge(o.ok ? 'check' : 'x', o.ok ? 'succeeded' : 'failed', o.ok ? 'ok' : 'err')),
         o.error ? h('div', { class: 'b-err' }, o.error) : null,
         ...(o.results || []).map((r) => h('div', {}, h('code', {}, (r.ok ? '✓ ' : '✗ ') + r.text), r.out ? h('pre', { class: 'prev' }, r.out) : null))))),
       h('div', { class: 'mbtns' }, h('button', { class: 'primary', onclick: () => close() }, 'Close')));

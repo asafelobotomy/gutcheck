@@ -32,16 +32,17 @@ function qualityForm(cfg, lim = { min: 20, max: 20000 }) {
     if (inflight.quality) await inflight.quality; // that scan started with the old limits
     await scanQualityNow(); // keeps the old results on screen until the new ones arrive
   });
-  return h('div', { class: 'qform' },
-    h('label', {}, h('span', {}, 'Max lines per file'), max), h('label', {}, h('span', {}, 'Count'), mode),
-    h('label', { class: 'wide' }, h('span', {}, 'Ignore (comma separated: folder/, *.ext or part of a path)'), ignore), save);
+  return UI.fold('quality|limits', [h('span', { class: 'ftitle' }, 'Limits'), h('span', { class: 'chip' }, `${cfg.maxLines} lines per file`), h('span', { class: 'chip' }, cfg.locMode === 'code' ? 'code lines only' : 'all lines'), h('span', { class: 'chip' }, cfg.ignore.length ? plural(cfg.ignore.length, 'ignore rule') : 'nothing ignored')],
+    h('div', { class: 'qform' },
+      h('label', {}, h('span', {}, 'Max lines per file'), max), h('label', {}, h('span', {}, 'Count'), mode),
+      h('label', { class: 'wide' }, h('span', {}, 'Ignore (comma separated: folder/, *.ext or part of a path)'), ignore), save), { cls: 'cat' });
 }
 
 const where = (x) => `${x.path}:${x.line}`;
 const miniList = (rows) => h('div', { class: 'mini' }, rows.map((r) => h('div', {}, ...r)));
 
 function qualityRepoEl(res) {
-  if (res.error) return h('div', { class: 'cblock' }, h('h3', {}, res.name), h('p', { class: 'b-err' }, res.error));
+  if (res.error) return UI.fold('quality|' + res.path, [h('span', { class: 'ftitle' }, res.name), UI.status('err', 'scan failed')], h('p', { class: 'b-err' }, res.error), { open: true, cls: 'cat cblock' });
   const q = res;
   const details = [];
   if (q.loc.over.length) details.push(h('details', {}, h('summary', {}, `Files over the limit (${q.loc.overCount})`),
@@ -57,16 +58,17 @@ function qualityRepoEl(res) {
   if (q.markers.items.length) details.push(h('details', {}, h('summary', {}, `TODO / FIXME markers (${q.markers.total})`), miniList(q.markers.items.slice(0, 20).map((m) => [h('code', {}, where(m)), h('span', { class: 'badge' }, m.kind), ` ${m.text}`]))));
   if (q.languages.length) details.push(h('details', {}, h('summary', {}, 'Lines by language'),
     langBars(q.languages)));
-  return h('div', { class: 'cblock' },
-    h('h3', {}, q.name, h('span', { class: 'pill' }, `${plural(q.files, 'file')} · ${plural(q.lines, 'line')}`)),
-    q.advice.length ? q.advice.map((f) => adviceEl(null, f)) : h('p', { class: 'ok-msg' }, 'Nothing to flag.'),
-    ...details);
+  const sev = UI.sevCounts(q.advice);
+  return UI.fold('quality|' + q.path, [h('span', { class: 'ftitle' }, q.name), h('span', { class: 'pill' }, `${plural(q.files, 'file')} · ${plural(q.lines, 'line')}`),
+    q.secretCount ? UI.status('err', plural(q.secretCount, 'possible secret')) : null, q.loc.overCount ? UI.status('warn', `${q.loc.overCount} over the limit`) : null,
+    q.advice.length ? h('span', { class: 'cnt' + (sev.error ? ' err' : sev.warn ? ' warn' : '') }, String(q.advice.length)) : UI.status('ok', 'clean')],
+  [q.advice.length ? q.advice.map((f) => adviceEl(null, f)) : h('p', { class: 'ok-msg' }, 'Nothing to flag.'), ...details], { open: sev.error > 0, cls: 'cat cblock' });
 }
 
 function renderQualityView() {
   if (state.view !== 'quality') return;
   const c = state.quality;
-  const head = [h('h2', {}, 'Code quality'),
+  const head = [h('div', { class: 'dhead' }, h('h2', {}, 'Code quality')),
     h('p', { class: 'sub' }, 'Long files, magic numbers, hardcoded secrets (where, never the value), debug leftovers and TODOs. Read-only.')];
   if (!c) {
     const err = state.scanError.quality;
@@ -78,10 +80,10 @@ function renderQualityView() {
   const n = (x) => x.toLocaleString();
   const top = $('detail').scrollTop;
   put($('detail'), ...head, qualityForm(c.settings, c.limits),
-    h('div', { class: 'toolbar' }, btn('Rescan', (e) => { e.target.disabled = true; scanQualityNow(); })),
+    h('div', { class: 'toolbar' }, UI.iconOnly('refresh', 'Rescan', (e) => { e.currentTarget.disabled = true; scanQualityNow(); })),
     h('div', { class: 'qstats' }, stat('Files', n(t.files)), stat('Lines', n(t.lines)), stat(`Over ${t.max} lines`, n(t.over), t.over ? 'warn' : 'ok'),
       stat('Magic numbers', n(t.magic), t.magic ? 'warn' : 'ok'), stat('Possible secrets', n(t.secrets), t.secrets ? 'err' : 'ok'), stat('TODO markers', n(t.todos))),
-    t.largest.length ? [h('h3', {}, 'Largest files across the workspace'), hbars(t.largest.map((f) => ({ label: `${f.repo}/${f.path}`, value: f.measured, cls: f.measured > t.max ? 'c-warn' : 'c-info', title: `${f.repo}/${f.path}` })), { max: Math.max(1, t.largest[0].measured) })] : null,
+    t.largest.length ? [h('h3', {}, 'Largest files across the workspace'), h('p', { class: 'muted' }, `The bar turns amber past your ${t.max}-line limit.`), hbars(t.largest.map((f) => ({ label: `${f.repo}/${f.path}`, value: f.measured, cls: f.measured > t.max ? 'c-warn' : 'c-info', title: `${f.repo}/${f.path}` })), { max: Math.max(1, t.largest[0].measured) })] : null,
     all.sort((a, b) => b.advice.length - a.advice.length).map(qualityRepoEl));
   $('detail').scrollTop = top;
 }

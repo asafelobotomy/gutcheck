@@ -24,11 +24,11 @@ async function applyIgnore(r, o) {
 }
 
 function ignoreButton(r, f) {
-  return btn('Ignore…', async () => {
+  return UI.iconOnly('eyeoff', 'Ignore…', async () => {
     const v = await askInputs({ ...IGNORE_SPEC, title: `Ignore "${f.title}"` }, {});
     if (!v) return;
     await applyIgnore(r, { id: f.id, reason: v.reason, allRepos: !!v.allRepos });
-  });
+  }, 'ghost', 'Ignore this finding (asks why)…');
 }
 
 // Written through MCP, or by anything other than the CLI or the app (as ignore-rules.js labels it).
@@ -50,7 +50,7 @@ async function renderDriftView() {
   renderList();
   const d = await window.api.drift();
   if (state.view !== 'drift') return;
-  const head = [h('h2', {}, 'Baseline'), h('p', { class: 'sub' }, 'Your baseline lists what every repo should have. Each repo is compared with it; the ones that differ get a "Baseline" finding.')];
+  const head = [h('div', { class: 'dhead' }, h('h2', {}, 'Baseline')), h('p', { class: 'sub' }, 'Your baseline lists what every repo should have. Each repo is compared with it; the ones that differ get a "Baseline" finding.')];
   // Ignore rules GutCheck stores but does not apply (a * with too few characters before it, from an older version).
   const inactive = (d.inactive || []).length ? [h('h3', {}, 'Ignore rules not applied'), ...d.inactive.map((x) => h('div', { class: 'muted' }, `${x.key === '*' ? 'every repo' : x.key}: ${x.id} (${x.why}). Remove it with "gutcheck unignore" and add a longer one.`))] : [];
   head.push(...inactive);
@@ -58,12 +58,23 @@ async function renderDriftView() {
     return put($('detail'), ...head, h('p', { class: 'empty' }, 'No baseline yet.'),
       h('div', { class: 'toolbar' }, btn('Create a starting baseline', async () => { const gen = state.gen; const i = await window.api.initBaseline(); if (i && i.ok === false) return toast(i.error || 'Could not create baseline.json.', 'bad'); if (gen === state.gen && i && Array.isArray(i.repos)) { for (const x of i.repos) state.repos.set(x.path, x); renderStats(); renderList(); } toast('Created baseline.json. Edit it to match what you want, then rescan.'); renderDriftView(); })));
   }
-  put($('detail'), ...head,
-    h('div', { class: 'toolbar' }, btn('Edit baseline.json', () => window.api.openBaseline())),
-    h('div', { class: 'muted' }, d.file),
-    ...d.rules.map((x) => h('div', { class: 'rec' }, h('span', { class: 'n ' + (x.missing.length ? 'b-warn' : 'b-ok') }, x.missing.length || '✓'),
+  const passing = d.rules.filter((x) => !x.missing.length).length;
+  const byName = new Map([...state.repos.values()].map((r) => [r.name, r.path]));
+  const repoChip = (n) => { const c = h('span', { class: 'chip link' }, n); activate(c, () => { const p = byName.get(n); if (p) select(p); }); return c; };
+  const ruleEl = (x) => {
+    const total = x.ok + x.missing.length;
+    return h('div', { class: 'rule' }, h('span', { class: 'n ' + (x.missing.length ? 'b-warn' : 'b-ok') }, x.missing.length ? UI.icon('alert') : UI.icon('check')),
       h('div', { class: 'grow' }, h('div', {}, `${x.label}  `, x.publicOnly ? h('span', { class: 'pill' }, 'public repos') : null),
-        h('div', { class: 'repos' }, x.missing.length ? `Missing in ${x.missing.join(', ')}` : `All ${x.ok} repos it applies to`)))));
+        x.missing.length ? h('div', { class: 'chips' }, h('span', { class: 'muted' }, 'Missing in'), x.missing.map(repoChip)) : h('div', { class: 'repos muted' }, `All ${x.ok} repos it applies to`)),
+      UI.meter(total ? Math.round((x.ok / total) * 100) : 100, x.missing.length ? 'warn' : 'ok', `${x.ok}/${total}`));
+  };
+  const failing = d.rules.filter((x) => x.missing.length);
+  const met = d.rules.filter((x) => !x.missing.length);
+  put($('detail'), ...head,
+    h('div', { class: 'toolbar' }, btn('Edit baseline.json', () => window.api.openBaseline()), h('span', { class: 'muted' }, d.file)),
+    h('div', { class: 'qstats' }, stat('Rules met everywhere', `${passing}/${d.rules.length}`, passing === d.rules.length ? 'ok' : 'warn')),
+    failing.length ? UI.fold('baseline|failing', [h('span', { class: 'dot d-warn' }), h('span', { class: 'ftitle' }, 'Not met everywhere'), h('span', { class: 'cnt warn' }, String(failing.length))], failing.map(ruleEl), { open: true, cls: 'cat' }) : null,
+    met.length ? UI.fold('baseline|met', [h('span', { class: 'dot d-ok' }), h('span', { class: 'ftitle' }, 'Met by every repo'), h('span', { class: 'cnt' }, String(met.length))], met.map(ruleEl), { open: !failing.length, cls: 'cat' }) : null);
 }
 $('baseline').addEventListener('click', renderDriftView);
 

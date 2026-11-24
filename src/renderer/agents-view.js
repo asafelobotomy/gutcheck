@@ -42,8 +42,8 @@ async function openAgents() {
           h('div', { class: 'mbtns left' },
             h('button', { class: 'primary', disabled: !c.installed || undefined, title: c.installed ? '' : `${c.name} was not found on this computer`, onclick: () => act(false) }, c.configured ? 'Update' : 'Connect'),
             c.configured ? h('button', { onclick: () => act(true) }, 'Disconnect') : null,
-            h('button', { onclick: async () => { const r = await window.api.copyAgent(c.id, allow.checked); toast(r.ok ? 'Copied to the clipboard.' : 'Could not copy.', r.ok ? undefined : 'bad'); } }, 'Copy'),
-            h('button', { onclick: () => window.api.openUrl(c.docs) }, 'Docs')));
+            UI.iconOnly('copy', 'Copy', async () => { const r = await window.api.copyAgent(c.id, allow.checked); toast(r.ok ? 'Copied to the clipboard.' : 'Could not copy.', r.ok ? undefined : 'bad'); }, '', `Copy the ${c.kind === 'cli' ? 'command' : 'config snippet'}`),
+            UI.iconOnly('book', 'Docs', () => window.api.openUrl(c.docs), '', `${c.name}'s MCP docs`)));
       }));
     };
     // The command shown (and copied) follows the checkbox; nothing is saved until Connect.

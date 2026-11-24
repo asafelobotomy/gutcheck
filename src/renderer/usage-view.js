@@ -31,12 +31,13 @@ async function reviewRules(r, flagged = []) {
       tick.addEventListener('change', () => { if (tick.checked) picked.add(x.hash); else picked.delete(x.hash); label(); });
       const value = h('code', { class: 'rule-value' });
       value.hidden = true;
-      const show = h('button', { class: 'sm' }, 'Show');
+      const show = UI.iconOnly('eye', 'Show', () => {}, '', 'Show this rule\'s value (this window only)');
+      const setShow = (t) => { show.querySelector('.sr').textContent = t; show.setAttribute('aria-label', t); show.title = t === 'Show' ? 'Show this rule\'s value (this window only)' : 'Hide the value'; show.querySelector('.ic').replaceWith(UI.icon(t === 'Show' ? 'eye' : 'eyeoff')); };
       show.addEventListener('click', async () => {
-        if (!value.hidden) { value.hidden = true; value.textContent = ''; show.textContent = 'Show'; return; }
+        if (!value.hidden) { value.hidden = true; value.textContent = ''; setShow('Show'); return; }
         const v = await window.api.revealRule(r.path, x.hash);
         if (!v.ok) return toast(v.error, 'bad');
-        value.textContent = v.value; value.hidden = false; show.textContent = 'Hide';
+        value.textContent = v.value; value.hidden = false; setShow('Hide');
       });
       return h('div', { class: 'row' }, tick, h('div', { class: 'grow' }, h('b', {}, x.shape), ' ', h('span', { class: 'muted' }, `#${x.hash}${x.tokenLike ? ' · token-like' : x.oneOff ? ' · one-off' : ''}`), value), show);
     });

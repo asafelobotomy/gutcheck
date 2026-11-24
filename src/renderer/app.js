@@ -18,13 +18,16 @@ function h(tag, attrs = {}, ...kids) {
 const put = (el, ...kids) => el.replaceChildren(...kids.flat().filter((k) => k != null));
 
 let toastTimer;
+// kind: '' (news), 'ok' (done) or 'bad' (failed). Failures stay until closed; the rest fade after 7s.
 function toast(msg, kind = '') {
   const t = $('toast');
-  t.textContent = msg;
+  const close = h('button', { class: 'tclose', 'aria-label': 'Dismiss' }, '×');
+  close.addEventListener('click', () => (t.hidden = true));
+  t.replaceChildren(h('span', { class: 'tmsg' }, msg), close);
   t.className = kind;
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 7000);
+  toastTimer = setTimeout(() => (t.hidden = true), kind === 'bad' ? 15000 : 7000);
 }
 
 // Shared view helpers (the other renderer scripts use these too).
@@ -43,7 +46,9 @@ function activate(el, fn) {
 }
 
 function copyButton(dir, label) {
-  const b = h('button', { title: 'Copy a full report with an ordered fix plan, to paste into any LLM' }, 'Copy for LLM');
+  const b = h('button', { class: 'sm', title: 'Copy a full report with an ordered fix plan, to paste into any LLM' }, 'Copy for LLM');
+  b.prepend(UI.icon('copy'));
+  if (dir) UI.makeIconOnly(b, 'copy', 'Copy for LLM: a full report with an ordered fix plan, to paste into any LLM'); // on a repo page; the workspace pages keep the words
   b.addEventListener('click', () => copyForLlm(b, dir, label));
   return b;
 }
@@ -78,41 +83,105 @@ const counts = (r) => ({
 
 /* ---------------------------------------------------------------- stats + list */
 
-// Same numbers as the dashboard: repos that failed to scan are not averaged in.
+// Same numbers as the dashboard: repos that failed to scan are not averaged in. Each one opens the
+// view that explains it.
 function renderStats() {
   const m = Metrics.compute([...state.repos.values()]);
   const t = m.totals;
+  const go = (el, fn) => (state.repos.size ? activate(el, fn) : el);
+  const toOverview = () => { renderOverview(); renderList(); };
   $('stats').replaceChildren(
     stat('Repositories', t.repos),
     stat('Avg health', m.avg == null ? '–' : m.avg, healthClass(m.avg)),
-    stat('Errors', t.errors, t.errors ? 'err' : 'ok'),
-    stat('Warnings', t.warns, t.warns ? 'warn' : 'ok'),
+    go(stat('Errors', t.errors, t.errors ? 'err' : 'ok'), toOverview),
+    go(stat('Warnings', t.warns, t.warns ? 'warn' : 'ok'), toOverview),
     stat('Open PRs', t.prs),
     stat('Failing CI', t.failingCI, t.failingCI ? 'err' : 'ok')
   );
 }
 
+// The repo list's quick filters: what kind of trouble, and which grade (the grade bar).
+const REPO_FILTERS = {
+  all: ['All', () => true],
+  err: ['Errors', (r) => counts(r).err > 0],
+  prs: ['PRs', (r) => (r.prs || []).length > 0],
+  dirty: ['Changes', (r) => (r.git?.dirty || 0) + (r.git?.ahead || 0) > 0],
+};
+state.rfilter = 'all'; state.grade = null;
 const NAV = { drift: 'baseline', dashboard: 'dashboard', overview: 'overview', quality: 'quality', tests: 'tests', secrets: 'secrets', clutter: 'clutter', history: 'history' };
+
+function gradeBar(rs) {
+  const bar = $('gradebar');
+  const total = rs.length;
+  bar.replaceChildren(...(total ? ['A', 'B', 'C', 'D'].map((g) => {
+    const n = rs.filter((r) => r.grade === g).length;
+    const seg = h('button', { class: `gseg g${g}${state.grade === g ? ' on' : ''}${n ? '' : ' none'}`, 'aria-pressed': state.grade === g ? 'true' : 'false', title: `Grade ${g}: ${plural(n, 'repo')}${state.grade === g ? ' (click to show all)' : ' (click to show only these)'}` }, h('b', {}, g), h('span', {}, String(n)));
+    seg.style.flexGrow = String(Math.max(n, 0.35));
+    seg.disabled = !n;
+    seg.addEventListener('click', () => { state.grade = state.grade === g ? null : g; renderList(); });
+    return seg;
+  }) : []));
+  const fx = Object.entries(REPO_FILTERS).map(([k, [label, f]]) => ({ value: k, label, count: k === 'all' ? null : rs.filter(f).length }));
+  $('rfilter').replaceChildren(total ? UI.segmented(fx, state.rfilter, (v) => { state.rfilter = v; renderList(); }, 'Show repos') : '');
+}
+
+// Small numbers next to each view in the sidebar, once that view has something to say.
+function navCounts() {
+  const rs = [...state.repos.values()].filter((r) => !r.error);
+  const set = (id, n, tone = '') => {
+    const b = $(id);
+    if (!b) return;
+    let c = b.querySelector('.cnt');
+    if (n == null || n === 0 || n === '') { if (c) c.remove(); return; }
+    if (!c) { c = h('span', { class: 'cnt' }); b.append(c); }
+    c.className = 'cnt ' + tone; c.textContent = String(n);
+  };
+  const groups = rs.length ? Metrics.groupFindings(rs) : [];
+  set('overview', groups.length || null, groups.some((g) => g.sev === 'error') ? 'err' : 'warn');
+  const s = state.secrets;
+  const need = s ? s.items.filter((i) => ['unbacked', 'changed', 'missing', 'mismatch'].includes(i.status)).length : null;
+  set('secrets', need, 'warn');
+  const cl = state.clutter ? [...state.clutter.repos.values()].reduce((n, r) => n + r.count, 0) : null;
+  set('clutter', cl, '');
+}
+
 function renderList() {
   document.body.classList.toggle('dash', state.view === 'dashboard'); // the dashboard shows these numbers itself
   for (const [view, id] of Object.entries(NAV)) { const b = $(id); if (b) { if (state.view === view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); } }
   const q = $('q').value.toLowerCase();
   const sort = $('sort').value;
-  let rs = RemoteView.visible([...state.repos.values()]).filter((r) => r.name.toLowerCase().includes(q));
+  const base = RemoteView.visible([...state.repos.values()]);
+  gradeBar(base);
+  navCounts();
+  const pass = REPO_FILTERS[state.rfilter]?.[1] || (() => true);
+  let rs = base.filter((r) => r.name.toLowerCase().includes(q) && pass(r) && (!state.grade || r.grade === state.grade));
   rs.sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : sort === 'prs' ? (b.prs?.length || 0) - (a.prs?.length || 0) : (a.score ?? 0) - (b.score ?? 0));
-  $('repos').replaceChildren(...rs.map((r) => {
+  const most = Math.max(1, ...rs.map((r) => (r.findings || []).length));
+  const items = rs.map((r) => {
     const c = counts(r);
+    const g = r.git || {};
     const sel = state.view === 'repo' && r.path === state.selected;
     return activate(h('li', { class: sel ? 'sel' : '', 'aria-current': sel ? 'true' : null, 'aria-label': `${r.name}, grade ${r.grade}${c.err ? `, ${c.err} errors` : ''}${c.warn ? `, ${c.warn} warnings` : ''}` },
       h('div', { class: 'grade g' + r.grade }, r.grade),
       h('div', { class: 'rinfo' },
         h('div', { class: 'rname' }, r.name),
+        r.error ? h('div', { class: 'rmeta b-err' }, 'scan failed') : UI.vitals(UI.sevCounts(r.findings), most),
         h('div', { class: 'rmeta' },
-          c.err ? h('span', { class: 'b-err' }, `${c.err} err`) : null,
-          c.warn ? h('span', { class: 'b-warn' }, `${c.warn} warn`) : null,
-          r.prs?.length ? h('span', {}, plural(r.prs.length, 'PR')) : null,
-          !r.remote && !r.error ? h('span', {}, 'local only') : null, RemoteView.chip(r)))), () => select(r.path));
-  }));
+          c.err ? UI.icount('error', c.err, c.err === 1 ? 'error' : 'errors', 'b-err') : null,
+          c.warn ? UI.icount('alert', c.warn, c.warn === 1 ? 'warning' : 'warnings', 'b-warn') : null,
+          r.prs?.length ? UI.icount('pr', r.prs.length, r.prs.length === 1 ? 'open PR' : 'open PRs') : null,
+          g.dirty ? UI.icount('pencil', g.dirty, 'uncommitted changes', 'b-warn') : null,
+          g.ahead ? UI.icount('arrowup', g.ahead, 'commits not pushed') : null,
+          g.behind ? UI.icount('arrowdown', g.behind, 'commits to pull') : null,
+          !r.remote && !r.error ? UI.badge('cloudoff', 'local only: no GitHub backup', 'b-warn') : null, RemoteView.chip(r)))), () => select(r.path));
+  });
+  const hidden = base.length - rs.length;
+  if (hidden && base.length) {
+    const clear = h('button', { class: 'sm ghost' }, 'Show all');
+    clear.addEventListener('click', () => { state.rfilter = 'all'; state.grade = null; $('q').value = ''; renderList(); });
+    $('rfilter').append(h('div', { class: 'lnote' }, `${plural(hidden, 'repo')} hidden by filters`, clear));
+  }
+  $('repos').replaceChildren(...items);
 }
 
 /* ---------------------------------------------------------------- running actions */
@@ -169,108 +238,7 @@ function btn(label, onclick, cls = '') {
   return b;
 }
 
-function findingEl(r, f) {
-  return h('div', { class: 'finding ' + f.severity },
-    h('div', { class: 't' }, h('b', {}, f.title), h('span', {}, f.detail || '')),
-    f.url ? btn('Open ↗', () => window.api.openUrl(f.url)) : null,
-    !RemoteView.canFix(r, f.fix) ? null : f.fix.type === 'permissions-prune' ? btn('Review rules…', () => reviewRules(r, f.fix.hashes)) : f.fix ? btn(f.fix.label, () => runActions([{ repo: r, action: f.fix }])) : null,
-    ignoreButton(r, f));
-}
-
-function branchesPanel(r) {
-  const g = r.git || {};
-  const def = r.remote?.defaultBranch;
-  const remoteSet = new Set((g.remoteBranches || []).map((b) => b.name));
-  const prByBranch = new Map((r.prs || []).map((p) => [p.headRefName, p]));
-  const act = (type, extra) => actOn(r, type, extra);
-  const rows = (g.branches || []).map((b) => {
-    const merged = (g.mergedBranches || []).includes(b.name);
-    return h('div', { class: 'row' },
-      h('div', { class: 'grow' }, h('b', {}, b.name), ' ',
-        b.current ? h('span', { class: 'badge cur' }, 'current') : null,
-        merged ? h('span', { class: 'badge ok' }, 'merged') : null,
-        remoteSet.has(b.name) ? null : h('span', { class: 'badge' }, 'local only'),
-        prByBranch.has(b.name) ? h('span', { class: 'badge' }, `PR #${prByBranch.get(b.name).number}`) : null,
-        h('span', { class: 'muted' }, ' ' + fmtDate(b.date))),
-      !b.current ? btn('Switch', act('checkout', { branch: b.name })) : null,
-      !b.current ? btn('Merge into current…', act('merge-branch', { branch: b.name })) : null,
-      r.remote && !r.remote.unreachable && b.name !== def && remoteSet.has(b.name) && !prByBranch.has(b.name) ? btn('Open PR…', act('pr-create', { branch: b.name })) : null,
-      !b.current ? btn(merged ? 'Delete' : 'Force delete', act('delete-local', { branch: b.name, force: !merged }), merged ? '' : 'dng') : null);
-  });
-  const localNames = new Set((g.branches || []).map((b) => b.name));
-  const remoteOnly = (g.remoteBranches || []).filter((b) => !localNames.has(b.name));
-  const remoteRows = remoteOnly.map((b) => h('div', { class: 'row' },
-    h('div', { class: 'grow' }, h('b', {}, 'origin/' + b.name), ' ', h('span', { class: 'badge' }, 'remote only'), b.name === def ? h('span', { class: 'badge cur' }, 'default') : null, h('span', { class: 'muted' }, ' ' + fmtDate(b.date))),
-    b.name !== def ? btn('Delete on GitHub', act('delete-remote', { branch: b.name }), 'dng') : null));
-  return [h('h3', {}, `Branches (${rows.length} local, ${remoteOnly.length} remote-only)`),
-    h('div', { class: 'toolbar' }, btn('New branch…', act('create-branch', {})), btn('Pull', act('pull', {})), btn('Push', act('push', {})), btn('Save a rescue copy…', act('rescue-bundle', {}))),
-    ...rows, ...remoteRows];
-}
-
-const CHECKS = { SUCCESS: 'checks passing', FAILURE: 'checks failing', PENDING: 'checks running' };
-const REVIEW = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes requested', REVIEW_REQUIRED: 'review required' };
-function prsPanel(r) {
-  if (!r.prs?.length) return [];
-  const act = (type, p, extra) => actOn(r, type, { number: p.number, ...extra });
-  return [h('h3', {}, `Open pull requests (${r.prs.length})`), ...r.prs.map((p) => h('div', { class: 'row' },
-    h('div', { class: 'grow' }, h('b', {}, `#${p.number} ${p.title}`), h('div', { class: 'muted' }, [p.headRefName, p.isDraft ? 'draft' : '', CHECKS[p.statusCheckRollup] || 'no checks', REVIEW[p.reviewDecision] || 'not reviewed', p.mergeable === 'CONFLICTING' ? 'conflicts' : ''].filter(Boolean).join(' · '))),
-    p.isDraft ? btn('Ready for review', act('pr-ready', p)) : btn('Merge…', act('pr-merge', p, { method: 'squash', deleteBranch: true })),
-    btn('Close', act('pr-close', p)),
-    btn('Open ↗', () => window.api.openUrl(p.url))))];
-}
-
-function settingsPanel(r) {
-  if (!r.remote || r.remote.unreachable) return [];
-  const act = (type, extra) => actOn(r, type, extra);
-  const prot = r.protection === true ? 'on' : r.protection === false ? 'off' : 'unknown';
-  return [h('h3', {}, 'Repository settings'),
-    h('div', { class: 'muted' }, `Default branch protection: ${prot} · Dependabot alerts: ${r.remote.alertsEnabled === false ? 'off' : r.remote.alertsEnabled ? 'on' : 'unknown'} · Your permission: ${r.remote.viewerPermission || 'unknown'}`),
-    h('div', { class: 'toolbar' },
-      btn('Protect default branch…', act('protect-branch', { preset: 'minimal' })),
-      r.protection === true && !RemoteView.isRemote(r) ? btn('Remove protection', act('unprotect-branch', {}), 'dng') : null,
-      btn('Enable Dependabot alerts', act('security-enable', { feature: 'alerts' })),
-      btn('Enable security updates', act('security-enable', { feature: 'security-fixes' })),
-      btn('Enable secret scanning', act('security-enable', { feature: 'secret-scanning' })),
-      btn('Edit description / merge options…', act('repo-edit', {})),
-      r.remote.archived ? null : btn('Archive repo', act('repo-archive', {}), 'dng'))];
-}
-
-const FILE_TEMPLATES = [
-  ['license', 'LICENSE', (r) => r.files.license], ['readme', 'README', (r) => r.files.readme], ['gitignore', '.gitignore', (r) => r.files.gitignore],
-  ['security', 'SECURITY.md', (r) => r.files.security], ['contributing', 'CONTRIBUTING.md', (r) => r.files.contributing], ['conduct', 'CODE_OF_CONDUCT.md', (r) => r.files.codeOfConduct],
-  ['pr-template', 'PR template', (r) => r.files.prTemplate], ['dependabot', 'dependabot.yml', (r) => r.files.dependabotConfig], ['ci-node', 'Node CI workflow', (r) => r.hasWorkflows || !r.deps?.npmLock],
-];
-
-function filesPanel(r) {
-  const missing = FILE_TEMPLATES.filter(([, , has]) => !has(r));
-  if (!missing.length) return [];
-  return [h('h3', {}, 'Add missing files'), h('div', { class: 'toolbar' }, missing.map(([id, label]) => btn('+ ' + label, actOn(r, 'add-file', { template: id }))))];
-}
-
-function renderRepo() {
-  const d = $('detail');
-  const r = state.repos.get(state.selected);
-  if (!r) return renderOverview();
-  if (r.error) return put(d, h('h2', {}, r.name), h('p', { class: 'b-err' }, r.error));
-  const toolbar = h('div', { class: 'toolbar' });
-  const mk = (label, fn) => { const b = h('button', {}, label); b.addEventListener('click', () => fn(b)); toolbar.append(b); return b; };
-  const all = FixAll.plan(r);
-  const fixable = all.actions.length + all.decisions.length;
-  if (fixable) mk(`Fix all issues (${fixable})…`, () => fixAllIssues(r, all)).classList.add('primary');
-  mk('Rescan', async (b) => { b.disabled = true; await refreshOne(r.path); });
-  if (!RemoteView.isRemote(r) && (!r.git || !Array.isArray(r.git.remotes) || r.git.remotes.length)) mk('Fetch & prune', actOn(r, 'fetch'));
-  if (!RemoteView.isRemote(r)) mk('Open folder', () => window.api.openFolder(r.path));
-  if (r.remote) mk('Open on GitHub ↗', () => window.api.openUrl(r.remote.url));
-  toolbar.append(copyButton(r.path, r.name));
-  const cats = [...new Set(r.findings.map((f) => f.category))];
-  put(d, 
-    h('div', { class: 'dhead' }, h('div', { class: 'grade g' + r.grade }, r.grade), h('h2', {}, r.name), h('span', { class: 'pill' }, `${r.score}/100`)),
-    h('div', { class: 'sub' }, RemoteView.where(r), r.git?.branch ? `  ·  ${r.git.branch}` : ''),
-    toolbar, RemoteView.note(r),
-    r.findings.length ? null : h('p', { class: 'ok-msg' }, 'No issues found. Nice.'),
-    ...cats.flatMap((c) => [h('h3', {}, c), ...r.findings.filter((f) => f.category === c).map((f) => findingEl(r, f))]),
-    ...ignoredPanel(r), ...prsPanel(r), ...RemoteView.branches(r, branchesPanel), ...settingsPanel(r), ...RemoteView.localPanel(r, filesPanel));
-}
+// The repo page itself (findingEl, the tabs, renderRepo) is in repo-view.js.
 
 async function copyForLlm(b, dir, label) {
   b.disabled = true;
@@ -343,13 +311,27 @@ function schedulePaint() {
   requestAnimationFrame(() => { paintQueued = false; renderStats(); renderList(); if (state.view === 'dashboard') renderDashboard(); });
 }
 
+// The API quota as a small gauge: the fuller, the more is left. Details in the tooltip.
 function showRate(rate) {
   const pill = $('rate');
-  if (!rate || !rate.core) { pill.textContent = ''; return; }
+  if (!rate || !rate.core) { pill.replaceChildren(); pill.hidden = true; return; }
+  pill.hidden = false;
   const n = (x) => x.remaining.toLocaleString();
-  pill.textContent = `API left: ${n(rate.core)} REST · ${n(rate.graphql)} GraphQL`;
+  const left = Math.min(...[rate.core, rate.graphql].map((x) => (x.limit ? x.remaining / x.limit : x.remaining / 5000)));
+  const tone = rate.limited || left < 0.1 ? 'err' : left < 0.3 ? 'warn' : 'ok';
+  pill.replaceChildren(h('span', { class: 'rlabel' }, 'API'), UI.meter(Math.round(left * 100), tone), h('span', { class: 'sr' }, `API left: ${n(rate.core)} REST · ${n(rate.graphql)} GraphQL`));
   pill.classList.toggle('bad', !!rate.limited);
-  pill.title = `Resets ${new Date(rate.core.reset).toLocaleTimeString()} (REST) / ${new Date(rate.graphql.reset).toLocaleTimeString()} (GraphQL)`;
+  pill.title = `GitHub API left: ${n(rate.core)} REST, ${n(rate.graphql)} GraphQL. Resets ${new Date(rate.core.reset).toLocaleTimeString()} (REST) / ${new Date(rate.graphql.reset).toLocaleTimeString()} (GraphQL)`;
+}
+
+// Read-only shows everywhere: the switch, a band under the header and every change button greyed.
+function showReadOnly() {
+  document.body.classList.toggle('ro', state.readOnly);
+  $('rofence').hidden = !state.readOnly;
+  const l = $('readonly').closest('label');
+  l.classList.toggle('on', state.readOnly);
+  const old = l.querySelector('.ic'); if (old) old.remove();
+  l.prepend(UI.icon(state.readOnly ? 'lock' : 'unlock'));
 }
 
 window.api.onRepo(({ res, done, total, stage }) => {
@@ -370,6 +352,7 @@ $('history').addEventListener('click', () => renderHistory()); // defined in ove
 $('readonly').addEventListener('change', async (e) => {
   state.readOnly = e.target.checked;
   await window.api.setSettings({ readOnly: state.readOnly });
+  showReadOnly();
   toast(state.readOnly ? 'Read-only mode on: no changes can be made.' : 'Read-only mode off: actions are enabled (each one still asks first).');
 });
 
@@ -381,9 +364,11 @@ $('readonly').addEventListener('change', async (e) => {
   $('deep').checked = !!s.deep;
   state.readOnly = !!s.readOnly;
   $('readonly').checked = state.readOnly;
+  showReadOnly();
   const a = await window.api.authStatus();
   const pill = $('auth');
-  pill.textContent = a.ok ? 'gh: signed in' : 'gh: not signed in (run gh auth login)';
+  pill.replaceChildren(UI.icon('github'), h('span', { class: 'sdot' }), h('span', { class: a.ok ? 'sr' : '' }, a.ok ? 'gh: signed in' : 'gh: not signed in (run gh auth login)'));
+  pill.title = a.ok ? 'The gh command line is signed in to GitHub' : 'Run "gh auth login" in a terminal, then scan again';
   pill.classList.add(a.ok ? 'ok' : 'bad');
   renderStats();
   showRate(await window.api.rate());

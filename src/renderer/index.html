@@ -10,51 +10,66 @@
 </head>
 <body>
   <header>
-    <h1>GutCheck <span id="version" class="ver"></span></h1>
-    <input id="root" type="text" placeholder="Workspace folder, e.g. ~/Projects" aria-label="Workspace folder" spellcheck="false" />
-    <button id="browse">Browse…</button>
-    <label class="deep" title="Also runs npm outdated per repo (slower)"><input id="deep" type="checkbox" /> Deep scan</label>
-    <button id="scan" class="primary">Scan</button>
-    <label class="deep" title="Disable every action; GutCheck only reads"><input id="readonly" type="checkbox" /> Read-only</label>
-    <button id="background" title="AI agents, launch on start up and system tray">Settings</button>
-    <span id="rate" class="pill" title="Remaining GitHub API quota"></span>
-    <span id="auth" class="pill"></span>
+    <div class="brand"><span class="logo" aria-hidden="true"></span><h1>GutCheck <span id="version" class="ver"></span></h1></div>
+    <div class="wsbar" role="group" aria-label="Workspace to scan">
+      <input id="root" type="text" placeholder="Workspace folder, e.g. ~/Projects" aria-label="Workspace folder" spellcheck="false" />
+      <button id="browse">Browse…</button>
+      <label class="toggle" title="Also runs npm outdated per repo (slower)"><input id="deep" type="checkbox" /> Deep scan</label>
+      <button id="scan" class="primary">Scan</button>
+    </div>
+    <div class="hstatus">
+      <span id="auth" class="pill"></span>
+      <span id="rate" class="pill" title="Remaining GitHub API quota"></span>
+      <label class="toggle lockt" title="Read-only: turn off every action, so GutCheck only reads"><input id="readonly" type="checkbox" /><span class="sr">Read-only</span></label>
+      <button id="background" title="AI agents, launch on start up and system tray">Settings</button>
+    </div>
   </header>
   <div id="progress" role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="100" hidden><div id="bar"></div><span id="ptext"></span></div>
-  <section id="stats"></section>
+  <div id="rofence" class="rofence" hidden>Read-only mode: GutCheck reads and reports, and every button that changes something is turned off.</div>
+  <section id="stats" aria-label="Workspace totals"></section>
   <main>
     <aside>
-      <div class="filters">
-        <input id="q" type="search" placeholder="Filter repos…" aria-label="Filter repositories" />
-        <select id="sort" aria-label="Sort repositories">
-          <option value="score">Worst health first</option>
-          <option value="name">Name</option>
-          <option value="prs">Most open PRs</option>
-        </select>
-        <select id="source" aria-label="Show local or remote repos" hidden>
-          <option value="all">All repos</option>
-          <option value="local">Cloned here</option>
-          <option value="remote">Only on GitHub</option>
-        </select>
+      <nav class="navs" aria-label="Views">
+        <button id="dashboard" class="nav">Dashboard</button>
+        <button id="overview" class="nav" title="Every issue grouped across repos, with fixes for many repos at once">Workspace overview</button>
+        <button id="baseline" class="nav" title="Compare every repo with what you say each repo should have">Baseline</button>
+        <span class="navsep" aria-hidden="true"></span>
+        <button id="quality" class="nav" title="File length limits, magic numbers, secrets and TODOs">Code quality</button>
+        <button id="tests" class="nav" title="Missing, skipped and assertion-free tests, CI gaps, coverage and mutation testing">Tests</button>
+        <button id="secrets" class="nav" title="Local secret files with no backup, saved to your password manager">Secrets</button>
+        <button id="clutter" class="nav" title="Find stale env files, caches, duplicates and get tidy-up advice">Clutter &amp; tidy-up</button>
+        <span class="navsep" aria-hidden="true"></span>
+        <button id="history" class="nav" title="Every change GutCheck has made on this machine">History</button>
+      </nav>
+      <div class="repohead">
+        <div class="filters">
+          <input id="q" type="search" placeholder="Filter repos…" aria-label="Filter repositories" />
+          <select id="sort" aria-label="Sort repositories">
+            <option value="score">Worst health first</option>
+            <option value="name">Name</option>
+            <option value="prs">Most open PRs</option>
+          </select>
+          <select id="source" aria-label="Show local or remote repos" hidden>
+            <option value="all">All repos</option>
+            <option value="local">Cloned here</option>
+            <option value="remote">Only on GitHub</option>
+          </select>
+        </div>
+        <div id="gradebar" class="gradebar"></div>
+        <div id="rfilter"></div>
       </div>
-      <button id="dashboard" class="nav">Dashboard</button>
-      <button id="overview" class="nav">Workspace overview</button>
-      <button id="baseline" class="nav" title="Compare every repo with what you say each repo should have">Baseline</button>
-      <button id="quality" class="nav" title="File length limits, magic numbers, secrets and TODOs">Code quality</button>
-      <button id="tests" class="nav" title="Missing, skipped and assertion-free tests, CI gaps, coverage and mutation testing">Tests</button>
-      <button id="secrets" class="nav" title="Local secret files with no backup, saved to your password manager">Secrets</button>
-      <button id="clutter" class="nav" title="Find stale env files, caches, duplicates and get tidy-up advice">Clutter &amp; tidy-up</button>
-      <button id="history" class="nav" title="Every change GutCheck has made on this machine">History</button>
-      <ul id="repos"></ul>
+      <ul id="repos" aria-label="Repositories"></ul>
     </aside>
     <section id="detail"><p class="empty">Choose a workspace folder and press Scan.</p></section>
   </main>
-  <div id="toast" role="status" aria-live="polite" hidden></div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
   <script src="metrics.js"></script>
   <script src="fix-all.js"></script>
   <script src="app.js"></script>
+  <script src="ui.js"></script>
   <script src="modals.js"></script>
   <script src="fixall-view.js"></script>
+  <script src="repo-view.js"></script>
   <script src="overview-view.js"></script>
   <script src="clutter-view.js"></script>
   <script src="quality-view.js"></script>

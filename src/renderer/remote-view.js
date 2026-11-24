@@ -37,11 +37,11 @@ const RemoteView = (() => {
       const pr = prs.get(b.name);
       return h('div', { class: 'row' },
         h('div', { class: 'grow' }, h('b', {}, b.name), ' ',
-          merged ? h('span', { class: 'badge ok' }, 'merged') : h('span', { class: 'badge' }, `${b.unique ?? '?'} commits not in ${def}`),
-          pr ? h('span', { class: 'badge' }, `PR #${pr.number}`) : null,
+          merged ? UI.badge('merge', 'merged', 'ok') : h('span', { class: 'badge' }, `${b.unique ?? '?'} commits not in ${def}`),
+          pr ? h('span', { class: 'badge', title: 'Has an open pull request' }, UI.icon('pr'), `#${pr.number}`) : null,
           h('span', { class: 'muted' }, ' ' + fmtDate(b.date))),
-        !pr && !merged && b.unique > 0 ? btn('Open PR…', actOn(r, 'pr-create', { branch: b.name })) : null,
-        !pr ? btn('Delete on GitHub', actOn(r, 'delete-remote', { branches: [b.name] }), merged ? '' : 'dng') : null);
+        !pr && !merged && b.unique > 0 ? UI.iconOnly('pr', 'Open PR…', actOn(r, 'pr-create', { branch: b.name }), '', `Open a pull request from ${b.name}…`) : null,
+        !pr ? UI.iconOnly('trash', 'Delete on GitHub', actOn(r, 'delete-remote', { branches: [b.name] }), merged ? '' : 'dng', `Delete ${b.name} on GitHub…`) : null);
     })];
   }
   const progress = (res, done, total, stage) => (stage === 'remote' ? `Checking remote repos: ${done}/${total} (${res.name})` : `Scanned ${done}/${total}`);

@@ -178,28 +178,33 @@ function renderDashboard() {
       card('TODO markers', qt.todos.toLocaleString(), { sub: qt.debug ? `${qt.debug} debug leftovers` : '', go: () => openQuality() })]
     : [card('Code quality', 'Scan', { sub: state.scanError.quality || 'file length, magic numbers, secrets', go: rescanQuality })];
 
-  const cards = [
+  const health = [
     card('Repositories', t.repos, { sub: t.failedScans ? `${t.failedScans} failed to scan` : '', cls: t.failedScans ? 'warn' : '' }),
     card('Average health', m.avg == null ? '–' : m.avg, { cls: healthClass(m.avg), delta: prev && dlt(m.avg, prev.avg, 'up') }),
     card('Errors', t.errors, { cls: kind(t.errors, 'err'), go: toOverview, delta: prev && dlt(t.errors, prev.errors) }),
     card('Warnings', t.warns, { cls: kind(t.warns), go: toOverview, delta: prev && dlt(t.warns, prev.warns) }),
+  ];
+  const github = [
     card('Open PRs', t.prs, { sub: [t.readyPRs && `${t.readyPRs} ready`, t.conflictPRs && `${t.conflictPRs} conflicts`].filter(Boolean).join(' · ') }),
     card('Failing CI', t.failingCI, { cls: kind(t.failingCI, 'err'), delta: prev && dlt(t.failingCI, prev.failingCI) }),
+    card('High/critical alerts', t.alertsHigh, { sub: `${t.alertsTotal} open in total`, cls: kind(t.alertsHigh, 'err') }),
+    card('No LICENSE', t.noLicense, { sub: t.noReadme ? `${t.noReadme} also lack a README` : '', cls: kind(t.noLicense, 'err') }),
+  ];
+  const local = [
     card('Uncommitted work', t.dirty, { sub: 'repos with changes', cls: kind(t.dirty) }),
     card('Unpushed commits', t.ahead, { sub: t.behind ? `${t.behind} behind upstream` : '', cls: kind(t.ahead), delta: prev && dlt(t.ahead, prev.ahead) }),
-    card('High/critical alerts', t.alertsHigh, { sub: `${t.alertsTotal} open in total`, cls: kind(t.alertsHigh, 'err') }),
     card('Merged branches', t.mergedBranches, { sub: 'safe to delete', cls: kind(t.mergedBranches, 'info') }),
     card('Stale branches', t.staleBranches, { sub: `${Metrics.STALE_BRANCH_DAYS}+ days, unmerged` }),
     card('Local-only repos', t.localOnly, { sub: 'no GitHub backup', cls: kind(t.localOnly) }),
-    card('No LICENSE', t.noLicense, { sub: t.noReadme ? `${t.noReadme} also lack a README` : '', cls: kind(t.noLicense, 'err') }),
-    clutterCard,
-    ...qualityCards,
   ];
+  const scans = [clutterCard, ...qualityCards];
+  const group = (title, cards) => h('section', { class: 'dgroup' }, h('h3', {}, title), h('div', { class: 'kpis' }, cards));
 
   const attention = m.attention.length
     ? h('div', { class: 'attn' }, m.attention.map((a) => activate(h('div', { class: 'row link' },
       h('div', { class: 'grade g' + a.grade }, a.grade),
       h('div', { class: 'grow' }, h('b', {}, a.name), h('div', { class: 'muted' }, a.top ? a.top.title : ''), ),
+      UI.vitals({ error: a.errors, warn: a.warns, info: 0 }, Math.max(...m.attention.map((x) => x.errors + x.warns))),
       h('span', { class: 'muted' }, [a.errors && `${a.errors} err`, a.warns && `${a.warns} warn`].filter(Boolean).join(' · '))), open(a.path))))
     : h('p', { class: 'ok-msg' }, 'Nothing needs attention.');
 
@@ -226,7 +231,7 @@ function renderDashboard() {
   put(d,
     h('div', { class: 'dhead' }, h('h2', {}, 'Dashboard'), h('span', { class: 'pill' }, plural(t.repos, 'repo'))),
     h('div', { class: 'toolbar' }, copyButton(null, 'the whole workspace'), btn('Workspace overview', toOverview)),
-    h('div', { class: 'kpis' }, cards),
+    group('Health', health), group('On GitHub', github), group('On this machine', local), group('Deeper scans (run on demand)', scans),
     h('div', { class: 'panels' },
       panel('Health grades', 'Repositories by grade', donut(m.grades, m.avg)),
       panel('Needs attention', 'Lowest-scoring repos and their worst issue', attention),
@@ -241,7 +246,7 @@ function renderDashboard() {
         h('div', { class: 'chips' }, chip(t.failingPRs, 'failing checks', 'err'), chip(t.conflictPRs, 'conflicts', 'err'), chip(t.readyPRs, 'ready to merge', 'ok'), chip(t.draftPRs, 'drafts', ''))),
       ...trendPanels,
       wide(panel('Issue heatmap', 'Where the problems are: repos down, categories across. Click a row to open it.', hm.cols.length ? heatmapEl(hm, open) : h('p', { class: 'ok-msg' }, 'No issues anywhere.'))),
-      panel('Health by repo', 'Click a bar to open the repo', hbars(m.perRepo.map((p) => ({ label: p.name, value: p.score, cls: 'c-' + GRADE_COLOR[p.grade], title: `${p.name}: ${p.score}/100`, go: open(p.path) })), { max: 100 })),
+      panel('Health by repo', 'Click a bar to open the repo', h('div', { class: 'hbars' }, UI.more('dash-health', [...hbars(m.perRepo.map((p) => ({ label: p.name, value: p.score, cls: 'c-' + GRADE_COLOR[p.grade], title: `${p.name}: ${p.score}/100`, go: open(p.path) })), { max: 100 }).children], 12, 'more repos'))),
       ...(qt ? [panel('Largest files', `Lines per file; limit is ${qt.max}`, hbars(qt.largest.map((f) => ({ label: `${f.repo}/${f.path}`, value: f.measured, cls: f.measured > qt.max ? 'c-warn' : 'c-info', go: () => openQuality() })), { max: Math.max(1, qt.largest[0] ? qt.largest[0].measured : 1) })),
         panel('Lines by language', `${qt.lines.toLocaleString()} lines in ${qt.files.toLocaleString()} files`, langBars(qt.languages)),
         panel('Magic numbers by repo', 'Bare numbers in non-test source', qt.magicByRepo.length ? hbars(qt.magicByRepo.slice(0, 10).map((r) => ({ label: r.name, value: r.count, cls: 'c-info', go: () => openQuality() })), { fmt: (n) => n.toLocaleString() }) : h('p', { class: 'ok-msg' }, 'None found.'))] : []),

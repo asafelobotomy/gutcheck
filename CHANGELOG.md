@@ -6,6 +6,17 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ### Changed
 
+- The app's pages are redesigned around showing state instead of describing it, shorter lists, and acting on many things at once (the audit is in `docs/ui-audit-2026-11-24.md`):
+  - A repo page opens with a score gauge, a severity strip and live git state (branch, uncommitted, to push or pull, open PRs, CI), and splits into tabs: Issues, Pull requests, Branches, Settings and Files, each with its count.
+  - Issues fold by category and filter by severity. Tick fixable issues (or all of them) to fix or ignore them together in one review. Pull requests can be squash-merged or closed together, branches filtered (merged, stale, local only, remote only) and deleted together, and missing files added together.
+  - Settings shows each protection and security feature as on, off or unknown, with its button beside it.
+  - The repo list has a grade bar (click a grade to show only those repos), quick filters (errors, PRs, uncommitted or unpushed work) and a severity strip per repo. The sidebar shows counts next to Workspace overview, Secrets and Clutter.
+  - Workspace overview folds by severity, filters by severity or text, shows affected repos as chips that open them, and lets you tick issue types to fix across every repo in one go.
+  - The dashboard's cards are grouped (Health, On GitHub, On this machine, Deeper scans). Clutter, Code quality and Tests fold per repo with their key numbers in the header; clutter can be filtered by confidence. Secrets filter by status and can be ticked all at once. Baseline shows each rule as a progress bar with the repos that miss it. History groups changes by day, filters to failures and hides commands until asked.
+  - The review dialog counts plans by risk, can tick or untick them all, and fades unticked ones. Results show how many succeeded, failed ones first. The Fix all wizard shows its progress.
+  - Read-only mode shows a band under the header and a locked switch. The GitHub API quota is a small gauge, and error messages stay until dismissed.
+  - Repeated actions and states are icons instead of words: refresh, folder, GitHub, copy, ignore, open, close, switch, merge and delete buttons, and badges for branch, clutter and secret states. Each keeps its words for screen readers and in a tooltip that names what it acts on. Errors and warnings get different shapes, not just different colours.
+
 - `npm test` runs through `scripts/test.js`, which gives the tests one private temp folder and removes it afterwards. The tests used to leave their throwaway repos in the shared temp folder: about 4,500 folders and 3.5 GB after a day's runs.
 
 ### Security
