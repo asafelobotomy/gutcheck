@@ -108,7 +108,7 @@ const REPO_FILTERS = {
   dirty: ['Changes', (r) => (r.git?.dirty || 0) + (r.git?.ahead || 0) > 0],
 };
 state.rfilter = 'all'; state.grade = null;
-const NAV = { drift: 'baseline', dashboard: 'dashboard', overview: 'overview', quality: 'quality', tests: 'tests', secrets: 'secrets', clutter: 'clutter', history: 'history' };
+const NAV = { drift: 'baseline', dashboard: 'dashboard', overview: 'overview', quality: 'quality', tests: 'tests', secrets: 'secrets', clutter: 'clutter', history: 'history', github: 'github' };
 
 function gradeBar(rs) {
   const bar = $('gradebar');
@@ -267,6 +267,7 @@ function renderMain() {
   else if (state.view === 'history') renderHistory();
   else if (state.view === 'drift') renderDriftView();
   else if (state.view === 'overview') renderOverview();
+  else if (state.view === 'github') GitHubView.render();
   else renderDashboard();
 }
 

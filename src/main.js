@@ -247,6 +247,16 @@ handle('remote:get', () => ({ settings: normalizeRemoteSettings(loadSettings().r
 handle('remote:set', (_e, patch) => { const next = normalizeRemoteSettings({ ...normalizeRemoteSettings(loadSettings().remote), ...(patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {}) }); updateSettings({ remote: next }); return next; });
 handle('remote:orgs', async () => { const r = await run('gh', ['api', 'user/orgs', '--jq', '.[].login']); return r.ok ? r.stdout.split('\n').map((s) => s.trim()).filter(validOwner) : []; });
 handle('remote:clear', () => { const freedBytes = remoteCache.sizeBytes(); remoteCache.clear(); return { freedBytes }; });
+// Clone and fork from GitHub into the scanned folder (github-get.js): search, your repos, plan, apply.
+const { parseGithubRemote } = require('./scanner');
+const getter = require('./github-get').createGitHubGet({
+  root: () => ws.root(), readOnly: () => !!loadSettings().readOnly, audit: (e) => audit({ ...e, via: 'app' }), adopt: (dir, key) => ws.adopt(dir, key),
+  local: () => [...known.values()].filter(isLocal).map((r) => ({ path: r.path, ...parseGithubRemote(r.originUrl) })),
+});
+handle('get:search', (_e, { query } = {}) => getter.search(String(query || '')));
+handle('get:mine', () => getter.mine());
+handle('get:plan', (_e, { items } = {}) => getter.plan(items));
+handle('get:apply', (_e, { tokens } = {}) => getter.apply(tokens));
 handle('open:url', (_e, url) => openExternal(url));
 handle('open:folder', (_e, dir) => { if (localKnown(dir)) shell.openPath(dir); });
 

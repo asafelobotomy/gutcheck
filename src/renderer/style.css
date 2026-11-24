@@ -298,6 +298,11 @@ details { margin: 6px 0; } summary { cursor: pointer; color: var(--muted); } sum
 .hm-error-1 { background: color-mix(in srgb, var(--err) 35%, var(--panel2)); } .hm-error-2 { background: color-mix(in srgb, var(--err) 65%, var(--panel2)); } .hm-error-3 { background: var(--err); }
 .hm-warn-1 { background: color-mix(in srgb, var(--warn) 35%, var(--panel2)); } .hm-warn-2 { background: color-mix(in srgb, var(--warn) 65%, var(--panel2)); } .hm-warn-3 { background: var(--warn); }
 .hm-info-1 { background: color-mix(in srgb, var(--info) 35%, var(--panel2)); } .hm-info-2 { background: color-mix(in srgb, var(--info) 65%, var(--panel2)); } .hm-info-3 { background: var(--info); }
+/* From GitHub (github-view.js) */
+.ghrow.here { background: transparent; } .ghrow.here b { color: var(--muted); }
+.ghrow .grow > div:first-child { overflow: hidden; text-overflow: ellipsis; }
+#ghresults .busy { opacity: .55; }
+#ghq { max-width: none; }
 
 /* icon-only buttons and icon badges: the word stays as hidden text and the tooltip */
 button.icon { padding: 5px 7px; } button.sm.icon { padding: 4px 6px; } button.icon .ic { width: 15px; height: 15px; }

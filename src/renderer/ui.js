@@ -40,6 +40,7 @@ const UI = (() => {
     trash: 'M2 4h12M6 4V2h4v2M3.5 4l1 10h7l1-10',
     plus: 'M8 3v10M3 8h10',
     play: 'M4 2v12l10-6z',
+    download: 'M8 2v8M4.5 6.5 8 10l3.5-3.5M2 13h12',
     github: 'M6 14c-3 1-3-1.5-4.5-2M10 15v-2.5c0-.8.1-1.3-.4-1.8 2-.2 4-1 4-4.4a3.4 3.4 0 0 0-1-2.4 3 3 0 0 0-.1-2.4s-.8-.2-2.5 1a8.6 8.6 0 0 0-4.5 0C3.8.9 3 1.1 3 1.1a3 3 0 0 0-.1 2.4 3.4 3.4 0 0 0-1 2.4c0 3.4 2 4.2 4 4.4-.4.4-.5 1-.4 1.6V15',
     merge: 'M4 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM4 6v8M12 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM4 6c0 3 3 4 6 4',
     switch: 'M2 5h10l-3-3M14 11H4l3 3',
@@ -224,7 +225,7 @@ const UI = (() => {
 })();
 
 // Icons on the page's fixed controls (index.html). Labels stay as they are.
-for (const [id, name] of [['dashboard', 'dashboard'], ['overview', 'overview'], ['baseline', 'baseline'], ['quality', 'quality'], ['tests', 'tests'], ['secrets', 'secrets'], ['clutter', 'clutter'], ['history', 'history'], ['scan', 'scan']]) {
+for (const [id, name] of [['dashboard', 'dashboard'], ['overview', 'overview'], ['baseline', 'baseline'], ['quality', 'quality'], ['tests', 'tests'], ['secrets', 'secrets'], ['clutter', 'clutter'], ['history', 'history'], ['github', 'download'], ['scan', 'scan']]) {
   const el = document.getElementById(id);
   if (el) el.prepend(UI.icon(name));
 }

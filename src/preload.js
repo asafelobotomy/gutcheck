@@ -33,6 +33,12 @@ contextBridge.exposeInMainWorld('api', {
   agentUsage: (live) => ipcRenderer.invoke('agents:usage', { live }),
   applyAgent: (token) => ipcRenderer.invoke('agents:apply', { token }),
   copyAgent: (id, allowActions) => ipcRenderer.invoke('agents:copy', { id, allowActions }),
+  get: {
+    search: (query) => ipcRenderer.invoke('get:search', { query }),
+    mine: () => ipcRenderer.invoke('get:mine'),
+    plan: (items) => ipcRenderer.invoke('get:plan', { items }),
+    apply: (tokens) => ipcRenderer.invoke('get:apply', { tokens }),
+  },
   openUrl: (u) => ipcRenderer.invoke('open:url', u),
   openFolder: (d) => ipcRenderer.invoke('open:folder', d),
   setIgnore: (o) => ipcRenderer.invoke('ignore:set', o),
