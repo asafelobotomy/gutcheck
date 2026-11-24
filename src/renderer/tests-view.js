@@ -26,7 +26,7 @@ async function runTestsFor(res, kind, stack, root) {
 const pctCls = (p, warn, ok) => (p == null ? '' : p < warn ? 'err' : p < ok ? 'warn' : 'ok');
 
 function testsRepoEl(res) {
-  if (res.error) return h('div', { class: 'cblock' }, h('h3', {}, res.name), h('p', { class: 'b-err' }, res.error));
+  if (res.error) return UI.fold('tests|' + res.path, [h('span', { class: 'ftitle' }, res.name), UI.status('err', 'review failed')], h('p', { class: 'b-err' }, res.error), { open: true, cls: 'cat cblock' });
   const r = res.results || {};
   const details = [];
   if (r.coverage && r.coverage.lowest.length) details.push(h('details', {}, h('summary', {}, `Least covered files (${r.coverage.file})`),
@@ -39,20 +39,23 @@ function testsRepoEl(res) {
     s.mutation ? btn(`Mutation testing (${s.name}${s.root !== '.' ? `, ${s.root}` : ''})…`, () => runTestsFor(res, 'mutation', s.stack, s.root)) : null,
   ]).filter(Boolean);
   const repo = state.repos.get(res.path);
-  return h('div', { class: 'cblock' },
-    h('h3', {}, res.name, h('span', { class: 'pill' }, `${plural(res.testCases, 'test')} · ${plural(res.testFiles, 'test file')}`),
-      r.coverage ? h('span', { class: 'pill ' + pctCls(r.coverage.percent, 50, 75), title: `${r.coverage.file}, ${r.coverage.date.slice(0, 10)}` }, `coverage ${r.coverage.percent}%`) : null,
-      r.mutation ? h('span', { class: 'pill ' + pctCls(r.mutation.score, 60, 80), title: r.mutation.tool }, `mutation ${r.mutation.score}%`) : null),
+  const sev = UI.sevCounts(res.advice);
+  const tone = { ok: 'ok', warn: 'warn', err: 'err', '': 'info' };
+  return UI.fold('tests|' + res.path, [h('span', { class: 'ftitle' }, res.name), h('span', { class: 'pill' }, `${plural(res.testCases, 'test')} · ${plural(res.testFiles, 'test file')}`),
+      r.coverage ? h('span', { class: 'pill ' + pctCls(r.coverage.percent, 50, 75), title: `${r.coverage.file}, ${r.coverage.date.slice(0, 10)}` }, `coverage ${r.coverage.percent}%`, UI.meter(r.coverage.percent, tone[pctCls(r.coverage.percent, 50, 75)])) : null,
+      r.mutation ? h('span', { class: 'pill ' + pctCls(r.mutation.score, 60, 80), title: r.mutation.tool }, `mutation ${r.mutation.score}%`) : null,
+      res.testCases ? null : UI.status('warn', 'no tests'),
+      res.advice.length ? h('span', { class: 'cnt' + (sev.error ? ' err' : sev.warn ? ' warn' : '') }, String(res.advice.length)) : UI.status('ok', 'clean')], [
     h('div', { class: 'muted' }, res.stacks.length ? res.stacks.map((s) => `${s.name}${s.runner ? ` (${s.runner})` : ''}${s.root !== '.' ? ` in ${s.root}/` : ''}`).join(', ') : 'No test setup found'),
     res.advice.length ? res.advice.map((f) => (f.fix && repo ? adviceEl(repo, f) : adviceEl(null, f))) : h('p', { class: 'ok-msg' }, 'Nothing to flag.'),
-    runs.length ? h('div', { class: 'toolbar' }, ...runs) : null,
-    ...details);
+    runs.length ? h('div', { class: 'toolbar' }, UI.icon('play'), ...runs) : null,
+    ...details], { open: sev.error + sev.warn > 0, cls: 'cat cblock' });
 }
 
 function renderTestsView() {
   if (state.view !== 'tests') return;
   const c = state.tests;
-  const head = [h('h2', {}, 'Tests'),
+  const head = [h('div', { class: 'dhead' }, h('h2', {}, 'Tests')),
     h('p', { class: 'sub' }, 'Reviews each repo\'s tests without running them, and reads coverage and mutation reports that already exist. Running tests is opt-in: it executes the project\'s code, so each run asks for the repo name.')];
   if (!c) {
     const err = state.scanError.tests;
@@ -65,7 +68,7 @@ function renderTestsView() {
   const n = (x) => x.toLocaleString();
   const top = $('detail').scrollTop;
   put($('detail'), ...head,
-    h('div', { class: 'toolbar' }, btn('Rescan', (e) => { e.target.disabled = true; scanTestsNow(); })),
+    h('div', { class: 'toolbar' }, UI.ibtn('refresh', 'Rescan', (e) => { e.currentTarget.disabled = true; scanTestsNow(); })),
     h('div', { class: 'qstats' }, stat('Test cases', n(sum((r) => r.testCases))), stat('Repos without tests', n(all.filter((r) => !r.testCases).length), all.some((r) => !r.testCases) ? 'warn' : 'ok'),
       stat('Not run by CI', n(all.filter((r) => r.advice.some((a) => a.id === 't-ci' || a.id === 't-ci-none')).length), 'warn'),
       stat('Skipped or focused', n(sum((r) => r.skipped.length + r.focused.length))), stat('With coverage', `${covered.length}/${all.length}`)),

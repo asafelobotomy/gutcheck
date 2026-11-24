@@ -94,7 +94,7 @@ async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clut
     secrets: fakeSecrets(calls, secrets, secretsApi),
   };
   const ctx = dom.getInternalVMContext();
-  for (const f of ['metrics.js', 'fix-all.js', 'app.js', 'modals.js', 'fixall-view.js', 'overview-view.js', 'clutter-view.js', 'quality-view.js', 'tests-view.js', 'secrets-view.js', 'dashboard.js', 'agents-view.js', 'policy-view.js', 'usage-view.js', 'remote-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
+  for (const f of ['metrics.js', 'fix-all.js', 'app.js', 'ui.js', 'modals.js', 'fixall-view.js', 'repo-view.js', 'overview-view.js', 'clutter-view.js', 'quality-view.js', 'tests-view.js', 'secrets-view.js', 'dashboard.js', 'agents-view.js', 'policy-view.js', 'usage-view.js', 'remote-view.js']) new vm.Script(fs.readFileSync(path.join(DIR, f), 'utf8'), { filename: f }).runInContext(ctx);
   await tick();
   return { dom, w, doc: w.document, calls, $: (s) => w.document.querySelector(s), $$: (s) => [...w.document.querySelectorAll(s)], run: (code) => new vm.Script(code).runInContext(ctx), emit: { begin: (d) => onBegin(d), repo: (d) => onRepo(d), done: (d) => onDone(d) } };
 }

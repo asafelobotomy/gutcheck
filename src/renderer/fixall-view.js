@@ -44,6 +44,7 @@ function decisionWizard(r, decisions) {
       check();
       box.replaceChildren(
         h('h3', { class: 'mh', id: 'modal-title' }, `Your call ${i + 1} of ${decisions.length}: ${r.name}`),
+        h('div', { class: 'steps', 'aria-hidden': 'true' }, decisions.map((_, k) => h('span', { class: k < i ? 'done' : k === i ? 'now' : '' }))),
         h('p', { class: 'sub' }, 'GutCheck can fix these too, but only you can choose how. Nothing runs yet: your answers join the plan, and you review it all before anything happens.'),
         h('div', { class: 'wcard' }, h('b', {}, d.title), d.detail ? h('div', { class: 'muted' }, d.detail) : null, ...options, fieldsEl),
         h('div', { class: 'mbtns' }, h('button', { onclick: () => close(null) }, 'Cancel'), back, next));
