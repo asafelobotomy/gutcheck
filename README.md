@@ -315,6 +315,8 @@ chmod +x GutCheck-*.AppImage
 
 Requires `gh` and `git` on your `PATH`, and `gh auth login` completed. To check the download, run `sha256sum -c SHA256SUMS.txt` next to the AppImage (the file is attached to every release). From the release after 0.28.1 on, `gh attestation verify GutCheck-*.AppImage --repo asafelobotomy/gutcheck` also shows that GitHub's own build made it from this repo's code.
 
+On Arch Linux, install [`gutcheck-bin`](https://aur.archlinux.org/packages/gutcheck-bin) from the AUR instead (for example `yay -S gutcheck-bin`). It unpacks the same AppImage into `/opt/gutcheck` and adds `gutcheck` to your `PATH`.
+
 Each release's notes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## API usage and privacy
