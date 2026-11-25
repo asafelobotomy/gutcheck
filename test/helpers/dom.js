@@ -72,9 +72,11 @@ function fakeGet(calls, over = {}) {
 
 const REMOTE_INFO = { settings: { enabled: false, orgs: [], forks: false, archived: false, skip: [], maxSizeMB: 500, cacheMaxGB: 5 }, status: null, cacheBytes: 0, orgs: [] };
 async function boot({ repos = REPOS, trend = [], settings = { root: '/w' }, clutter = CLUTTER, quality = QUALITY, secrets = SECRETS, secretsApi = {}, remote = REMOTE_INFO, getApi = {} } = {}) {
-  const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8').replace(/<script[^>]*><\/script>/g, '');
+  const html = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8');
   const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true, url: 'file:///app/index.html' });
   const w = dom.window;
+  // The page's own <script> tags are dropped (outside-only never runs them); the scripts are evaluated below instead.
+  for (const s of w.document.querySelectorAll('script')) s.remove();
   const calls = [];
   let onRepo = () => {};
   let onBegin = () => {};
