@@ -7,7 +7,7 @@
 
 pkgname=gutcheck-bin
 _appname=GutCheck
-pkgver=0.28.1
+pkgver=0.29.0
 pkgrel=1
 pkgdesc='Check the health of every git repo in a folder: CI, PRs, branches, uncommitted work and more'
 arch=('x86_64')
@@ -21,7 +21,7 @@ options=('!strip' '!debug')
 source=("$_appname-$pkgver-x86_64.AppImage::$url/releases/download/v$pkgver/$_appname-$pkgver-x86_64.AppImage"
         "LICENSE-$pkgver::https://raw.githubusercontent.com/asafelobotomy/gutcheck/v$pkgver/LICENSE")
 noextract=("$_appname-$pkgver-x86_64.AppImage")
-sha256sums=('3af4d5977bf4c77260e92e8f1a31d6bd732be65e754ea0a6b69de99d6b611a92'
+sha256sums=('862447e9133175ce19a81213acbd283194a39f103d5e357ac2fc1d974bc11dd2'
             'b96b5a0ecb11e311dab94d71fe36add411fd2110b624d336a6e54cc74aba3e4b')
 
 prepare() {
