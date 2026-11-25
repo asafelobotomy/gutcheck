@@ -4,6 +4,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-25
+
 ### Added
 
 - **From GitHub** in the sidebar clones and forks repos into the scanned folder. Search all of GitHub with results as you type, or list your own repos filtered to the ones not here and tick several to clone together. A repo that is only on GitHub has **Clone here** on its page. Each clone or fork is reviewed first (the exact `gh` command and the folder it creates), never lands on an existing folder, skips submodules, is recorded in History, and joins the repo list straight away.
@@ -29,6 +31,7 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ### Security
 
+- Electron 45.3.3 (from 45.2.3), which brings Chromium 156.0.8078.100 and its upstream security fixes.
 - Fixes that only read or move commits can no longer run a program a cloned repo's `.git/config` names. In a partial clone, a step that needed a missing file (Switch, Pull's fast-forward, Merge, Commit, deleting a branch, aborting) fetched it, which ran the repo's `remote.<name>.uploadpack` or `core.sshCommand`, while the plan said "safe". Every git step now runs with fetching of missing files switched off. A real partial clone still works: its steps get the same checks as Fetch (no programs named for network commands, a plain https, ssh or git remote), the plan says it may download missing files, and only then may it fetch.
 - The rescue copy no longer runs an external diff program. With `diff.external` set, by the repo or by you, `uncommitted.patch` came out empty while every step reported success, and the repo's program ran. The patch and the stash patches are now always git's own diff (`--no-ext-diff --no-textconv`).
 - A repo whose git config points its work tree at another folder (`core.worktree`) is refused, for scans and for fixes. A Switch rated "safe" could write a branch's files into that folder (your home folder, say), and Commit all could commit files from it. A value that names the repo's own folder, as a submodule's does, is fine. The repo shows as an error that names the setting.
@@ -449,7 +452,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 - First release: health checks for every git repo in a folder.
 
-[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.28.1...HEAD
+[Unreleased]: https://github.com/asafelobotomy/gutcheck/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.28.1...v0.29.0
 [0.28.1]: https://github.com/asafelobotomy/gutcheck/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/asafelobotomy/gutcheck/compare/v0.27.1...v0.28.0
 [0.27.1]: https://github.com/asafelobotomy/gutcheck/compare/v0.27.0...v0.27.1
