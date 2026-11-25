@@ -12,14 +12,15 @@
 
 A desktop dashboard that gives you a health check across every GitHub project in a folder. It is built on the [`gh` CLI](https://cli.github.com) and `git`, so it uses your existing GitHub login and never handles tokens itself. It also runs as a command line and as an MCP server, so AI coding agents can use the same checks and fixes.
 
-![The GutCheck dashboard: health grades, KPI cards and the repos that need attention](docs/images/dashboard.png)
+![The GutCheck dashboard: KPI cards grouped by Health, On GitHub and On this machine, the repo list with its grade bar, and the repos that need attention](docs/images/dashboard.png)
 
 - **One scan, every repo**: CI, pull requests, branches, docs, Actions security, dependencies, releases, settings, clutter, code quality, tests and AI agent setup, with a grade for each repo.
 - **Fixes you can see first**: every change shows the exact commands before it runs, and only those run.
+- **One at a time or many at once**: every issue, pull request, branch and missing file has its own button, and you can tick several and act on them together.
 - **Your own rules**: ignore a finding with a reason, and declare a baseline every repo should meet.
 - **Local and private**: no account, no server, no telemetry. GitHub data comes through your own `gh` login.
 
-[What it checks](#what-it-checks) · [Screenshots](#screenshots) · [Actions](#actions) · [Command line and MCP](#command-line-and-mcp-server-for-ai-agents) · [Install](#install) · [Changelog](CHANGELOG.md)
+[What it checks](#what-it-checks) · [Using the app](#using-the-app) · [Clone and fork](#clone-and-fork-from-github) · [Actions](#actions) · [Command line and MCP](#command-line-and-mcp-server-for-ai-agents) · [Install](#install) · [Changelog](CHANGELOG.md)
 
 ## What it checks
 
@@ -61,21 +62,39 @@ GutCheck can also check your GitHub repos that have no folder in the workspace. 
 - **Your repos:** every repo you own, filtered to the ones not here. Tick several and clone them together.
 - A repo in the list that is only on GitHub (see below) has **Clone here** on its page.
 
+![From GitHub: search results for "weather", one already in the folder and three with Clone and Fork](docs/images/github.png)
+
 Each is a normal change: the review shows the exact `gh repo clone` or `gh repo fork --clone` command and the folder it creates, nothing runs until you apply it, and History records it. A clone never goes on top of an existing folder or outside the scanned one, submodules are not fetched, and nothing in the repo runs. A fork makes your fork `origin` and the original `upstream`. The new clone joins the repo list straight away.
 
-## Screenshots
+## Using the app
+
+The app is built to show state rather than describe it, keep lists short, and let you act on one thing or many.
+
+- **Header**: the workspace folder, **Scan** (tick **Deep scan** for the slower checks), whether `gh` is signed in, a small gauge of the GitHub API quota left, the **Read-only** switch and Settings. Under it, the workspace totals: repos, average health, errors, warnings, open PRs and failing CI.
+- **Sidebar**: the Dashboard, Workspace overview, Baseline, the deeper scans (Code quality, Tests, Secrets, Clutter & tidy-up), From GitHub and History, with counts where there is something to see. Below them is the repo list: a grade bar (click a grade to show only those repos), quick filters (errors, PRs, uncommitted or unpushed work), a text filter and sort, and a severity strip on every repo.
+- **A repo page** opens with a score ring (its grade and score out of 100), a severity strip, and its live git state: branch, uncommitted changes, commits to push or pull, open PRs and CI. Then **Fix all issues** and icon buttons to rescan, fetch and prune, open the folder, open it on GitHub and copy the report for an LLM. The rest is split into tabs, each with its count:
+  - **Issues**, folded by category and filtered by severity. Each has its own fix and an ignore button.
+  - **Pull requests**, to merge, close or mark ready, one at a time or together.
+  - **Branches**, filtered to merged, stale, local only or remote only, with switch, merge and delete on each, plus new branch, pull, push and a rescue copy.
+  - **Settings**: each protection and security feature shown as on, off or unknown, with the button that changes it.
+  - **Files**: the project files it is missing, to add one by one or together.
+- **Bulk actions**: tick issues, pull requests, branches, files, secrets or your own GitHub repos, and a bar appears with what can be done to all of them at once (fix, ignore, merge, close, delete, add, clone). The tick box at the top selects everything shown.
+- **Icons**: repeated buttons and states (refresh, folder, GitHub, copy, ignore, open, switch, merge, delete, and the branch, clutter and secret badges) are icons. Hover one for a tooltip naming what it acts on; screen readers get the words.
+- **Read-only**: with the switch on, a band under the header says so and every change button is greyed out.
 
 All screenshots show a made-up demo workspace (`npm run screenshots` rebuilds them).
 
-| A repo and its findings | Every change is reviewed first |
+| A repo: score ring, live git state and tabs | Tick several issues to fix or ignore them together |
 |---|---|
-| ![A repo view: failed CI, missing files and Dependabot alerts, each with a fix and an Ignore button](docs/images/repo.png) | ![The review dialog: the exact file GutCheck will write and how to undo it](docs/images/review.png) |
-| **The same issue across repos** | **Baseline drift** |
-| ![The workspace overview: recommendations grouped across repos, with Fix all](docs/images/overview.png) | ![The Baseline view: each rule and the repos missing it](docs/images/baseline.png) |
+| ![A repo page: a D score ring, branch and CI state, tabs for Issues, Pull requests, Branches, Settings and Files, and issues folded by category with a fix and an ignore button each](docs/images/repo.png) | ![Four issues ticked on a repo page, with a bar offering Fix selected (4) and Ignore selected](docs/images/bulk.png) |
+| **Every change is reviewed first** | **The same issue across repos** |
+| ![The review dialog: the exact file GutCheck will write and how to undo it](docs/images/review.png) | ![The workspace overview: issue types folded by severity, the affected repos as chips, and Fix all buttons](docs/images/overview.png) |
+| **Baseline drift** | **Clone and fork from GitHub** |
+| ![The Baseline view: each rule, how many repos meet it and the ones missing it](docs/images/baseline.png) | ![From GitHub: search results as you type, with Clone and Fork on each, and Here on a repo already in the folder](docs/images/github.png) |
 
 ## Actions
 
-Everything is done from the repo view, or in bulk from the workspace overview ("Fix all N").
+Everything is done from the repo page, one item at a time or by ticking several (see [Using the app](#using-the-app)), or across repos from the workspace overview ("Fix all N", or tick issue types to fix them in every repo in one go).
 
 **Fix all issues** (on each repo) gathers every fix for that repo into one plan. Fixes that only you can choose come first, in a short wizard: a commit message for your uncommitted work, merging or closing a pull request, a description, installing packages or running the tests (those two start on "leave it", because they run the project's code). Then one review lists every step in the order a developer would do them: pull, `.gitignore` rules (so caches and `.env` files are not committed with your work), your commit, dependencies, new project files (each its own commit), local clean-up, push, then GitHub settings and pull requests, and test runs last. Within a step, worse issues go first. Untick anything you do not want; nothing runs until you press Apply. From the command line, `gutcheck fix <repo> all` shows the same plan and the choices left to you; agents use `gutcheck_plan` with `{ repo, all: true }`. Before anything runs, GutCheck shows the **exact commands** in a review dialog, and only those commands run. Dangerous actions make you type the repo name.
 
@@ -97,7 +116,7 @@ Safety rails: a **Read-only** switch in the header disables every action, every 
 
 ## Dashboard
 
-After a scan GutCheck opens on a **Dashboard**: KPI cards (average health, errors, warnings, open PRs, failing CI, uncommitted and unpushed work, high-severity alerts, merged and stale branches, local-only repos, missing licences, reclaimable clutter) and charts for grade distribution, issues by category, repo activity, open PR age, health per repo and clutter size per repo. Click a repo bar, an attention row or a card to drill in. It is computed from the scan you already have, so it makes no extra GitHub calls; the clutter numbers appear once you run a clutter scan from the dashboard.
+After a scan GutCheck opens on a **Dashboard**: KPI cards in four groups (**Health**: repos, average health, errors, warnings; **On GitHub**: open PRs, failing CI, high-severity alerts, missing licences; **On this machine**: uncommitted and unpushed work, merged and stale branches, local-only repos; **Deeper scans**: clutter and code quality, started from their cards) and charts for grade distribution, issues by category, repo activity, open PR age, health per repo and clutter size per repo. Click a repo bar, an attention row or a card to drill in. It is computed from the scan you already have, so it makes no extra GitHub calls; the clutter numbers appear once you run a clutter scan from the dashboard.
 
 An **issue heatmap** shows repos against problem categories (darker means more issues, colour is the worst severity). **Trends** show average health, errors and warnings, and clutter size across scans, and the cards show the change since the previous scan, plus the repos whose score moved most. GutCheck keeps one small snapshot per scan (scores and totals only, no paths or file names) in `trend.json` in its app data folder, scoped per workspace folder, capped at 365 snapshots; scans within 10 minutes of each other replace one another. Delete the file to reset the history.
 
@@ -283,7 +302,7 @@ The result lists enabled plugins nothing used, skills (yours and each repo's) no
 
 ## Ignoring findings
 
-Not every finding fits every repo. **Ignore…** on a finding (or `gutcheck ignore <repo> <finding> <reason>`) asks why, then takes it out of the score, the dashboard and the report; it stays listed under **Ignored** with your reason, and **Stop ignoring** brings it back. Tick **Ignore it in every repo** (`--all`) for findings you never want. A finding id ending in `*` covers a family (`pr-stale-*`). Ignores live in `ignores.json` in GutCheck's data folder, keyed by `owner/name`, so they survive a fresh clone. A `*` needs at least 3 characters before it (`no-*`); older rules without them are listed by `gutcheck ignored` as not applied. A repo can also carry its own in `.gutcheck.json` (`{ "ignore": { "no-topics": "internal tool" } }`), which everyone who scans it shares. Whoever controls a repo writes that file, so its rules cannot hide errors, security findings (workflows, credentials, secrets, GitHub's security features), your baseline, or uncommitted and unpushed work, and a `*` there needs at least 4 characters before it. The "Copy for LLM" report lists ignored findings by who ignored them: yours with your reasons, an AI agent's (through MCP) with its reasons quoted, and the repo's own without its reasons, never as your decision. Every ignore is recorded in History, Read-only mode blocks ignoring and creating a baseline, and agents can only ignore through an MCP server started with `--allow-actions`, never an error or a security finding (they are told to ask you).
+Not every finding fits every repo. **Ignore** on a finding (the crossed-out eye; tick several issues to ignore them together) (or `gutcheck ignore <repo> <finding> <reason>`) asks why, then takes it out of the score, the dashboard and the report; it stays listed under **Ignored** with your reason, and **Stop ignoring** brings it back. Tick **Ignore it in every repo** (`--all`) for findings you never want. A finding id ending in `*` covers a family (`pr-stale-*`). Ignores live in `ignores.json` in GutCheck's data folder, keyed by `owner/name`, so they survive a fresh clone. A `*` needs at least 3 characters before it (`no-*`); older rules without them are listed by `gutcheck ignored` as not applied. A repo can also carry its own in `.gutcheck.json` (`{ "ignore": { "no-topics": "internal tool" } }`), which everyone who scans it shares. Whoever controls a repo writes that file, so its rules cannot hide errors, security findings (workflows, credentials, secrets, GitHub's security features), your baseline, or uncommitted and unpushed work, and a `*` there needs at least 4 characters before it. The "Copy for LLM" report lists ignored findings by who ignored them: yours with your reasons, an AI agent's (through MCP) with its reasons quoted, and the repo's own without its reasons, never as your decision. Every ignore is recorded in History, Read-only mode blocks ignoring and creating a baseline, and agents can only ignore through an MCP server started with `--allow-actions`, never an error or a security finding (they are told to ask you).
 
 ## Baseline
 
@@ -333,7 +352,7 @@ npm install
 npm start      # run the app
 npm test       # unit tests
 npm run dist   # build the AppImage into dist/
-npm run screenshots   # rebuild docs/images from a made-up demo workspace (needs a desktop session)
+npm run screenshots   # rebuild docs/images from a made-up demo workspace (needs a desktop session, or xvfb-run)
 ```
 
 [AGENTS.md](AGENTS.md) describes the layout and the rules every change follows (read-only scans, plan, preview, apply, files under 400 lines). [CONTRIBUTING.md](CONTRIBUTING.md) covers pull requests, and [docs/sources.md](docs/sources.md) where each check comes from.

@@ -15,6 +15,12 @@ const OUT = path.join(__dirname, '..', '..', 'docs', 'images');
 const SRC = path.join(__dirname, '..', '..', 'src');
 const DAY = 86400e3;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const GITHUB_SEARCH = [
+  { owner: 'example', name: 'weather-cli', description: 'Forecasts in your terminal', stars: 12, language: 'Go', pushedAt: new Date(Date.now() - 2 * DAY).toISOString(), mine: true },
+  { owner: 'skyline-labs', name: 'weather-kit', description: 'Weather data client for Node and the browser', stars: 4210, language: 'TypeScript', pushedAt: new Date(Date.now() - 3 * DAY).toISOString() },
+  { owner: 'openmeteo-tools', name: 'weather-dash', description: 'A self-hosted weather dashboard', stars: 873, language: 'Python', pushedAt: new Date(Date.now() - 20 * DAY).toISOString() },
+  { owner: 'rainfall', name: 'weather-station', description: 'Firmware and logger for a home weather station', stars: 152, language: 'C', pushedAt: new Date(Date.now() - 400 * DAY).toISOString(), isArchived: true },
+];
 
 async function main() {
   const demo = await build();
@@ -51,6 +57,10 @@ async function main() {
     'drift:get': () => ({ file: '~/.config/GutCheck/baseline.json', rules: driftReport(demo.results, demo.baseline) }),
     'background:get': () => ({ launchOnStartup: true, minimizeToTray: true, closeToTray: true, trayAvailable: true, scheduleEnabled: true, scheduleHours: '24' }),
     'action:plan': (_e, { items }) => service.planActions(items),
+    'uq-tokens:read': () => null,
+    // From GitHub: made-up search results, one of them already in the demo folder.
+    'get:search': () => ({ ok: true, total: 41, repos: GITHUB_SEARCH.map((r) => ({ ...r, here: r.owner === 'example' ? path.join(demo.root, r.name) : null })) }),
+    'get:mine': () => ({ ok: true, repos: demo.results.map((r) => ({ owner: 'example', name: path.basename(r.path), here: r.path, mine: true })) }),
   };
   for (const ch of ['scan:one', 'action:apply', 'clutter:scan', 'quality:scan', 'tests:scan', 'quality:set', 'report:copy', 'settings:set', 'background:set', 'agents:status', 'agents:plan', 'agents:cleanup', 'agents:apply', 'agents:copy', 'open:url', 'open:folder', 'dir:pick', 'ignore:set', 'baseline:init', 'baseline:open']) H[ch] = H[ch] || (() => ({ ok: false, error: 'demo' }));
   for (const [ch, fn] of Object.entries(H)) ipcMain.handle(ch, fn);
@@ -58,6 +68,7 @@ async function main() {
   win = new BrowserWindow({ width: 1280, height: 820, show: true, backgroundColor: '#0f1115', webPreferences: { preload: path.join(SRC, 'preload.js'), contextIsolation: true, sandbox: true } });
   win.removeMenu();
   await win.loadFile(path.join(SRC, 'renderer', 'index.html'));
+  await win.webContents.insertCSS('::-webkit-scrollbar { display: none; }'); // the desktop's scrollbars are not part of the app
   const js = (code) => win.webContents.executeJavaScript(code);
   const shot = async (name) => { await wait(600); fs.writeFileSync(path.join(OUT, name), (await win.webContents.capturePage()).toPNG()); console.log('saved', name); };
   fs.mkdirSync(OUT, { recursive: true });
@@ -73,10 +84,18 @@ async function main() {
   await js("(document.querySelector('.modal button.primary') || {}).click && [...document.querySelectorAll('.modal button')].find((b) => b.textContent === 'Continue')?.click()");
   await shot('review.png');
   await js("document.querySelector('.overlay')?.remove()");
+  // Tick four of recipe-api's issues so the bulk action bar shows (each tick redraws the page).
+  for (let k = 1; k <= 4; k++) { await js(`document.querySelectorAll('.finding input.pick')[${k}].click()`); await wait(150); }
+  await shot('bulk.png');
   await js("document.getElementById('overview').click()");
   await shot('overview.png');
   await js("document.getElementById('baseline').click()");
   await shot('baseline.png');
+  await js("document.getElementById('github').click()");
+  await wait(300);
+  await js("(() => { const q = document.getElementById('ghq'); q.value = 'weather'; q.dispatchEvent(new Event('input')); })()");
+  await wait(800);
+  await shot('github.png');
   // GUTCHECK_SHOTS_ALL=<folder>: every other view and dialog too, for reviewing the UI (not the README).
   const all = process.env.GUTCHECK_SHOTS_ALL;
   if (all) {
