@@ -150,7 +150,8 @@ ws = createWorkspaceScanner({ known, service, policy: policyNow, seen: seen(), r
 
 handle('action:plan', (_e, { items } = {}) => service.planActions(items));
 // confirm: { token: the repo name the user typed } for each dangerous plan; the service checks it.
-handle('action:apply', (_e, { tokens, confirm } = {}) => service.applyActions(tokens, { confirm: confirm && typeof confirm === 'object' ? confirm : {} }));
+// Progress goes to the window's footer bar as each plan, step and rescan starts (action:progress).
+handle('action:apply', (_e, { tokens, confirm } = {}) => service.applyActions(tokens, { confirm: confirm && typeof confirm === 'object' ? confirm : {}, onProgress: (p) => send('action:progress', p) }));
 handle('clutter:scan', (_e, { dirs } = {}) => service.clutterScan(dirs));
 handle('trend:get', () => service.trend());
 handle('quality:scan', (_e, { dirs } = {}) => service.qualityScan(dirs));

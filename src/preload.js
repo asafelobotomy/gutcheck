@@ -58,6 +58,7 @@ contextBridge.exposeInMainWorld('api', {
   onDone: (cb) => ipcRenderer.on('scan:done', (_e, d) => cb(d)),
   onBegin: (cb) => ipcRenderer.on('scan:begin', (_e, d) => cb(d)),
   onRepo: (cb) => ipcRenderer.on('scan:repo', (_e, d) => cb(d)),
+  onApplyProgress: (cb) => ipcRenderer.on('action:progress', (_e, d) => cb(d)),
 });
 
 // uQ's theme (main: uq-theme.js; renderer: uq-theme.mjs, which validates every value).
