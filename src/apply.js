@@ -85,7 +85,9 @@ async function applySteps(p, ctx) {
   ctx = defaultCtx(ctx);
   const io = ctx.fs;
   const results = [];
-  for (const s of p.steps) {
+  for (const [k, s] of p.steps.entries()) {
+    // Progress for the app's footer bar: the step about to run (its text is the previewed command).
+    if (typeof ctx.onStep === 'function') { try { ctx.onStep(k, p.steps.length, s.display); } catch {} }
     if (s.kind === 'check' && s.expectFail) {
       // The command must fail in the expected way (for example GitHub's 404 for "no protection yet").
       const r = await ctx.run(s.cmd, s.args, { cwd: s.cwd });

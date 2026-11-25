@@ -216,7 +216,9 @@ async function runActions(items, { ask = true, lead = [], hold = null } = {}) {
   const chosen = await confirmPlans(good, { lead, hold });
   if (!chosen || !chosen.length) return;
   const gen = state.gen;
-  const outs = await window.api.applyActions(chosen.map((p) => p.token), confirmOf(chosen));
+  ApplyProgress.show(chosen.length); // the footer bar, until the results dialog opens
+  let outs;
+  try { outs = await window.api.applyActions(chosen.map((p) => p.token), confirmOf(chosen)); } finally { ApplyProgress.hide(); }
   if (gen === state.gen) for (const o of outs) if (o.res) state.repos.set(o.res.path, o.res); // not into a newer workspace
   const rate = outs.find((o) => o.rate)?.rate;
   if (rate) showRate(rate);
