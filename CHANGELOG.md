@@ -7,6 +7,7 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 ### Added
 
 - **From GitHub** in the sidebar clones and forks repos into the scanned folder. Search all of GitHub with results as you type, or list your own repos filtered to the ones not here and tick several to clone together. A repo that is only on GitHub has **Clone here** on its page. Each clone or fork is reviewed first (the exact `gh` command and the folder it creates), never lands on an existing folder, skips submodules, is recorded in History, and joins the repo list straight away.
+- An AUR package, `gutcheck-bin`, for Arch Linux. It installs the release AppImage's contents to `/opt/gutcheck`, puts `gutcheck` on your `PATH`, adds a menu entry, and keeps Chromium's sandbox on (the AppImage's own menu entry turns it off).
 - A progress bar at the bottom of the window while reviewed changes are applied. It shows which change of how many is running, the command it is on, and the rescan after each one. Before, nothing moved between accepting the review and the results dialog, which for a long Fix all looked as if nothing was happening.
 
 ### Changed
