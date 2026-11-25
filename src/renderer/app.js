@@ -357,7 +357,9 @@ $('readonly').addEventListener('change', async (e) => {
   toast(state.readOnly ? 'Read-only mode on: no changes can be made.' : 'Read-only mode off: actions are enabled (each one still asks first).');
 });
 
-(async () => {
+// Startup waits for the page's other scripts (ui.js among them): an IPC reply can land between two
+// of them, and the header's icons would then fail with "UI is not defined".
+async function startup() {
   state.version = await window.api.version();
   $('version').textContent = state.version ? 'v' + state.version : '';
   const s = await window.api.settings();
@@ -373,4 +375,5 @@ $('readonly').addEventListener('change', async (e) => {
   pill.classList.add(a.ok ? 'ok' : 'bad');
   renderStats();
   showRate(await window.api.rate());
-})();
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startup); else startup();
