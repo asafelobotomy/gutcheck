@@ -108,8 +108,10 @@ async function main() {
       if (full) { await js("document.getElementById('detail').scrollTop = 99999"); await wait(300); fs.writeFileSync(path.join(OUT2, name.replace('.png', '-end.png')), (await win.webContents.capturePage()).toPNG()); await js("document.getElementById('detail').scrollTop = 0"); }
       console.log('saved', name);
     };
-    const click = (sel) => js(`document.querySelector(${JSON.stringify(sel)}).click()`);
-    const clickText = (sel, text) => js(`[...document.querySelectorAll(${JSON.stringify(sel)})].find((b) => b.textContent.includes(${JSON.stringify(text)}))?.click()`);
+    // A JS string literal that is safe to splice into code: JSON plus escapes for characters JSON leaves raw.
+    const lit = (v) => JSON.stringify(String(v)).replace(/[<>/\u2028\u2029]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+    const click = (sel) => js(`document.querySelector(${lit(sel)}).click()`);
+    const clickText = (sel, text) => js(`[...document.querySelectorAll(${lit(sel)})].find((b) => b.textContent.includes(${lit(text)}))?.click()`);
     await click('#dashboard'); await shot2('dashboard.png', true);
     await clickText('#repos li', 'recipe-api'); await shot2('repo-recipe.png', true);
     await clickText('#repos li', 'notes-sync'); await shot2('repo-notes.png', true);
