@@ -216,7 +216,9 @@ async function runActions(items, { ask = true, lead = [], hold = null } = {}) {
   const chosen = await confirmPlans(good, { lead, hold });
   if (!chosen || !chosen.length) return;
   const gen = state.gen;
-  const outs = await window.api.applyActions(chosen.map((p) => p.token), confirmOf(chosen));
+  ApplyProgress.show(chosen.length); // the footer bar, until the results dialog opens
+  let outs;
+  try { outs = await window.api.applyActions(chosen.map((p) => p.token), confirmOf(chosen)); } finally { ApplyProgress.hide(); }
   if (gen === state.gen) for (const o of outs) if (o.res) state.repos.set(o.res.path, o.res); // not into a newer workspace
   const rate = outs.find((o) => o.rate)?.rate;
   if (rate) showRate(rate);
@@ -357,7 +359,9 @@ $('readonly').addEventListener('change', async (e) => {
   toast(state.readOnly ? 'Read-only mode on: no changes can be made.' : 'Read-only mode off: actions are enabled (each one still asks first).');
 });
 
-(async () => {
+// Startup waits for the page's other scripts (ui.js among them): an IPC reply can land between two
+// of them, and the header's icons would then fail with "UI is not defined".
+async function startup() {
   state.version = await window.api.version();
   $('version').textContent = state.version ? 'v' + state.version : '';
   const s = await window.api.settings();
@@ -373,4 +377,5 @@ $('readonly').addEventListener('change', async (e) => {
   pill.classList.add(a.ok ? 'ok' : 'bad');
   renderStats();
   showRate(await window.api.rate());
-})();
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startup); else startup();

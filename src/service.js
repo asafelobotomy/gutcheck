@@ -99,28 +99,38 @@ function createService({ known, settings, audit, trash, clipboard = { writeText(
     // must not expire the later steps the user already reviewed. opts.startedAt carries it across calls.
     const started = typeof opts.startedAt === 'number' ? opts.startedAt : Date.now();
     const note = (r, p) => { if (!r.ok && p) failed.add(p.repoPath); out.push(r); };
-    for (const token of tokens) {
+    // opts.onProgress (the app's footer bar): { index, total, repoName, title, phase, step, steps, text }.
+    // phase: 'start', 'step' (a command of the plan), 'rescan', 'done'. Never throws into the batch.
+    const tell = (o) => { if (typeof opts.onProgress === 'function') { try { opts.onProgress({ total: tokens.length, ...o }); } catch {} } };
+    for (const [index, token] of tokens.entries()) {
       const entry = plans.get(token);
-      plans.delete(token); // single use
-      if (!entry || entry.expires < started) { out.push({ ok: false, error: `Plan expired (plans last ${Math.round(planTtl / 60000)} minutes). Plan it again and review it.` }); continue; }
-      const p = entry.plan;
-      if (failed.has(p.repoPath)) { out.push({ ok: false, skipped: true, repoName: p.repoName, title: p.title, error: 'Skipped: an earlier change to this repo failed, so the rest did not run.' }); continue; }
-      if (p.confirmName && !(opts.confirm && opts.confirm[token] === p.confirmName)) { note({ ok: false, repoName: p.repoName, title: p.title, error: `This is a dangerous action: confirm it by passing the repo name "${p.confirmName}" for this token.` }, p); continue; }
-      if (!known.has(p.repoPath)) { note({ ok: false, repoName: p.repoName, title: p.title, error: 'This repo is no longer in the scanned workspace.' }, p); continue; }
-      if (settings().readOnly) { note({ ok: false, repoName: p.repoName, title: p.title, error: 'Read-only mode is on.' }, p); continue; }
-      if (busy.has(p.repoPath)) { note({ ok: false, repoName: p.repoName, title: p.title, error: 'Another action is running on this repo.' }, p); continue; }
-      busy.add(p.repoPath);
+      const who = entry ? { repoName: entry.plan.repoName, title: entry.plan.title } : {};
+      tell({ index, phase: 'start', ...who });
       try {
-        // An earlier plan in the batch (a pull) may have brought hooks, filters or settings since the preview.
-        const held = await actions.recheck(p);
-        if (held) { note({ ok: false, held: true, repoName: p.repoName, title: p.title, error: held }, p); continue; }
-        const r = await actions.apply(p, { trash });
-        audit({ repo: p.repoName, path: p.repoPath, action: p.type, risk: p.risk, title: p.title, ok: r.ok, steps: r.results.map((x) => ({ cmd: x.text, ok: x.ok })) });
-        let res = null;
-        try { res = await rescan(p.repoPath); if (known.has(p.repoPath)) known.set(p.repoPath, res); } catch {}
-        note({ ok: r.ok, repoName: p.repoName, title: p.title, results: r.results, res, rate: github.getRate() }, p);
+        plans.delete(token); // single use
+        if (!entry || entry.expires < started) { out.push({ ok: false, error: `Plan expired (plans last ${Math.round(planTtl / 60000)} minutes). Plan it again and review it.` }); continue; }
+        const p = entry.plan;
+        if (failed.has(p.repoPath)) { out.push({ ok: false, skipped: true, repoName: p.repoName, title: p.title, error: 'Skipped: an earlier change to this repo failed, so the rest did not run.' }); continue; }
+        if (p.confirmName && !(opts.confirm && opts.confirm[token] === p.confirmName)) { note({ ok: false, repoName: p.repoName, title: p.title, error: `This is a dangerous action: confirm it by passing the repo name "${p.confirmName}" for this token.` }, p); continue; }
+        if (!known.has(p.repoPath)) { note({ ok: false, repoName: p.repoName, title: p.title, error: 'This repo is no longer in the scanned workspace.' }, p); continue; }
+        if (settings().readOnly) { note({ ok: false, repoName: p.repoName, title: p.title, error: 'Read-only mode is on.' }, p); continue; }
+        if (busy.has(p.repoPath)) { note({ ok: false, repoName: p.repoName, title: p.title, error: 'Another action is running on this repo.' }, p); continue; }
+        busy.add(p.repoPath);
+        try {
+          // An earlier plan in the batch (a pull) may have brought hooks, filters or settings since the preview.
+          const held = await actions.recheck(p);
+          if (held) { note({ ok: false, held: true, repoName: p.repoName, title: p.title, error: held }, p); continue; }
+          const r = await actions.apply(p, { trash, onStep: (step, steps, text) => tell({ index, phase: 'step', step, steps, text, ...who }) });
+          audit({ repo: p.repoName, path: p.repoPath, action: p.type, risk: p.risk, title: p.title, ok: r.ok, steps: r.results.map((x) => ({ cmd: x.text, ok: x.ok })) });
+          tell({ index, phase: 'rescan', ...who });
+          let res = null;
+          try { res = await rescan(p.repoPath); if (known.has(p.repoPath)) known.set(p.repoPath, res); } catch {}
+          note({ ok: r.ok, repoName: p.repoName, title: p.title, results: r.results, res, rate: github.getRate() }, p);
+        } finally {
+          busy.delete(p.repoPath);
+        }
       } finally {
-        busy.delete(p.repoPath);
+        tell({ index, phase: 'done', ok: !!(out[index] && out[index].ok), ...who });
       }
     }
     return out;

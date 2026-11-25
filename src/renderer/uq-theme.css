@@ -13,7 +13,7 @@
 :root[data-uq-variant] button.primary, :root[data-uq-variant] button.danger:not(:disabled) { color: var(--uq-accent-text); }
 :root[data-uq-variant] code, :root[data-uq-variant] pre.prev, :root[data-uq-variant] pre.warnbox { background: var(--code-bg); }
 :root[data-uq-variant] code { font-family: var(--uq-font-mono), ui-monospace, monospace; }
-:root[data-uq-variant] #bar { background: color-mix(in srgb, var(--accent) 45%, var(--bg)); }
+:root[data-uq-variant] #bar, :root[data-uq-variant] #abar { background: color-mix(in srgb, var(--accent) 45%, var(--bg)); }
 :root[data-uq-variant] .gA, :root[data-uq-variant] .r-safe { background: color-mix(in srgb, var(--ok) 22%, var(--bg)); }
 :root[data-uq-variant] .gB { background: color-mix(in srgb, var(--info) 22%, var(--bg)); color: var(--info); }
 :root[data-uq-variant] .gC, :root[data-uq-variant] .r-caution { background: color-mix(in srgb, var(--warn) 22%, var(--bg)); }

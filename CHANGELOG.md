@@ -8,6 +8,7 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 - **From GitHub** in the sidebar clones and forks repos into the scanned folder. Search all of GitHub with results as you type, or list your own repos filtered to the ones not here and tick several to clone together. A repo that is only on GitHub has **Clone here** on its page. Each clone or fork is reviewed first (the exact `gh` command and the folder it creates), never lands on an existing folder, skips submodules, is recorded in History, and joins the repo list straight away.
 - An AUR package, `gutcheck-bin`, for Arch Linux. It installs the release AppImage's contents to `/opt/gutcheck`, puts `gutcheck` on your `PATH`, adds a menu entry, and keeps Chromium's sandbox on (the AppImage's own menu entry turns it off).
+- A progress bar at the bottom of the window while reviewed changes are applied. It shows which change of how many is running, the command it is on, and the rescan after each one. Before, nothing moved between accepting the review and the results dialog, which for a long Fix all looked as if nothing was happening.
 
 ### Changed
 
@@ -21,6 +22,8 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
   - The review dialog counts plans by risk, can tick or untick them all, and fades unticked ones. Results show how many succeeded, failed ones first. The Fix all wizard shows its progress.
   - Read-only mode shows a band under the header and a locked switch. The GitHub API quota is a small gauge, and error messages stay until dismissed.
   - Repeated actions and states are icons instead of words: refresh, folder, GitHub, copy, ignore, open, close, switch, merge and delete buttons, and badges for branch, clutter and secret states. Each keeps its words for screen readers and in a tooltip that names what it acts on. Errors and warnings get different shapes, not just different colours.
+
+- The README describes the redesigned app (a new "Using the app" section: the header, sidebar, repo page and its tabs, bulk actions, icons and read-only mode) and has fresh screenshots, including ticking several issues at once and the From GitHub view. `npm run screenshots` takes those two as well.
 
 - `npm test` runs through `scripts/test.js`, which gives the tests one private temp folder and removes it afterwards. The tests used to leave their throwaway repos in the shared temp folder: about 4,500 folders and 3.5 GB after a day's runs.
 
@@ -62,6 +65,7 @@ All notable changes to GutCheck. The format follows [Keep a Changelog](https://k
 
 ### Fixed
 
+- The header could start without its GitHub sign-in pill and with a blank Read-only switch. The app's startup ran as soon as `app.js` loaded, and when its first replies came back before `ui.js` had loaded it stopped with "UI is not defined". It now waits for the page's scripts.
 - The rescue copy saves uncommitted changes made after the last scan. It took "nothing uncommitted" from the scan, so edits made since were left out of the copy with no warning; it now asks git when the plan is made.
 - Ignored findings stay ignored when GitHub cannot be reached (offline, rate limit, `gh` logged out). The repo's key fell back to its folder name, so its ignores stopped applying, the findings came back and the score dropped until the next good scan.
 - A detached HEAD is no longer listed as a merged branch ("1 local branch already merged: (HEAD detached at …)") with a delete fix.
