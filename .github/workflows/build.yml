@@ -13,9 +13,14 @@ permissions:
 
 # Third-party actions are pinned to full commit SHAs so a moved tag cannot change what runs.
 # Dependabot keeps these up to date.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,6 +38,7 @@ jobs:
   appimage:
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # The provenance attestation is signed with this job's own identity (a push only: a pull
     # request from a fork gets no identity token).
     permissions:
@@ -91,6 +97,7 @@ jobs:
     if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
     needs: appimage
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     concurrency:
